@@ -1,0 +1,37 @@
+name: Build Sony Camera APK
+on: [push, workflow_dispatch]
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Java 8
+      uses: actions/setup-java@v3
+      with:
+        java-version: '8'
+        distribution: 'temurin'
+
+    # This is the correct purge. It targets the 30+ SDKs that have the broken XML,
+    # but leaves the Android directory intact so the compiler can still work.
+    - name: Purge Modern SDKs
+      run: |
+        sudo rm -rf $ANDROID_HOME/platforms/android-3*
+        sudo rm -rf $ANDROID_HOME/build-tools/3*
+
+    - name: Setup Gradle 4.10.3
+      uses: gradle/actions/setup-gradle@v3
+      with:
+        gradle-version: 4.10.3
+
+    - name: Build APK
+      run: |
+        gradle wrapper --gradle-version 4.10.3
+        chmod +x gradlew
+        ./gradlew assembleDebug --stacktrace
+
+    - name: Upload Result
+      uses: actions/upload-artifact@v4
+      with:
+        name: AlphaProManager-App
+        path: app/build/outputs/apk/debug/*.apk
