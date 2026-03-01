@@ -19,10 +19,26 @@ jobs:
         java-version: '8'
         distribution: 'temurin'
 
+    - name: Inject Sony Brain (Failsafe)
+      run: |
+        # Download the missing Sony framework directly from ma1co
+        git clone https://github.com/ma1co/OpenMemories-Framework.git temp_framework
+        
+        # Create the folder structure the compiler expects
+        mkdir -p lib/src/main/java
+        
+        # Copy the Sony hardware source code into your project
+        cp -r temp_framework/src/* lib/src/main/java/
+        
+        # Copy the proprietary Sony hardware "stubs" (scalar.jar)
+        mkdir -p lib/libs
+        cp -r temp_framework/libs/* lib/libs/
+        
+        # Clean up
+        rm -rf temp_framework
+
     - name: Purge Modern SDKs
       run: |
-        # GitHub runners include Android 30-35 which break legacy builds.
-        # We delete them to force the compiler to use our legacy settings.
         sudo rm -rf $ANDROID_HOME/platforms/android-3*
         sudo rm -rf $ANDROID_HOME/build-tools/3*
 
@@ -30,9 +46,9 @@ jobs:
       uses: gradle/actions/setup-gradle@v3
       with:
         gradle-version: 4.10.3
-        cache-disabled: true # Bypasses current GitHub service outages
+        cache-disabled: true
 
-    - name: Build with Gradle
+    - name: Build APK
       run: |
         gradle wrapper --gradle-version 4.10.3
         chmod +x gradlew

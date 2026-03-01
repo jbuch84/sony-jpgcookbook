@@ -20,7 +20,6 @@ android {
 }
 
 dependencies {
-    // This downloads the Sony Brain directly from the web!
-    // It replaces the empty 'lib' folder entirely.
-    compile 'com.github.ma1co:openmemories-framework:v0.3'
+    // This connects your 'app' to the 'lib' folder we just injected
+    compile project(':lib')
 }
