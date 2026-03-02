@@ -10,6 +10,11 @@ public class LutCooker {
     private int lutSize = 0;
     private int[] lutPixels;
 
+    // The interface to talk back to the camera screen
+    public interface ProgressCallback {
+        void onProgress(int percent);
+    }
+
     public boolean loadLut(File cubeFile) {
         try {
             BufferedReader br = new BufferedReader(new FileReader(cubeFile));
@@ -46,10 +51,17 @@ public class LutCooker {
             br.close();
 
             int expectedColors = lutSize * lutSize * lutSize;
-            if (lutSize > 0 && colors.size() >= expectedColors) {
+            
+            // THE FIX: Fault-tolerant padding for truncated files
+            if (lutSize > 0 && colors.size() > 0) {
                 lutPixels = new int[expectedColors];
                 for (int i = 0; i < expectedColors; i++) {
-                    lutPixels[i] = colors.get(i);
+                    if (i < colors.size()) {
+                        lutPixels[i] = colors.get(i);
+                    } else {
+                        // File is short! Pad the rest with the last known color
+                        lutPixels[i] = colors.get(colors.size() - 1);
+                    }
                 }
                 return true;
             }
@@ -59,11 +71,14 @@ public class LutCooker {
         return false;
     }
 
-    // THE RELAY: Modifies the raw integer array in place
-    public void applyLutToPixels(int[] pixels) {
+    public void applyLutToPixels(int[] pixels, ProgressCallback callback) {
         if (lutPixels == null || lutSize == 0 || pixels == null) return;
 
-        for (int i = 0; i < pixels.length; i++) {
+        int total = pixels.length;
+        int step = total / 100;
+        if (step == 0) step = 1;
+
+        for (int i = 0; i < total; i++) {
             int pixel = pixels[i];
             int r = Color.red(pixel);
             int g = Color.green(pixel);
@@ -77,6 +92,11 @@ public class LutCooker {
 
             if (lutIndex >= 0 && lutIndex < lutPixels.length) {
                 pixels[i] = lutPixels[lutIndex];
+            }
+
+            // Report progress back to the UI
+            if (callback != null && i % step == 0) {
+                callback.onProgress((i * 100) / total);
             }
         }
     }

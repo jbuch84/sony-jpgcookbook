@@ -58,12 +58,19 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         setDialMode(DialMode.shutter);
     }
 
-    private class BakeTask extends AsyncTask<Void, Void, String> {
+    // CHANGED TO <Void, Integer, String> FOR PROGRESS UPDATES
+    private class BakeTask extends AsyncTask<Void, Integer, String> {
         @Override protected void onPreExecute() { 
             isBaking = true;
-            String recipeName = recipeList.get(recipeIndex);
+            String recipeName = recipeList.get(recipeIndex).split("\\.")[0].toUpperCase();
             tvRecipe.setText(recipeIndex == 0 ? "COPYING..." : "COOKING " + recipeName + "...");
             tvRecipe.setTextColor(Color.YELLOW);
+        }
+
+        // REAL-TIME SCREEN UPDATE
+        @Override protected void onProgressUpdate(Integer... values) {
+            String recipeName = recipeList.get(recipeIndex).split("\\.")[0].toUpperCase();
+            tvRecipe.setText("COOKING " + recipeName + " [" + values[0] + "%]");
         }
 
         @Override protected String doInBackground(Void... voids) {
@@ -89,23 +96,19 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 }
                 if (original == null) return "ERR: NO JPG";
 
-                // 1. Load image cleanly (NO inMutable flag)
                 BitmapFactory.Options opt = new BitmapFactory.Options();
                 opt.inSampleSize = 4;
                 Bitmap bmp = BitmapFactory.decodeFile(original.getAbsolutePath(), opt);
                 if (bmp == null) return "ERR: DECODE FAIL";
 
-                // 2. Extract pixels
                 int width = bmp.getWidth();
                 int height = bmp.getHeight();
                 int[] pixels = new int[width * height];
                 bmp.getPixels(pixels, 0, width, 0, 0, width, height);
 
-                // 3. IMMEDIATELY TRASH THE ORIGINAL IMAGE TO FREE MEMORY
                 bmp.recycle();
                 bmp = null;
 
-                // 4. Cook the raw pixels
                 if (recipeIndex > 0) {
                     File lutDir = new File(Environment.getExternalStorageDirectory(), "LUTS");
                     if (!lutDir.exists()) lutDir = new File("/storage/sdcard0/LUTS");
@@ -114,7 +117,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                     if (cubeFile.exists()) {
                         LutCooker cooker = new LutCooker();
                         if (cooker.loadLut(cubeFile)) {
-                            cooker.applyLutToPixels(pixels); 
+                            // PASS THE CALLBACK TO THE COOKER
+                            cooker.applyLutToPixels(pixels, new LutCooker.ProgressCallback() {
+                                public void onProgress(int percent) {
+                                    publishProgress(percent);
+                                }
+                            }); 
                         } else {
                             return "ERR: BAD LUT FILE";
                         }
@@ -123,11 +131,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                     }
                 }
 
-                // 5. Build final image from the cooked pixels
                 Bitmap cookedBmp = Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888);
-                pixels = null; // Free array memory
+                pixels = null;
 
-                // 6. Save
                 File cookedDir = new File(dcim, "COOKED");
                 if (!cookedDir.exists()) cookedDir.mkdirs();
                 
@@ -144,14 +150,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 fos.flush();
                 fos.close();
                 
-                cookedBmp.recycle(); // Done!
+                cookedBmp.recycle();
 
                 sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(outFile)));
                 return "SUCCESS: " + newName;
                 
             } catch (OutOfMemoryError oom) {
                 return "ERR: OUT OF MEMORY";
-            } catch (Throwable t) { // Catch absolutely everything, including native hardware crashes
+            } catch (Throwable t) {
                 return "CRASH: " + t.getMessage();
             }
         }
@@ -243,8 +249,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     }
     
     private void updateRecipeDisplay() { 
-        String name = recipeList.get(recipeIndex);
-        tvRecipe.setText("< " + name.toUpperCase() + " >");
+        String name = recipeList.get(recipeIndex).split("\\.")[0].toUpperCase();
+        tvRecipe.setText("< " + name + " >");
         tvRecipe.setTextColor(mDialMode == DialMode.recipe ? Color.GREEN : Color.WHITE);
     }
     
