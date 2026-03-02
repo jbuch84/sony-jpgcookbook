@@ -8,7 +8,6 @@ import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Environment;
-import android.os.FileObserver;
 import android.util.Pair;
 import android.view.KeyEvent;
 import android.view.SurfaceHolder;
@@ -21,7 +20,7 @@ import java.io.*;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
-import java.util.List; 
+import java.util.List;
 
 public class MainActivity extends Activity implements SurfaceHolder.Callback, CameraEx.ShutterSpeedChangeListener {
     private CameraEx mCameraEx;
@@ -92,7 +91,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                                         if (lastNewestFileTime == 0) {
                                             lastNewestFileTime = maxModified; 
                                         } else if (maxModified > lastNewestFileTime) {
-                                            Thread.sleep(2000); 
+                                            Thread.sleep(2000); // Let BIONZ finish writing
                                             lastNewestFileTime = maxModified;
                                             final String path = newest.getAbsolutePath();
                                             runOnUiThread(new Runnable() {
@@ -114,6 +113,32 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
     private void stopAutoCookPolling() { isPolling = false; }
 
+    // YOUR LOGIC: PRE-LOAD THE LUT WHEN THE DIAL TURNS!
+    private class PreloadLutTask extends AsyncTask<Integer, Void, Void> {
+        @Override protected void onPreExecute() {
+            tvRecipe.setText("PRELOADING...");
+            tvRecipe.setTextColor(Color.CYAN);
+        }
+
+        @Override protected Void doInBackground(Integer... params) {
+            int index = params[0];
+            if (index > 0) {
+                File lutDir = new File(Environment.getExternalStorageDirectory(), "LUTS");
+                if (!lutDir.exists()) lutDir = new File("/storage/sdcard0/LUTS");
+                String selectedRecipe = recipeList.get(index);
+                File cubeFile = new File(lutDir, selectedRecipe);
+                if (cubeFile.exists()) {
+                    mCooker.loadLut(cubeFile, selectedRecipe);
+                }
+            }
+            return null;
+        }
+
+        @Override protected void onPostExecute(Void result) {
+            updateRecipeDisplay();
+        }
+    }
+
     private class BakeTask extends AsyncTask<String, Integer, String> {
         @Override protected void onPreExecute() { 
             isBaking = true;
@@ -130,7 +155,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         @Override protected void onProgressUpdate(Integer... values) {
             String recipeName = recipeList.get(recipeIndex).split("\\.")[0].toUpperCase();
             if (values[0] == -1) {
-                tvRecipe.setText("READING RECIPE DATA...");
+                tvRecipe.setText("READING RECIPE DATA..."); // Should rarely see this now!
             } else {
                 tvRecipe.setText("COOKING " + recipeName + " [" + values[0] + "%]");
             }
@@ -162,14 +187,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 
                 if (original == null || !original.exists()) return "ERR: NO JPG";
 
-                // MEMORY HEIST: 6 Megapixels + RGB_565 Halved Footprint
+                // REVERT TO 1.5MP FOR STABILITY
                 BitmapFactory.Options opt = new BitmapFactory.Options();
-                opt.inSampleSize = 2; // 6MP!
-                opt.inPreferredConfig = Bitmap.Config.RGB_565; // Force 16-bit to cut memory in half
+                opt.inSampleSize = 4; 
+                opt.inPreferredConfig = Bitmap.Config.RGB_565;
                 Bitmap rawBmp = BitmapFactory.decodeFile(original.getAbsolutePath(), opt);
                 if (rawBmp == null) return "ERR: DECODE FAIL";
 
-                // Create a mutable copy we can write directly onto, then immediately trash the original
                 Bitmap cookedBmp = rawBmp.copy(Bitmap.Config.RGB_565, true);
                 rawBmp.recycle();
                 rawBmp = null;
@@ -187,7 +211,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                             if (!mCooker.loadLut(cubeFile, selectedRecipe)) return "ERR: BAD LUT FILE";
                         }
                         
-                        // Pass the actual image directly to the cooker
                         mCooker.applyLutToBitmap(cookedBmp, new LutCooker.ProgressCallback() {
                             public void onProgress(int percent) { publishProgress(percent); }
                         }); 
@@ -218,7 +241,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 return "SUCCESS: " + newName;
                 
             } catch (OutOfMemoryError oom) {
-                return "ERR: OUT OF MEMORY (6MP)";
+                return "ERR: OUT OF MEMORY";
             } catch (Throwable t) {
                 return "CRASH: " + t.getMessage();
             }
@@ -266,9 +289,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 mCamera.setParameters(p);
             } else if (mDialMode == DialMode.recipe) {
                 recipeIndex = (recipeIndex + d + recipeList.size()) % recipeList.size();
+                
+                // EXECUTE YOUR PRE-LOAD IDEA
+                if (recipeIndex > 0) {
+                    new PreloadLutTask().execute(recipeIndex);
+                } else {
+                    updateRecipeDisplay();
+                }
             }
             syncUI();
-            updateRecipeDisplay();
+            if (mDialMode != DialMode.recipe) updateRecipeDisplay();
         } catch (Exception e) {}
     }
 
@@ -304,7 +334,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         
         if (lutDir.exists() && lutDir.listFiles() != null) {
             for (File f : lutDir.listFiles()) {
-                if (f.length() < 10240) continue; // Mac Ghost file filter
+                if (f.length() < 10240) continue; 
                 String name = f.getName().toUpperCase();
                 if (name.contains("CUB")) recipeList.add(f.getName());
             }
