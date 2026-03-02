@@ -12,6 +12,7 @@ import android.view.KeyEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.TextView;
 import com.sony.scalar.hardware.CameraEx;
 import com.sony.scalar.sysutil.ScalarInput;
@@ -49,9 +50,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         tvExposure = (TextView) findViewById(R.id.tvExposure);
         tvRecipe = (TextView) findViewById(R.id.tvRecipe);
         
-        // Ensure the app has focus for the dials
-        findViewById(R.id.container).setFocusable(true);
-        findViewById(R.id.container).requestFocus();
+        // Fix for Dial Focus without needing a specific ID
+        ViewGroup root = (ViewGroup) ((ViewGroup) this.findViewById(android.R.id.content)).getChildAt(0);
+        root.setFocusable(true);
+        root.requestFocus();
         
         scanRecipes();
         setDialMode(DialMode.shutter);
@@ -66,9 +68,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
         @Override protected String doInBackground(Void... voids) {
             try {
-                // Use the absolute internal mount point
-                File dir = new File("/storage/sdcard0/DCIM/100MSDCF");
-                if (!dir.exists()) dir = new File("/sdcard/DCIM/100MSDCF");
+                // Verified Path from Detective
+                File dir = new File("/sdcard/DCIM/100MSDCF");
+                if (!dir.exists()) dir = new File("/storage/sdcard0/DCIM/100MSDCF");
                 
                 File[] files = dir.listFiles();
                 if (files == null || files.length == 0) return "ERR: NO FILES";
@@ -92,10 +94,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 Bitmap bmp = BitmapFactory.decodeFile(original.getAbsolutePath(), opt);
                 if (bmp == null) return "ERR: BIONZ LOCK";
 
-                // FORCE FOLDER CREATION
-                File outDir = new File(dir.getParentFile(), "COOKED");
+                File outDir = new File("/sdcard/DCIM/COOKED");
                 if (!outDir.exists()) outDir.mkdirs();
-                
                 File outFile = new File(outDir, "MIRROR_" + original.getName());
 
                 FileOutputStream fos = new FileOutputStream(outFile);
@@ -121,23 +121,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         int scanCode = event.getScanCode();
-        
-        // Always allow exit
         if (scanCode == ScalarInput.ISV_KEY_DELETE) { finish(); return true; }
-        
-        // Manual Bake
         if (scanCode == ScalarInput.ISV_KEY_UP) { 
             new FinalMirrorTask().execute(); 
             return true; 
         }
-
         if (isBaking) return true;
-
-        // Dial controls
         if (scanCode == ScalarInput.ISV_KEY_DOWN) { cycleMode(); return true; }
         if (scanCode == ScalarInput.ISV_DIAL_1_CLOCKWISE) { handleInput(1); return true; }
         if (scanCode == ScalarInput.ISV_DIAL_1_COUNTERCW) { handleInput(-1); return true; }
-        
         return super.onKeyDown(keyCode, event);
     }
 
@@ -146,7 +138,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         try {
             Camera.Parameters p = mCamera.getParameters();
             CameraEx.ParametersModifier pm = mCameraEx.createParametersModifier(p);
-            
             if (mDialMode == DialMode.shutter) {
                 if (d > 0) mCameraEx.incrementShutterSpeed(); else mCameraEx.decrementShutterSpeed();
             } else if (mDialMode == DialMode.aperture) {
@@ -199,8 +190,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
     private void scanRecipes() {
         recipeList.clear(); recipeList.add("NONE");
-        File lutDir = new File("/storage/sdcard0/LUTS");
-        if (!lutDir.exists()) lutDir = new File("/sdcard/LUTS");
+        File lutDir = new File("/sdcard/LUTS");
         if (lutDir.exists() && lutDir.listFiles() != null) {
             for (File f : lutDir.listFiles()) if (f.getName().toUpperCase().contains("CUB")) recipeList.add(f.getName());
         }
@@ -218,11 +208,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             mCameraEx = CameraEx.open(0, null);
             mCamera = mCameraEx.getNormalCamera();
             mCameraEx.startDirectShutter();
-            
             m_autoReviewControl = new CameraEx.AutoPictureReviewControl();
             mCameraEx.setAutoPictureReviewControl(m_autoReviewControl);
             m_autoReviewControl.setPictureReviewTime(0);
-
             mCamera.setPreviewDisplay(h);
             mCamera.startPreview();
             syncUI();
