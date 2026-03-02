@@ -20,9 +20,12 @@ import java.util.List;
 public class MainActivity extends Activity implements SurfaceHolder.Callback {
     private CameraEx mCameraEx;
     private Camera mCamera;
+    private SurfaceHolder mSurfaceHolder;
     private TextView tvShutter, tvAperture, tvISO, tvExposure, tvRecipe;
+    
     private List<Integer> supportedIsos;
     private int curIso;
+    
     private ArrayList<String> recipeList = new ArrayList<String>();
     private int recipeIndex = 0;
     
@@ -35,8 +38,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         setContentView(R.layout.activity_main);
         
         SurfaceView surfaceView = (SurfaceView) findViewById(R.id.surfaceView);
-        surfaceView.getHolder().addCallback(this);
-        surfaceView.getHolder().setType(SurfaceHolder.SURFACE_TYPE_PUSH_BUFFERS);
+        mSurfaceHolder = surfaceView.getHolder();
+        mSurfaceHolder.addCallback(this);
+        // REQUIRED: Sony a5100 buffer handshake
+        mSurfaceHolder.setType(SurfaceHolder.SURFACE_TYPE_PUSH_BUFFERS);
         
         tvShutter = (TextView) findViewById(R.id.tvShutter);
         tvAperture = (TextView) findViewById(R.id.tvAperture);
@@ -52,18 +57,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         recipeList.clear();
         recipeList.add("NONE (DEFAULT)");
 
-        // ANCHOR SEARCH: Find the physical SD card by looking for the DCIM folder
-        String[] potentialRoots = {"/mnt/sdcard", "/storage/sdcard0", "/storage/sdcard1", "/mnt/storage/sdcard1", "/storage/external_SD"};
+        // SEARCH: Look for LUTs next to the DCIM folder
+        String[] roots = {"/mnt/sdcard", "/storage/sdcard0", "/storage/sdcard1", "/mnt/storage/sdcard1", Environment.getExternalStorageDirectory().getAbsolutePath()};
         File foundLutDir = null;
 
-        for (String root : potentialRoots) {
-            File dcimCheck = new File(root, "DCIM");
-            if (dcimCheck.exists()) {
-                File lutFolder = new File(root, "LUTs");
-                if (lutFolder.exists() && lutFolder.isDirectory()) {
-                    foundLutDir = lutFolder;
-                    break;
-                }
+        for (String root : roots) {
+            File testDir = new File(root, "LUTs");
+            if (testDir.exists() && testDir.isDirectory()) {
+                foundLutDir = testDir;
+                break;
             }
         }
 
@@ -71,18 +73,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             File[] files = foundLutDir.listFiles();
             if (files != null) {
                 for (File f : files) {
-                    String name = f.getName().toLowerCase();
-                    if (name.endsWith(".cube") || name.endsWith(".png")) {
-                        recipeList.add(f.getName());
+                    String name = f.getName();
+                    if (name.toLowerCase().endsWith(".cube") || name.toLowerCase().endsWith(".png")) {
+                        recipeList.add(name);
                     }
                 }
             }
         }
 
         if (recipeList.size() <= 1) {
-            // DEBUG: Show the path where we found DCIM but no LUTs
-            String rootPath = (foundLutDir != null) ? foundLutDir.getParent() : "ROOT NOT FOUND";
-            tvRecipe.setText("ERR: NO .CUBE IN " + rootPath);
+            tvRecipe.setText("RECIPE: NONE (DEFAULT)");
         } else {
             updateRecipeDisplay();
         }
@@ -106,6 +106,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             curIso = pm.getISOSensitivity();
 
             notifySonyStatus(true);
+            syncUI();
         } catch (Exception e) {}
     }
 
@@ -114,11 +115,19 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         try {
             Camera.Parameters p = mCamera.getParameters();
             CameraEx.ParametersModifier pm = mCameraEx.createParametersModifier(p);
+            
+            // Format Shutter (Issue 1 Fix)
             Pair<Integer, Integer> speed = pm.getShutterSpeed();
             if (speed.first >= speed.second) tvShutter.setText((speed.first / speed.second) + "\"");
             else tvShutter.setText(speed.first + "/" + speed.second);
+            
+            // Format Aperture (Issue 2 Fix)
             tvAperture.setText("f/" + (pm.getAperture() / 100.0f));
+            
+            // Format ISO (Issue 3 Fix)
             tvISO.setText(curIso == 0 ? "ISO AUTO" : "ISO " + curIso);
+            
+            // Format Exposure (Issue 4 Fix)
             tvExposure.setText(String.format("%.1f", p.getExposureCompensation() * p.getExposureCompensationStep()));
         } catch (Exception e) {}
     }
