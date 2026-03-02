@@ -1,7 +1,16 @@
 apply plugin: 'com.android.application'
+
+repositories {
+    google()
+    mavenCentral()
+    jcenter()
+    maven { url 'https://jitpack.io' }
+}
+
 android {
     compileSdkVersion 25
-    buildToolsVersion "26.0.2"
+    buildToolsVersion "25.0.2"
+
     defaultConfig {
         applicationId "com.jpgcookbook.sony"
         minSdkVersion 9
@@ -9,10 +18,16 @@ android {
         versionCode 1
         versionName "1.0"
     }
-    sourceSets {
-        main {
-            java.srcDirs = ['src/main/java', 'src/main/stubs']
+
+    applicationVariants.all { variant ->
+        variant.outputs.all { output ->
+            outputFileName = "Sony-JPGCookbook-v${variant.versionName}.apk"
         }
     }
 }
-dependencies {}
+
+dependencies {
+    // This pulls the "Sony Brain" pre-built from the web
+    implementation 'com.github.ma1co.OpenMemories-Framework:framework:-SNAPSHOT'
+    compileOnly 'com.github.ma1co.OpenMemories-Framework:stubs:-SNAPSHOT'
+}
