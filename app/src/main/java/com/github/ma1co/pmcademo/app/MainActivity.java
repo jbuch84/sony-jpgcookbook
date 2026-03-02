@@ -12,6 +12,7 @@ import android.util.Pair;
 import android.view.KeyEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
+import android.view.View;
 import android.widget.TextView;
 import com.sony.scalar.hardware.CameraEx;
 import com.sony.scalar.sysutil.ScalarInput;
@@ -23,6 +24,7 @@ import java.util.List;
 public class MainActivity extends Activity implements SurfaceHolder.Callback, CameraEx.ShutterSpeedChangeListener {
     private CameraEx mCameraEx;
     private Camera mCamera;
+    private SurfaceView mSurfaceView;
     private CameraEx.AutoPictureReviewControl m_autoReviewControl;
     private int m_pictureReviewTime;
     
@@ -35,17 +37,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private Handler m_handler = new Handler();
     private boolean isBaking = false;
 
-    enum DialMode { shutter, aperture, iso, exposure, recipe }
-    private DialMode mDialMode = DialMode.shutter;
-
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         
-        SurfaceView surfaceView = (SurfaceView) findViewById(R.id.surfaceView);
-        surfaceView.getHolder().addCallback(this);
-        surfaceView.getHolder().setType(SurfaceHolder.SURFACE_TYPE_PUSH_BUFFERS);
+        mSurfaceView = (SurfaceView) findViewById(R.id.surfaceView);
+        mSurfaceView.getHolder().addCallback(this);
+        mSurfaceView.getHolder().setType(SurfaceHolder.SURFACE_TYPE_PUSH_BUFFERS);
         
         tvShutter = (TextView) findViewById(R.id.tvShutter);
         tvAperture = (TextView) findViewById(R.id.tvAperture);
@@ -55,7 +54,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         
         initializeFileLibrary();
         scanRecipes();
-        setDialMode(DialMode.shutter);
     }
 
     private void initializeFileLibrary() {
@@ -85,9 +83,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                         }
                     }
                 }
-                m_handler.postDelayed(this, 1000);
+                m_handler.postDelayed(this, 1500);
             }
-        }, 1000);
+        }, 1500);
     }
 
     private class CubeLUT {
@@ -120,63 +118,67 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             float g = (Color.green(color) / 255.0f) * (size - 1);
             float b = (Color.blue(color) / 255.0f) * (size - 1);
             int offset = ((int)r + size * ((int)g + size * (int)b)) * 3;
+            if (offset >= data.length - 3) return color;
             return Color.rgb((int)(data[offset]*255), (int)(data[offset+1]*255), (int)(data[offset+2]*255));
         }
     }
 
-    private class BakeTask extends AsyncTask<Void, String, Boolean> {
+    private class BakeTask extends AsyncTask<Void, Void, Boolean> {
         String fileName;
         BakeTask(String name) { this.fileName = name; }
+
         @Override protected void onPreExecute() { 
             isBaking = true;
-            tvRecipe.setText("SLICING & BAKING...");
+            tvRecipe.setText("FREEZING & BAKING...");
             tvRecipe.setTextColor(Color.RED);
+            // KILL PREVIEW to save RAM
+            if (mCamera != null) {
+                mCamera.stopPreview();
+                mSurfaceView.setVisibility(View.INVISIBLE);
+            }
         }
-        
+
         @Override protected Boolean doInBackground(Void... voids) {
             try {
+                Thread.sleep(800); // Wait for hardware to finish writing
                 File lutFile = new File("/sdcard/LUTS/" + recipeList.get(recipeIndex));
                 CubeLUT lut = new CubeLUT(lutFile);
                 File original = new File(SONY_PATH, fileName);
                 
-                // THE SLICER: Use RegionDecoder to avoid loading full image into RAM
-                BitmapRegionDecoder decoder = BitmapRegionDecoder.newInstance(original.getAbsolutePath(), false);
-                int width = decoder.getWidth();
-                int height = decoder.getHeight();
+                // ATTEMPT FULL RES (No inSampleSize)
+                BitmapFactory.Options opt = new BitmapFactory.Options();
+                opt.inMutable = true;
+                Bitmap bmp = BitmapFactory.decodeFile(original.getAbsolutePath(), opt);
                 
-                Bitmap output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
-                Canvas canvas = new Canvas(output);
-                
-                int tileHeight = 500; // Small strips to keep RAM low
-                for (int y = 0; y < height; y += tileHeight) {
-                    int currentTileHeight = Math.min(tileHeight, height - y);
-                    Rect rect = new Rect(0, y, width, y + currentTileHeight);
-                    Bitmap tile = decoder.decodeRegion(rect, null).copy(Bitmap.Config.ARGB_8888, true);
-                    
-                    int[] pixels = new int[tile.getWidth() * tile.getHeight()];
-                    tile.getPixels(pixels, 0, tile.getWidth(), 0, 0, tile.getWidth(), tile.getHeight());
+                if (bmp != null) {
+                    int w = bmp.getWidth();
+                    int h = bmp.getHeight();
+                    int[] pixels = new int[w * h];
+                    bmp.getPixels(pixels, 0, w, 0, 0, w, h);
                     for (int i = 0; i < pixels.length; i++) pixels[i] = lut.mapColor(pixels[i]);
-                    tile.setPixels(pixels, 0, tile.getWidth(), 0, 0, tile.getWidth(), tile.getHeight());
+                    bmp.setPixels(pixels, 0, w, 0, 0, w, h);
                     
-                    canvas.drawBitmap(tile, 0, y, null);
-                    tile.recycle(); // Free RAM immediately
+                    File cooked = new File(SONY_PATH, "COOKED_" + fileName);
+                    FileOutputStream fos = new FileOutputStream(cooked);
+                    bmp.compress(Bitmap.CompressFormat.JPEG, 98, fos);
+                    fos.close();
+                    bmp.recycle();
+                    sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(cooked)));
+                    return true;
                 }
-                
-                File cooked = new File(SONY_PATH, "COOKED_" + fileName);
-                FileOutputStream fos = new FileOutputStream(cooked);
-                output.compress(Bitmap.CompressFormat.JPEG, 95, fos);
-                fos.close();
-                output.recycle();
-                
-                sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(cooked)));
-                return true;
-            } catch (Exception e) { return false; }
+            } catch (Exception e) {}
+            return false;
         }
-        
+
         @Override protected void onPostExecute(Boolean success) {
             isBaking = false;
+            // RESTORE PREVIEW
+            if (mCamera != null) {
+                mSurfaceView.setVisibility(View.VISIBLE);
+                mCamera.startPreview();
+            }
             updateRecipeDisplay();
-            setDialMode(mDialMode);
+            tvShutter.setTextColor(Color.WHITE); // Reset UI colors
         }
     }
 
@@ -222,7 +224,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     }
 
     private void handleInput(int delta) {
-        if (mCameraEx == null) return;
+        if (mCameraEx == null || isBaking) return;
         try {
             if (mDialMode == DialMode.shutter) {
                 if (delta > 0) mCameraEx.incrementShutterSpeed(); else mCameraEx.decrementShutterSpeed();
@@ -237,11 +239,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     }
 
     private void cycleMode() {
-        if (mDialMode == DialMode.shutter) setDialMode(DialMode.aperture);
-        else if (mDialMode == DialMode.aperture) setDialMode(DialMode.iso);
-        else if (mDialMode == DialMode.iso) setDialMode(DialMode.exposure);
-        else if (mDialMode == DialMode.exposure) setDialMode(DialMode.recipe);
-        else setDialMode(DialMode.shutter);
+        if (isBaking) return;
+        DialMode[] modes = DialMode.values();
+        int next = (mDialMode.ordinal() + 1) % modes.length;
+        setDialMode(modes[next]);
     }
 
     private void setDialMode(DialMode mode) {
@@ -298,4 +299,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     @Override protected void onPause() { super.onPause(); m_handler.removeCallbacksAndMessages(null); if (mCameraEx != null) { m_autoReviewControl.setPictureReviewTime(m_pictureReviewTime); mCameraEx.release(); mCameraEx = null; } }
     @Override public void surfaceChanged(SurfaceHolder h, int f, int w, int h1) {}
     @Override public void surfaceDestroyed(SurfaceHolder h) {}
+    
+    enum DialMode { shutter, aperture, iso, exposure, recipe }
 }
