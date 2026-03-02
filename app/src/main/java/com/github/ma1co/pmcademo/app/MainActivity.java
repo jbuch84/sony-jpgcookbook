@@ -8,7 +8,6 @@ import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Environment;
-import android.os.FileObserver;
 import android.util.Pair;
 import android.view.KeyEvent;
 import android.view.SurfaceHolder;
@@ -34,7 +33,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private boolean isBaking = false;
     
     private LutCooker mCooker = new LutCooker();
-    private FileObserver photoObserver; 
+    
+    // BULLETPROOF AUTO-COOK POLLING
+    private boolean isPolling = false;
+    private long lastNewestFileTime = 0;
 
     public enum DialMode { shutter, aperture, iso, exposure, recipe }
     private DialMode mDialMode = DialMode.shutter;
@@ -62,29 +64,57 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         setDialMode(DialMode.shutter);
     }
 
-    private void setupPhotoObserver() {
-        File dcim = new File(Environment.getExternalStorageDirectory(), "DCIM");
-        final File sonyDir = new File(dcim, "100MSDCF");
-        if (!sonyDir.exists()) return;
-
-        photoObserver = new FileObserver(sonyDir.getAbsolutePath(), FileObserver.CLOSE_WRITE) {
+    private void startAutoCookPolling() {
+        isPolling = true;
+        new Thread(new Runnable() {
             @Override
-            public void onEvent(int event, String path) {
-                if (path != null && path.toUpperCase().endsWith(".JPG") && !path.startsWith("CKED")) {
-                    final String fullPath = new File(sonyDir, path).getAbsolutePath();
-                    
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            if (!isBaking && recipeIndex > 0) {
-                                new BakeTask().execute(fullPath);
+            public void run() {
+                while (isPolling) {
+                    try {
+                        Thread.sleep(1000); // Check folder every 1 second
+                        if (!isBaking && recipeIndex > 0) {
+                            File dcim = new File(Environment.getExternalStorageDirectory(), "DCIM");
+                            File sonyDir = new File(dcim, "100MSDCF");
+                            if (sonyDir.exists()) {
+                                File[] files = sonyDir.listFiles();
+                                if (files != null && files.length > 0) {
+                                    File newest = null;
+                                    long maxModified = 0;
+                                    for (File f : files) {
+                                        if (f.getName().toUpperCase().endsWith(".JPG") && !f.getName().startsWith("CKED")) {
+                                            if (f.lastModified() > maxModified) {
+                                                maxModified = f.lastModified();
+                                                newest = f;
+                                            }
+                                        }
+                                    }
+                                    if (newest != null) {
+                                        if (lastNewestFileTime == 0) {
+                                            lastNewestFileTime = maxModified; // Initialize on boot
+                                        } else if (maxModified > lastNewestFileTime) {
+                                            // BRAND NEW PHOTO TIMESTAMP DETECTED!
+                                            Thread.sleep(2000); // Wait 2 secs for BIONZ hardware write to finish
+                                            lastNewestFileTime = maxModified;
+                                            final String path = newest.getAbsolutePath();
+                                            runOnUiThread(new Runnable() {
+                                                @Override
+                                                public void run() {
+                                                    if (!isBaking) new BakeTask().execute(path);
+                                                }
+                                            });
+                                        }
+                                    }
+                                }
                             }
                         }
-                    });
+                    } catch (Exception e) {}
                 }
             }
-        };
-        photoObserver.startWatching();
+        }).start();
+    }
+
+    private void stopAutoCookPolling() {
+        isPolling = false;
     }
 
     private class BakeTask extends AsyncTask<String, Integer, String> {
@@ -136,7 +166,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 if (original == null || !original.exists()) return "ERR: NO JPG";
 
                 BitmapFactory.Options opt = new BitmapFactory.Options();
-                opt.inSampleSize = 4;
+                
+                // *** RESOLUTION BUMP: Now pulling 6 Megapixels! ***
+                opt.inSampleSize = 2; 
+                
                 Bitmap bmp = BitmapFactory.decodeFile(original.getAbsolutePath(), opt);
                 if (bmp == null) return "ERR: DECODE FAIL";
 
@@ -183,7 +216,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 File outFile = new File(cookedDir, newName);
 
                 FileOutputStream fos = new FileOutputStream(outFile);
-                cookedBmp.compress(Bitmap.CompressFormat.JPEG, 90, fos);
+                
+                // Save at slightly higher compression to keep the 6MP file size manageable
+                cookedBmp.compress(Bitmap.CompressFormat.JPEG, 85, fos); 
                 fos.flush();
                 fos.close();
                 cookedBmp.recycle();
@@ -192,7 +227,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 return "SUCCESS: " + newName;
                 
             } catch (OutOfMemoryError oom) {
-                return "ERR: OUT OF MEMORY";
+                return "ERR: OUT OF MEMORY (6MP)";
             } catch (Throwable t) {
                 return "CRASH: " + t.getMessage();
             }
@@ -278,8 +313,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         
         if (lutDir.exists() && lutDir.listFiles() != null) {
             for (File f : lutDir.listFiles()) {
+                // THE PHYSICAL SIZE FILTER: Skips tiny 4KB Mac metadata files
+                if (f.length() < 10240) continue; 
+                
                 String name = f.getName().toUpperCase();
-                if (name.startsWith("._") || name.startsWith(".")) continue; 
                 if (name.contains("CUB")) recipeList.add(f.getName());
             }
         }
@@ -309,13 +346,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     @Override protected void onResume() { 
         super.onResume(); 
         if (mCamera != null) syncUI(); 
-        setupPhotoObserver(); 
+        startAutoCookPolling(); // TURN ON BACKGROUND RADAR
     }
     
     @Override protected void onPause() { 
         super.onPause(); 
         if (mCameraEx != null) mCameraEx.release(); 
-        if (photoObserver != null) photoObserver.stopWatching(); 
+        stopAutoCookPolling(); // TURN OFF RADAR
     }
     
     @Override public void onShutterSpeedChange(CameraEx.ShutterSpeedInfo i, CameraEx c) { syncUI(); }
