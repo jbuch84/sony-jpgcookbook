@@ -85,12 +85,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                         }
                     }
                 }
-                m_handler.postDelayed(this, 1000); // Check every second
+                m_handler.postDelayed(this, 1000);
             }
         }, 1000);
     }
 
-    // --- LUT ENGINE (SAME AS BEFORE) ---
     private class CubeLUT {
         int size = 0;
         float[] data;
@@ -120,46 +119,60 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             float r = (Color.red(color) / 255.0f) * (size - 1);
             float g = (Color.green(color) / 255.0f) * (size - 1);
             float b = (Color.blue(color) / 255.0f) * (size - 1);
-            int x = (int)r; int y = (int)g; int z = (int)b;
-            int offset = (x + size * (y + size * z)) * 3;
+            int offset = ((int)r + size * ((int)g + size * (int)b)) * 3;
             return Color.rgb((int)(data[offset]*255), (int)(data[offset+1]*255), (int)(data[offset+2]*255));
         }
     }
 
-    private class BakeTask extends AsyncTask<Void, Void, Boolean> {
+    private class BakeTask extends AsyncTask<Void, String, Boolean> {
         String fileName;
         BakeTask(String name) { this.fileName = name; }
         @Override protected void onPreExecute() { 
             isBaking = true;
-            tvRecipe.setText("COOKING: " + fileName);
+            tvRecipe.setText("SLICING & BAKING...");
             tvRecipe.setTextColor(Color.RED);
         }
+        
         @Override protected Boolean doInBackground(Void... voids) {
             try {
                 File lutFile = new File("/sdcard/LUTS/" + recipeList.get(recipeIndex));
                 CubeLUT lut = new CubeLUT(lutFile);
                 File original = new File(SONY_PATH, fileName);
                 
-                BitmapFactory.Options opt = new BitmapFactory.Options();
-                opt.inMutable = true;
-                Bitmap bmp = BitmapFactory.decodeFile(original.getAbsolutePath(), opt);
+                // THE SLICER: Use RegionDecoder to avoid loading full image into RAM
+                BitmapRegionDecoder decoder = BitmapRegionDecoder.newInstance(original.getAbsolutePath(), false);
+                int width = decoder.getWidth();
+                int height = decoder.getHeight();
                 
-                if (bmp != null) {
-                    int[] pixels = new int[bmp.getWidth() * bmp.getHeight()];
-                    bmp.getPixels(pixels, 0, bmp.getWidth(), 0, 0, bmp.getWidth(), bmp.getHeight());
-                    for (int i = 0; i < pixels.length; i++) pixels[i] = lut.mapColor(pixels[i]);
-                    bmp.setPixels(pixels, 0, bmp.getWidth(), 0, 0, bmp.getWidth(), bmp.getHeight());
+                Bitmap output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+                Canvas canvas = new Canvas(output);
+                
+                int tileHeight = 500; // Small strips to keep RAM low
+                for (int y = 0; y < height; y += tileHeight) {
+                    int currentTileHeight = Math.min(tileHeight, height - y);
+                    Rect rect = new Rect(0, y, width, y + currentTileHeight);
+                    Bitmap tile = decoder.decodeRegion(rect, null).copy(Bitmap.Config.ARGB_8888, true);
                     
-                    File cooked = new File(SONY_PATH, "COOKED_" + fileName);
-                    FileOutputStream fos = new FileOutputStream(cooked);
-                    bmp.compress(Bitmap.CompressFormat.JPEG, 95, fos);
-                    fos.close();
-                    sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(cooked)));
-                    return true;
+                    int[] pixels = new int[tile.getWidth() * tile.getHeight()];
+                    tile.getPixels(pixels, 0, tile.getWidth(), 0, 0, tile.getWidth(), tile.getHeight());
+                    for (int i = 0; i < pixels.length; i++) pixels[i] = lut.mapColor(pixels[i]);
+                    tile.setPixels(pixels, 0, tile.getWidth(), 0, 0, tile.getWidth(), tile.getHeight());
+                    
+                    canvas.drawBitmap(tile, 0, y, null);
+                    tile.recycle(); // Free RAM immediately
                 }
-            } catch (Exception e) {}
-            return false;
+                
+                File cooked = new File(SONY_PATH, "COOKED_" + fileName);
+                FileOutputStream fos = new FileOutputStream(cooked);
+                output.compress(Bitmap.CompressFormat.JPEG, 95, fos);
+                fos.close();
+                output.recycle();
+                
+                sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(cooked)));
+                return true;
+            } catch (Exception e) { return false; }
         }
+        
         @Override protected void onPostExecute(Boolean success) {
             isBaking = false;
             updateRecipeDisplay();
@@ -211,7 +224,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private void handleInput(int delta) {
         if (mCameraEx == null) return;
         try {
-            Camera.Parameters p = mCamera.getParameters();
             if (mDialMode == DialMode.shutter) {
                 if (delta > 0) mCameraEx.incrementShutterSpeed(); else mCameraEx.decrementShutterSpeed();
             } else if (mDialMode == DialMode.aperture) {
