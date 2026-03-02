@@ -16,7 +16,7 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
-public class MainActivity extends Activity implements SurfaceHolder.Callback {
+public class MainActivity extends Activity implements SurfaceHolder.Callback, CameraEx.ShutterSpeedChangeListener {
     private CameraEx mCameraEx;
     private Camera mCamera;
     private SurfaceHolder mSurfaceHolder;
@@ -53,42 +53,34 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         recipeList.clear();
         recipeList.add("NONE (DEFAULT)");
 
-        // BRUTE FORCE SCAN: Target the verified LUTS folder
         File lutDir = new File("/sdcard/LUTS");
-        
         if (lutDir.exists() && lutDir.isDirectory()) {
             File[] files = lutDir.listFiles();
-            if (files != null && files.length > 0) {
+            if (files != null) {
                 for (File f : files) {
-                    String n = f.getName().toUpperCase();
-                    // BROAD SEARCH: Check if the name contains "CUB" or "PNG" at all
-                    if (n.contains("CUB") || n.contains("PNG")) {
-                        recipeList.add(f.getName());
+                    String name = f.getName();
+                    // FILTER JUNK: Skip macOS hidden files (starting with _ or .)
+                    if (name.startsWith("_") || name.startsWith(".")) continue;
+                    
+                    String upper = name.toUpperCase();
+                    if (upper.contains("CUB") || upper.contains("PNG")) {
+                        recipeList.add(name);
                     }
                 }
-            } else if (files != null) {
-                tvRecipe.setText("LUTS FOLDER IS LITERALLY EMPTY");
             }
-        } else {
-            tvRecipe.setText("LUTS FOLDER GONE AGAIN");
         }
-
-        if (recipeList.size() <= 1 && recipeList.get(0).equals("NONE (DEFAULT)")) {
-            // DEBUG: If no recipes found, list the first 3 things found in /sdcard/LUTS
-            String items = "";
-            String[] list = lutDir.list();
-            if (list != null) {
-                for (int i=0; i < Math.min(list.length, 3); i++) items += list[i] + " ";
-                tvRecipe.setText("FOUND IN LUTS: " + items);
-            }
-        } else {
-            updateRecipeDisplay();
-        }
+        updateRecipeDisplay();
     }
 
     private void updateRecipeDisplay() {
         String name = recipeList.get(recipeIndex);
-        tvRecipe.setText("<  " + name.toUpperCase() + "  >");
+        String display = name;
+        
+        // Strip file extension for the UI (e.g., ASH.CUBE -> ASH)
+        int dot = name.lastIndexOf('.');
+        if (dot > 0) display = name.substring(0, dot);
+        
+        tvRecipe.setText("<  " + display.toUpperCase() + "  >");
     }
 
     @Override
@@ -97,6 +89,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         try {
             mCameraEx = CameraEx.open(0, null);
             mCamera = mCameraEx.getNormalCamera();
+            mCameraEx.setShutterSpeedChangeListener(this);
             mCameraEx.startDirectShutter();
             
             CameraEx.ParametersModifier pm = mCameraEx.createParametersModifier(mCamera.getParameters());
@@ -113,9 +106,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         try {
             Camera.Parameters p = mCamera.getParameters();
             CameraEx.ParametersModifier pm = mCameraEx.createParametersModifier(p);
+            
+            // Format Shutter Speed (e.g. 1/4000) using BetterManual logic
             Pair<Integer, Integer> speed = pm.getShutterSpeed();
-            if (speed.first >= speed.second) tvShutter.setText((speed.first / speed.second) + "\"");
-            else tvShutter.setText(speed.first + "/" + speed.second);
+            if (speed.first == 1 && speed.second != 2 && speed.second != 1) {
+                tvShutter.setText(speed.first + "/" + speed.second);
+            } else if (speed.second == 1) {
+                tvShutter.setText(speed.first + "\"");
+            } else {
+                tvShutter.setText(String.format("%.1f\"", (float)speed.first / (float)speed.second));
+            }
+            
             tvAperture.setText("f/" + (pm.getAperture() / 100.0f));
             tvISO.setText(curIso == 0 ? "ISO AUTO" : "ISO " + curIso);
             tvExposure.setText(String.format("%.1f", p.getExposureCompensation() * p.getExposureCompensationStep()));
@@ -125,15 +126,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         int scanCode = event.getScanCode();
-        if (scanCode == ScalarInput.ISV_KEY_DELETE) {
-            notifySonyStatus(false);
-            finish();
-            return true;
-        }
-        if (scanCode == ScalarInput.ISV_KEY_DOWN) {
-            cycleMode();
-            return true;
-        }
+        if (scanCode == ScalarInput.ISV_KEY_DELETE) { notifySonyStatus(false); finish(); return true; }
+        if (scanCode == ScalarInput.ISV_KEY_DOWN) { cycleMode(); return true; }
         if (scanCode == ScalarInput.ISV_DIAL_1_CLOCKWISE) { handleInput(1); return true; }
         if (scanCode == ScalarInput.ISV_DIAL_1_COUNTERCW) { handleInput(-1); return true; }
         return super.onKeyDown(keyCode, event);
@@ -174,6 +168,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         tvAperture.setTextColor(mode == DialMode.aperture ? Color.GREEN : Color.WHITE);
         tvISO.setTextColor(mode == DialMode.iso ? Color.GREEN : Color.WHITE);
         tvRecipe.setTextColor(mode == DialMode.recipe ? Color.GREEN : Color.WHITE);
+    }
+
+    @Override
+    public void onShutterSpeedChange(CameraEx.ShutterSpeedInfo info, CameraEx camera) {
+        syncUI();
     }
 
     private void notifySonyStatus(boolean active) {
