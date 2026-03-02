@@ -10,7 +10,7 @@ import com.sony.scalar.hardware.CameraEx;
 import com.sony.scalar.sysutil.ScalarInput;
 import java.io.IOException;
 
-public class MainActivity extends Activity implements SurfaceHolder.Callback {
+public class MainActivity extends Activity implements SurfaceHolder.Callback, CameraEx.ShutterListener {
     private CameraEx mCameraEx;
     private SurfaceHolder mSurfaceHolder;
 
@@ -22,7 +22,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         mSurfaceHolder = surfaceView.getHolder();
         mSurfaceHolder.addCallback(this);
         
-        // BETTERMANUAL FIX 1: Required for a5100 sensor handoff
+        // SONY FIX 1: BetterManual forces this for a5100 sensor handoff
         mSurfaceHolder.setType(SurfaceHolder.SURFACE_TYPE_PUSH_BUFFERS);
         
         setContentView(surfaceView);
@@ -31,8 +31,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     @Override
     protected void onResume() {
         super.onResume();
-        // BETTERMANUAL FIX 2: Open hardware and start direct shutter immediately
+        // SONY FIX 2: Open and start direct shutter immediately
         mCameraEx = CameraEx.open(0, null);
+        mCameraEx.setShutterListener(this);
         mCameraEx.startDirectShutter();
     }
 
@@ -48,7 +49,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
 
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
-        // Trash button exit
+        // TRASH BUTTON: Map to finish so you can exit the app safely
         if (keyCode == ScalarInput.ISV_KEY_DELETE || keyCode == KeyEvent.KEYCODE_BACK) {
             finish();
             return true;
@@ -60,14 +61,20 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     public void surfaceCreated(SurfaceHolder holder) {
         try {
             if (mCameraEx != null) {
-                // BETTERMANUAL FIX 3: Pull the normal camera instance from the Sony wrapper
+                // SONY FIX 3: Pull the normal camera instance from the Sony wrapper
                 Camera cam = mCameraEx.getNormalCamera();
                 cam.setPreviewDisplay(holder);
                 cam.startPreview();
             }
         } catch (IOException e) {
-            // Sensor bind failed
+            // Handle initialization failure
         }
+    }
+
+    @Override
+    public void onShutter(int i, CameraEx cameraEx) {
+        // This is where we will trigger the "Baking" process once a photo is taken
+        // i: 0 = success
     }
 
     @Override
