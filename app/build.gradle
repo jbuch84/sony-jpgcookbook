@@ -12,7 +12,7 @@ android {
     buildToolsVersion "25.0.2"
 
     defaultConfig {
-        applicationId "com.jpgcookbook.sony.beta"
+        applicationId "com.jpgcookbook.sony"
         minSdkVersion 10
         targetSdkVersion 10
         versionCode 1

@@ -1,5 +1,6 @@
 package com.github.ma1co.pmcademo.app;
 
+import com.jpgcookbook.sony.R; // CRITICAL: This matches your unique applicationId
 import android.app.Activity;
 import android.content.Intent;
 import android.graphics.*;
@@ -66,7 +67,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         
         // STATUS UI (Top Left)
         tvStatus = new TextView(this);
-        tvStatus.setText("VERSION: 0.9.0-BETA");
+        tvStatus.setText("STATUS: STANDBY");
         tvStatus.setTextColor(Color.LTGRAY);
         tvStatus.setTextSize(18); 
         FrameLayout.LayoutParams statusParams = new FrameLayout.LayoutParams(
@@ -229,55 +230,53 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
                 int sample = (qualityIndex == 1) ? 2 : 4; 
                 
-                BitmapFactory.Options boundsOpt = new BitmapFactory.Options();
-                boundsOpt.inJustDecodeBounds = true;
-                BitmapFactory.decodeFile(original.getAbsolutePath(), boundsOpt);
+                BitmapFactory.Options b = new BitmapFactory.Options();
+                b.inJustDecodeBounds = true;
+                BitmapFactory.decodeFile(original.getAbsolutePath(), b);
 
-                int targetW = boundsOpt.outWidth / sample;
-                int targetH = boundsOpt.outHeight / sample;
+                int targetW = b.outWidth / sample;
+                int targetH = b.outHeight / sample;
 
-                // FULL ARGB_8888 FOR MAX QUALITY (NO BANDING)
                 Bitmap finalBmp = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888);
                 Canvas canvas = new Canvas(finalBmp);
 
                 BitmapRegionDecoder decoder = BitmapRegionDecoder.newInstance(original.getAbsolutePath(), false);
-                BitmapFactory.Options stripOpt = new BitmapFactory.Options();
-                stripOpt.inSampleSize = sample;
-                stripOpt.inPreferredConfig = Bitmap.Config.ARGB_8888;
+                BitmapFactory.Options s = new BitmapFactory.Options();
+                s.inSampleSize = sample;
+                s.inPreferredConfig = Bitmap.Config.ARGB_8888;
 
-                int stripHeight = (boundsOpt.outHeight / 10 / sample) * sample; 
-                int destY = 0;
+                int stripH = (b.outHeight / 10 / sample) * sample; 
+                int dY = 0;
 
-                for (int y = 0; y < boundsOpt.outHeight; y += stripHeight) {
-                    int h = Math.min(stripHeight, boundsOpt.outHeight - y);
-                    Bitmap strip = decoder.decodeRegion(new Rect(0, y, boundsOpt.outWidth, y + h), stripOpt);
-                    Bitmap mutableStrip = strip.copy(Bitmap.Config.ARGB_8888, true);
+                for (int y = 0; y < b.outHeight; y += stripH) {
+                    int h = Math.min(stripH, b.outHeight - y);
+                    Bitmap strip = decoder.decodeRegion(new Rect(0, y, b.outWidth, y + h), s);
+                    Bitmap mStrip = strip.copy(Bitmap.Config.ARGB_8888, true);
                     strip.recycle();
 
-                    mEngine.applyLutToBitmap(mutableStrip, null);
+                    mEngine.applyLutToBitmap(mStrip, null);
                     
-                    canvas.drawBitmap(mutableStrip, 0, destY, null);
-                    destY += mutableStrip.getHeight();
-                    mutableStrip.recycle();
+                    canvas.drawBitmap(mStrip, 0, dY, null);
+                    dY += mStrip.getHeight();
+                    mStrip.recycle();
 
-                    publishProgress((int) (((float) (y + h) / boundsOpt.outHeight) * 100));
+                    publishProgress((int) (((float) (y + h) / b.outHeight) * 100));
                 }
                 decoder.recycle();
 
                 File rootDir = Environment.getExternalStorageDirectory();
-                File processedDir = new File(rootDir, "GRADED");
-                if (!processedDir.exists()) processedDir.mkdirs();
+                File outDir = new File(rootDir, "GRADED");
+                if (!outDir.exists()) outDir.mkdirs();
                 
-                File outFile = new File(processedDir, original.getName());
+                File outFile = new File(outDir, original.getName());
 
                 FileOutputStream fos = new FileOutputStream(outFile);
-                // BUMPED TO 98% FOR PROFESSIONAL GRADIENTS
                 finalBmp.compress(Bitmap.CompressFormat.JPEG, 98, fos); 
                 fos.flush();
                 fos.close();
                 finalBmp.recycle();
 
-                // RUN EXIF INJECTOR BEFORE BROADCAST
+                // RUN EXIF INJECTOR
                 copyExif(original.getAbsolutePath(), outFile.getAbsolutePath());
 
                 sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(outFile)));
@@ -298,12 +297,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
-        int scanCode = event.getScanCode();
-        if (scanCode == ScalarInput.ISV_KEY_DELETE) { finish(); return true; }
+        int sc = event.getScanCode();
+        if (sc == ScalarInput.ISV_KEY_DELETE) { finish(); return true; }
         if (!isProcessing) {
-            if (scanCode == ScalarInput.ISV_KEY_DOWN) { cycleMode(); return true; }
-            if (scanCode == ScalarInput.ISV_DIAL_1_CLOCKWISE) { handleInput(1); return true; }
-            if (scanCode == ScalarInput.ISV_DIAL_1_COUNTERCW) { handleInput(-1); return true; }
+            if (sc == ScalarInput.ISV_KEY_DOWN) { cycleMode(); return true; }
+            if (sc == ScalarInput.ISV_DIAL_1_CLOCKWISE) { handleInput(1); return true; }
+            if (sc == ScalarInput.ISV_DIAL_1_COUNTERCW) { handleInput(-1); return true; }
         }
         return super.onKeyDown(keyCode, event);
     }
@@ -361,16 +360,20 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         } catch (Exception e) {}
     }
 
-    private void cycleMode() { setDialMode(DialMode.values()[(mDialMode.ordinal() + 1) % DialMode.values().length]); }
+    private void cycleMode() { 
+        setDialMode(DialMode.values()[(mDialMode.ordinal() + 1) % DialMode.values().length]); 
+    }
     
     private void setDialMode(DialMode m) { 
         mDialMode = m; 
-        tvShutter.setTextColor(m == DialMode.shutter ? Color.GREEN : Color.WHITE);
-        tvAperture.setTextColor(m == DialMode.aperture ? Color.GREEN : Color.WHITE);
-        tvISO.setTextColor(m == DialMode.iso ? Color.GREEN : Color.WHITE);
-        tvExposure.setTextColor(m == DialMode.exposure ? Color.GREEN : Color.WHITE);
-        tvRecipe.setTextColor(m == DialMode.recipe ? Color.GREEN : Color.WHITE);
-        tvQuality.setTextColor(m == DialMode.quality ? Color.GREEN : Color.LTGRAY);
+        int g = Color.GREEN;
+        int w = Color.WHITE;
+        tvShutter.setTextColor(m == DialMode.shutter ? g : w);
+        tvAperture.setTextColor(m == DialMode.aperture ? g : w);
+        tvISO.setTextColor(m == DialMode.iso ? g : w);
+        tvExposure.setTextColor(m == DialMode.exposure ? g : w);
+        tvRecipe.setTextColor(m == DialMode.recipe ? g : w);
+        tvQuality.setTextColor(m == DialMode.quality ? g : Color.LTGRAY);
         updateRecipeDisplay(); 
     }
     
