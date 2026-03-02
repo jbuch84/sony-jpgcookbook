@@ -5,7 +5,6 @@ import android.content.Intent;
 import android.graphics.Color;
 import android.hardware.Camera;
 import android.os.Bundle;
-import android.os.Environment;
 import android.util.Pair;
 import android.view.KeyEvent;
 import android.view.SurfaceHolder;
@@ -55,12 +54,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         recipeList.add("NONE (DEFAULT)");
 
         File foundDir = null;
-        // Search through every mounted system folder
-        String[] topLevels = {"/storage", "/mnt"};
-        for (String top : topLevels) {
-            File[] subs = new File(top).listFiles();
+        // THE BRUTE FORCE SCAN: Including the hidden /media_rw path
+        String[] hardwarePaths = {"/media_rw", "/mnt", "/storage"};
+        
+        for (String base : hardwarePaths) {
+            File baseDir = new File(base);
+            File[] subs = baseDir.listFiles();
             if (subs != null) {
                 for (File sub : subs) {
+                    // Check for /LUTs directly in the subfolder
                     File test = new File(sub, "LUTs");
                     if (test.exists() && test.isDirectory()) {
                         foundDir = test;
@@ -82,11 +84,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         }
 
         if (recipeList.size() <= 1) {
-            // DEBUG: Show /storage contents if /mnt failed
-            String debug = "";
-            File[] sList = new File("/storage").listFiles();
-            if (sList != null) for (File f : sList) debug += f.getName() + " ";
-            tvRecipe.setText("STORAGE CONTAINS: " + debug);
+            // DEBUG: List every single folder in the root so we can pick the right one
+            String rootDirs = "";
+            File[] roots = new File("/").listFiles();
+            if (roots != null) {
+                for (File r : roots) if (r.isDirectory()) rootDirs += r.getName() + " ";
+            }
+            tvRecipe.setText("ROOT DIRS: " + rootDirs);
         } else {
             updateRecipeDisplay();
         }
@@ -104,11 +108,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             mCameraEx = CameraEx.open(0, null);
             mCamera = mCameraEx.getNormalCamera();
             mCameraEx.startDirectShutter();
-            
             CameraEx.ParametersModifier pm = mCameraEx.createParametersModifier(mCamera.getParameters());
             supportedIsos = (List<Integer>) pm.getSupportedISOSensitivities();
             curIso = pm.getISOSensitivity();
-
             notifySonyStatus(true);
             syncUI();
         } catch (Exception e) {}
