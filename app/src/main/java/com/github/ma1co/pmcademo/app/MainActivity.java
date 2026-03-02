@@ -34,7 +34,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private ArrayList<String> recipeList = new ArrayList<String>();
     private int recipeIndex = 0;
     
-    // DYNAMIC PATHS
     private String currentDcimPath = "";
     private HashSet<String> knownFiles = new HashSet<String>();
     private Handler m_handler = new Handler();
@@ -57,7 +56,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         tvExposure = (TextView) findViewById(R.id.tvExposure);
         tvRecipe = (TextView) findViewById(R.id.tvRecipe);
         
-        findActiveDcimPath(); // Start the scout
+        findActiveDcimPath();
         initializeFileLibrary();
         scanRecipes();
         setDialMode(DialMode.shutter);
@@ -75,11 +74,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             }
             if (!sonyFolders.isEmpty()) {
                 Collections.sort(sonyFolders);
-                currentDcimPath = sonyFolders.get(sonyFolders.size() - 1); // Pick the newest/highest number
+                currentDcimPath = sonyFolders.get(sonyFolders.size() - 1);
                 return;
             }
         }
-        currentDcimPath = "/sdcard/DCIM/100MSDCF"; // Fallback
+        currentDcimPath = "/sdcard/DCIM/100MSDCF";
     }
 
     private void initializeFileLibrary() {
@@ -104,24 +103,24 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                             String name = f.getName();
                             if (name.toUpperCase().endsWith(".JPG") && !name.startsWith("MIRROR_") && !knownFiles.contains(name)) {
                                 knownFiles.add(name);
-                                new TrueMirrorTask(name).execute();
+                                new PersistenceMirrorTask(name).execute();
                                 break; 
                             }
                         }
                     }
                 }
-                m_handler.postDelayed(this, 2000);
+                m_handler.postDelayed(this, 1500);
             }
-        }, 2000);
+        }, 1500);
     }
 
-    private class TrueMirrorTask extends AsyncTask<Void, String, Boolean> {
+    private class PersistenceMirrorTask extends AsyncTask<Void, String, Boolean> {
         String fileName;
-        TrueMirrorTask(String name) { this.fileName = name; }
+        PersistenceMirrorTask(String name) { this.fileName = name; }
 
         @Override protected void onPreExecute() { 
             isBaking = true;
-            tvRecipe.setText("WAITING FOR SD CARD...");
+            tvRecipe.setText("WAITING FOR BIONZ...");
             tvRecipe.setTextColor(Color.YELLOW);
         }
 
@@ -129,16 +128,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             File original = new File(currentDcimPath, fileName);
             Bitmap bmp = null;
             
-            // Try 3 times to bypass the Sony File Lock
-            for (int i = 0; i < 3; i++) {
+            // INFINITE LOOP (With Safety Exit): Poll until the file is readable
+            int attempts = 0;
+            while (bmp == null && attempts < 15) { // Try for up to 30 seconds
                 try {
-                    Thread.sleep(3000);
-                    if (original.exists()) {
-                        BitmapFactory.Options opt = new BitmapFactory.Options();
-                        opt.inSampleSize = 4; // Stay safe with 4MP
-                        bmp = BitmapFactory.decodeFile(original.getAbsolutePath(), opt);
-                        if (bmp != null) break; 
-                    }
+                    Thread.sleep(2000);
+                    BitmapFactory.Options opt = new BitmapFactory.Options();
+                    opt.inSampleSize = 4; // 4MP is the stability sweet spot
+                    bmp = BitmapFactory.decodeFile(original.getAbsolutePath(), opt);
+                    attempts++;
                 } catch (Exception e) {}
             }
             
@@ -147,8 +145,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                     File mirrorFile = new File(currentDcimPath, "MIRROR_" + fileName);
                     FileOutputStream fos = new FileOutputStream(mirrorFile);
                     bmp.compress(Bitmap.CompressFormat.JPEG, 85, fos);
-                    fos.flush();
-                    fos.close();
+                    fos.flush(); fos.close();
                     bmp.recycle();
                     sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(mirrorFile)));
                     return true;
@@ -160,10 +157,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         @Override protected void onPostExecute(Boolean success) {
             isBaking = false;
             if (success) {
-                tvRecipe.setText("MIRROR SAVED!");
+                tvRecipe.setText("MIRROR SUCCESS!");
                 tvRecipe.setTextColor(Color.GREEN);
             } else {
-                tvRecipe.setText("SD CARD BUSY - TIMEOUT");
+                tvRecipe.setText("BIONZ LOCK TIMEOUT");
                 tvRecipe.setTextColor(Color.RED);
             }
             m_handler.postDelayed(new Runnable() {
@@ -172,15 +169,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         }
     }
 
-    // --- STANDARD CAMERA RE-OPEN LOGIC ---
+    // --- VIEWFIX: KEEP PREVIEW ALIVE ---
     private void reopenCamera() {
         try {
             mCameraEx = CameraEx.open(0, null);
             mCamera = mCameraEx.getNormalCamera();
             mCameraEx.startDirectShutter();
+            
             m_autoReviewControl = new CameraEx.AutoPictureReviewControl();
             mCameraEx.setAutoPictureReviewControl(m_autoReviewControl);
             m_autoReviewControl.setPictureReviewTime(0);
+            
             mCameraEx.setShutterSpeedChangeListener(this);
             mCamera.setPreviewDisplay(mSurfaceView.getHolder());
             mCamera.startPreview();
@@ -224,49 +223,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     }
 
     private void cycleMode() { if (isBaking) return; DialMode[] modes = DialMode.values(); int next = (mDialMode.ordinal() + 1) % modes.length; setDialMode(modes[next]); }
-    
-    private void setDialMode(DialMode mode) { 
-        mDialMode = mode; 
-        tvShutter.setTextColor(mode == DialMode.shutter ? Color.GREEN : Color.WHITE); 
-        tvAperture.setTextColor(mode == DialMode.aperture ? Color.GREEN : Color.WHITE); 
-        updateRecipeDisplay(); 
-    }
-
-    private void scanRecipes() { 
-        recipeList.clear(); 
-        recipeList.add("NONE (DEFAULT)"); 
-        File lutDir = new File(Environment.getExternalStorageDirectory(), "LUTS");
-        if (lutDir.exists()) { 
-            File[] files = lutDir.listFiles(); 
-            if (files != null) { 
-                for (File f : files) { 
-                    if (!f.getName().startsWith("_") && f.getName().toUpperCase().contains("CUB")) recipeList.add(f.getName()); 
-                } 
-            } 
-        } 
-        updateRecipeDisplay(); 
-    }
-
-    private void updateRecipeDisplay() { 
-        String name = recipeList.get(recipeIndex); 
-        String display = name.split("\\.")[0].toUpperCase(); 
-        tvRecipe.setText("<  " + display + "  >"); 
-        tvRecipe.setTextColor(mDialMode == DialMode.recipe ? Color.GREEN : Color.WHITE); 
-    }
-
+    private void setDialMode(DialMode mode) { mDialMode = mode; tvShutter.setTextColor(mode == DialMode.shutter ? Color.GREEN : Color.WHITE); tvAperture.setTextColor(mode == DialMode.aperture ? Color.GREEN : Color.WHITE); updateRecipeDisplay(); }
+    private void scanRecipes() { recipeList.clear(); recipeList.add("NONE (DEFAULT)"); File lutDir = new File(Environment.getExternalStorageDirectory(), "LUTS"); if (lutDir.exists()) { File[] files = lutDir.listFiles(); if (files != null) { for (File f : files) { if (!f.getName().startsWith("_") && f.getName().toUpperCase().contains("CUB")) recipeList.add(f.getName()); } } } updateRecipeDisplay(); }
+    private void updateRecipeDisplay() { String name = recipeList.get(recipeIndex); String display = name.split("\\.")[0].toUpperCase(); tvRecipe.setText("<  " + display + "  >"); tvRecipe.setTextColor(mDialMode == DialMode.recipe ? Color.GREEN : Color.WHITE); }
     private void sendSonyBroadcast(boolean active) { Intent intent = new Intent("com.android.server.DAConnectionManagerService.AppInfoReceive"); intent.putExtra("package_name", getPackageName()); intent.putExtra("resume_key", active ? new String[]{"on"} : new String[]{}); sendBroadcast(intent); }
-    
-    private void exitApp() { 
-        m_handler.removeCallbacksAndMessages(null); 
-        Intent intent = new Intent("com.android.server.DAConnectionManagerService.AppInfoReceive"); 
-        intent.putExtra("package_name", getPackageName()); 
-        intent.putExtra("class_name", getClass().getName()); 
-        intent.putExtra("pullingback_key", new String[] {}); 
-        intent.putExtra("resume_key", new String[] {}); 
-        sendBroadcast(intent); 
-        finish(); 
-    }
-
+    private void exitApp() { m_handler.removeCallbacksAndMessages(null); Intent intent = new Intent("com.android.server.DAConnectionManagerService.AppInfoReceive"); intent.putExtra("package_name", getPackageName()); intent.putExtra("class_name", getClass().getName()); intent.putExtra("pullingback_key", new String[] {}); intent.putExtra("resume_key", new String[] {}); sendBroadcast(intent); finish(); }
     @Override public void onShutterSpeedChange(CameraEx.ShutterSpeedInfo info, CameraEx camera) { syncUI(); }
     @Override public void surfaceCreated(SurfaceHolder h) { try { if (mCamera != null) { mCamera.setPreviewDisplay(h); mCamera.startPreview(); syncUI(); } } catch (Exception e) {} }
     @Override protected void onPause() { super.onPause(); if (mCameraEx != null) { m_autoReviewControl.setPictureReviewTime(m_pictureReviewTime); mCameraEx.release(); } }
