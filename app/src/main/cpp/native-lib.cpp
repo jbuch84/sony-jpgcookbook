@@ -6,7 +6,7 @@
 #include "jpeglib.h"
 #include <android/log.h>
 
-#define LOG_TAG "NDK_ENGINE"
+#define LOG_TAG "COOKBOOK_LOG"
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 std::vector<int> nativeLutR, nativeLutG, nativeLutB;
@@ -18,16 +18,21 @@ struct my_error_mgr {
 };
 
 METHODDEF(void) my_error_exit (j_common_ptr cinfo) {
+    LOGE("CRITICAL: LibJpeg threw an internal error!");
     my_error_mgr * myerr = (my_error_mgr *) cinfo->err;
     longjmp(myerr->setjmp_buffer, 1);
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_github_ma1co_pmcademo_app_LutEngine_loadLutNative(JNIEnv* env, jobject, jstring path) {
+    LOGE("C++: loadLutNative Started");
     const char *file_path = env->GetStringUTFChars(path, NULL);
     FILE *file = fopen(file_path, "r");
     env->ReleaseStringUTFChars(path, file_path);
-    if (!file) return JNI_FALSE;
+    if (!file) {
+        LOGE("C++: Failed to open LUT file");
+        return JNI_FALSE;
+    }
 
     nativeLutR.clear(); nativeLutG.clear(); nativeLutB.clear();
     nativeLutSize = 0;
@@ -49,38 +54,49 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_loadLutNative(JNIEnv* env, jobject,
         }
     }
     fclose(file);
+    LOGE("C++: LUT loaded successfully. Size: %d", nativeLutSize);
     return nativeLutSize > 0 ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, jobject, jstring inPath, jstring outPath) {
-    if (nativeLutSize == 0) return JNI_FALSE;
+    LOGE("C++: --- SCANLINE ENGINE INITIATED ---");
+    
+    if (nativeLutSize == 0) {
+        LOGE("C++: Engine failed - No LUT loaded in memory.");
+        return JNI_FALSE;
+    }
 
     const char *in_file = env->GetStringUTFChars(inPath, NULL);
     const char *out_file = env->GetStringUTFChars(outPath, NULL);
-
+    
+    LOGE("C++: Opening input file: %s", in_file);
     FILE *infile = fopen(in_file, "rb");
     if (!infile) {
+        LOGE("C++: Failed to read input file.");
         env->ReleaseStringUTFChars(inPath, in_file);
         env->ReleaseStringUTFChars(outPath, out_file);
         return JNI_FALSE;
     }
 
+    LOGE("C++: Opening output file: %s", out_file);
     FILE *outfile = fopen(out_file, "wb");
     if (!outfile) {
+        LOGE("C++: Failed to create output file.");
         fclose(infile);
         env->ReleaseStringUTFChars(inPath, in_file);
         env->ReleaseStringUTFChars(outPath, out_file);
         return JNI_FALSE;
     }
 
-    // 1. Setup Reader
+    LOGE("C++: Step 1 - Setting up LibJpeg Decompressor");
     struct jpeg_decompress_struct cinfo_d;
     struct my_error_mgr jerr_d;
     cinfo_d.err = jpeg_std_error(&jerr_d.pub);
     jerr_d.pub.error_exit = my_error_exit;
     
     if (setjmp(jerr_d.setjmp_buffer)) {
+        LOGE("C++: FATAL JUMP - Decompressor crashed!");
         jpeg_destroy_decompress(&cinfo_d);
         fclose(infile); fclose(outfile);
         env->ReleaseStringUTFChars(inPath, in_file);
@@ -88,19 +104,25 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
         return JNI_FALSE;
     }
     
+    LOGE("C++: Calling jpeg_create_decompress. If it dies after this, it's a Symbol Collision!");
     jpeg_create_decompress(&cinfo_d);
+    LOGE("C++: Decompressor created successfully. Reading header.");
+    
     jpeg_stdio_src(&cinfo_d, infile);
     jpeg_read_header(&cinfo_d, TRUE);
     cinfo_d.out_color_space = JCS_RGB; 
     jpeg_start_decompress(&cinfo_d);
+    
+    LOGE("C++: Header read. Image Size: %dx%d", cinfo_d.output_width, cinfo_d.output_height);
 
-    // 2. Setup Writer
+    LOGE("C++: Step 2 - Setting up LibJpeg Compressor");
     struct jpeg_compress_struct cinfo_c;
     struct my_error_mgr jerr_c;
     cinfo_c.err = jpeg_std_error(&jerr_c.pub);
     jerr_c.pub.error_exit = my_error_exit;
     
     if (setjmp(jerr_c.setjmp_buffer)) {
+        LOGE("C++: FATAL JUMP - Compressor crashed!");
         jpeg_destroy_compress(&cinfo_c);
         jpeg_destroy_decompress(&cinfo_d);
         fclose(infile); fclose(outfile);
@@ -120,6 +142,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
     jpeg_set_quality(&cinfo_c, 95, TRUE);
     jpeg_start_compress(&cinfo_c, TRUE);
 
+    LOGE("C++: Step 3 - Allocating 1 Row of RAM (18KB)");
     int expectedSize = nativeLutSize * nativeLutSize * nativeLutSize;
     if (nativeLutR.size() < expectedSize) {
         nativeLutR.resize(expectedSize, 0);
@@ -137,7 +160,8 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
     
     JSAMPARRAY buffer = (*cinfo_d.mem->alloc_sarray)((j_common_ptr) &cinfo_d, JPOOL_IMAGE, row_stride, 1);
 
-    // 4. SCANLINE LOOP (Low Memory Mode)
+    LOGE("C++: Step 4 - Entering Scanline Loop");
+    int rows_processed = 0;
     while (cinfo_d.output_scanline < cinfo_d.output_height) {
         jpeg_read_scanlines(&cinfo_d, buffer, 1);
         unsigned char* row = buffer[0];
@@ -178,9 +202,14 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
         }
         
         jpeg_write_scanlines(&cinfo_c, buffer, 1);
+        rows_processed++;
+        
+        if (rows_processed == 1000) LOGE("C++: 1000 rows processed...");
+        if (rows_processed == 2000) LOGE("C++: 2000 rows processed...");
+        if (rows_processed == 3000) LOGE("C++: 3000 rows processed...");
     }
 
-    // 5. Cleanup
+    LOGE("C++: Step 5 - Image Processed Successfully. Cleaning up RAM.");
     jpeg_finish_compress(&cinfo_c);
     jpeg_destroy_compress(&cinfo_c);
     jpeg_finish_decompress(&cinfo_d);
@@ -191,5 +220,6 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
 
     env->ReleaseStringUTFChars(inPath, in_file);
     env->ReleaseStringUTFChars(outPath, out_file);
+    LOGE("C++: --- ENGINE FINISHED SUCCESSFULLY ---");
     return JNI_TRUE;
 }
