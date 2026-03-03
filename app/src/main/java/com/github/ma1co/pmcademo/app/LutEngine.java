@@ -11,8 +11,8 @@ public class LutEngine {
     private String currentLutName = "";
 
     private native boolean loadLutNative(String filePath);
-    // Added scaleDenom parameter to JNI call
-    private native boolean processImageNative(String inPath, String outPath, int scaleDenom);
+    // Added Magic Variables to the JNI bridge
+    private native boolean processImageNative(String inPath, String outPath, int scaleDenom, int opacity, int grain, int vignette);
 
     public String getCurrentLutName() {
         return currentLutName;
@@ -28,7 +28,7 @@ public class LutEngine {
         return false;
     }
 
-    public boolean applyLutToJpeg(String inPath, String outPath, int scaleDenom) {
-        return processImageNative(inPath, outPath, scaleDenom);
+    public boolean applyLutToJpeg(String inPath, String outPath, int scaleDenom, int opacity, int grain, int vignette) {
+        return processImageNative(inPath, outPath, scaleDenom, opacity, grain, vignette);
     }
 }

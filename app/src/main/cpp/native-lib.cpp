@@ -12,6 +12,7 @@
 
 std::vector<int> nativeLutR, nativeLutG, nativeLutB;
 int nativeLutSize = 0;
+uint32_t random_seed = 12345; // Fast PRNG seed for Film Grain
 
 struct my_error_mgr {
     struct jpeg_error_mgr pub;
@@ -24,6 +25,12 @@ METHODDEF(void) my_error_exit (j_common_ptr cinfo) {
 }
 METHODDEF(void) my_emit_message (j_common_ptr cinfo, int msg_level) {}
 METHODDEF(void) my_output_message (j_common_ptr cinfo) {}
+
+// Fast Integer Highlight Roll-Off (Soft Shoulder)
+inline int rollOff(int v) {
+    if (v > 200) return 200 + ((v - 200) * (310 - v)) / 110;
+    return v;
+}
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_github_ma1co_pmcademo_app_LutEngine_loadLutNative(JNIEnv* env, jobject, jstring path) {
@@ -54,7 +61,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_loadLutNative(JNIEnv* env, jobject,
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, jobject, jstring inPath, jstring outPath, jint scaleDenom) {
+Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, jobject, jstring inPath, jstring outPath, jint scaleDenom, jint opacity, jint grain, jint vignette) {
     if (nativeLutSize == 0) return JNI_FALSE;
     const char *in_file = env->GetStringUTFChars(inPath, NULL);
     const char *out_file = env->GetStringUTFChars(outPath, NULL);
@@ -88,6 +95,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
     }
     
     jpeg_create_decompress(cinfo_d);
+    jpeg_save_markers(cinfo_d, JPEG_APP0 + 1, 0xFFFF); 
     jpeg_stdio_src(cinfo_d, infile);
     jpeg_read_header(cinfo_d, TRUE);
     cinfo_d->scale_num = 1;
@@ -113,6 +121,12 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
     cinfo_c->in_color_space = JCS_RGB;
     jpeg_set_defaults(cinfo_c);
     jpeg_set_quality(cinfo_c, 95, TRUE);
+
+    jpeg_saved_marker_ptr marker = cinfo_d->marker_list;
+    while (marker != NULL) {
+        jpeg_write_marker(cinfo_c, marker->marker, marker->data, marker->data_length);
+        marker = marker->next;
+    }
     jpeg_start_compress(cinfo_c, TRUE);
 
     int lutMax = nativeLutSize - 1;
@@ -122,82 +136,114 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
     int row_stride = cinfo_d->output_width * cinfo_d->output_components;
     JSAMPARRAY buffer = (*cinfo_d->mem->alloc_sarray)((j_common_ptr) cinfo_d, JPOOL_IMAGE, row_stride, 1);
 
-    // CACHED MEMORY POINTERS
-    const int* pR = &nativeLutR[0]; 
-    const int* pG = &nativeLutG[0]; 
-    const int* pB = &nativeLutB[0];
+    const int* pR = &nativeLutR[0]; const int* pG = &nativeLutG[0]; const int* pB = &nativeLutB[0];
+
+    // VIGNETTE GEOMETRY PRE-CALCULATION
+    long cx = cinfo_d->output_width / 2;
+    long cy = cinfo_d->output_height / 2;
+    long max_dist_sq = cx*cx + cy*cy;
+    if (max_dist_sq == 0) max_dist_sq = 1;
 
     while (cinfo_d->output_scanline < cinfo_d->output_height) {
+        long current_y = cinfo_d->output_scanline;
         jpeg_read_scanlines(cinfo_d, buffer, 1);
         unsigned char* row = buffer[0];
 
-        for (int x = 0; x < row_stride; x += 3) {
-            // FIXED-POINT MATH (0 to 128 integer scale, no decimals)
-            int fX = map[row[x]]; 
-            int fY = map[row[x+1]]; 
-            int fZ = map[row[x+2]];
+        // VIGNETTE ROW CACHE
+        long dy = current_y - cy;
+        long dy_sq = dy * dy;
 
-            int x0 = fX >> 7; 
-            int y0 = fY >> 7; 
-            int z0 = fZ >> 7;
-            
-            // THE CRASH PREVENTER: Strict Bounds Capping
+        for (int x = 0; x < row_stride; x += 3) {
+            int origR = row[x]; int origG = row[x+1]; int origB = row[x+2];
+
+            // 1. VIGNETTE
+            if (vignette > 0) {
+                long dx = (x / 3) - cx;
+                long dist_sq = dx*dx + dy_sq;
+                int vig_mult = 256 - ((dist_sq * vignette) / max_dist_sq);
+                if (vig_mult < 0) vig_mult = 0;
+                origR = (origR * vig_mult) >> 8;
+                origG = (origG * vig_mult) >> 8;
+                origB = (origB * vig_mult) >> 8;
+            }
+
+            // 2. HIGHLIGHT ROLL-OFF
+            origR = rollOff(origR);
+            origG = rollOff(origG);
+            origB = rollOff(origB);
+
+            // 3. LUT MATH (Tetrahedral)
+            int fX = map[origR]; int fY = map[origG]; int fZ = map[origB];
+            int x0 = fX >> 7; int y0 = fY >> 7; int z0 = fZ >> 7;
             int x1 = x0 + 1; if (x1 > lutMax) x1 = lutMax;
             int y1 = y0 + 1; if (y1 > lutMax) y1 = lutMax;
             int z1 = z0 + 1; if (z1 > lutMax) z1 = lutMax;
 
-            int dx = fX & 0x7F; 
-            int dy = fY & 0x7F; 
-            int dz = fZ & 0x7F;
-
+            int dx_lut = fX & 0x7F; int dy_lut = fY & 0x7F; int dz_lut = fZ & 0x7F;
             int y0_idx = y0 * nativeLutSize; int y1_idx = y1 * nativeLutSize;
             int z0_idx = z0 * lutSize2;      int z1_idx = z1 * lutSize2;
 
-            int i000 = x0 + y0_idx + z0_idx;
-            int i100 = x1 + y0_idx + z0_idx;
-            int i010 = x0 + y1_idx + z0_idx;
-            int i110 = x1 + y1_idx + z0_idx;
-            int i001 = x0 + y0_idx + z1_idx;
-            int i101 = x1 + y0_idx + z1_idx;
-            int i011 = x0 + y1_idx + z1_idx;
-            int i111 = x1 + y1_idx + z1_idx;
+            int i000 = x0 + y0_idx + z0_idx; int i100 = x1 + y0_idx + z0_idx;
+            int i010 = x0 + y1_idx + z0_idx; int i110 = x1 + y1_idx + z0_idx;
+            int i001 = x0 + y0_idx + z1_idx; int i101 = x1 + y0_idx + z1_idx;
+            int i011 = x0 + y1_idx + z1_idx; int i111 = x1 + y1_idx + z1_idx;
 
             int v0, v1, v2, v3;
             int w0, w1, w2, w3;
 
-            // TETRAHEDRAL PYRAMID LOGIC (Selects 4 vertices instead of 8)
-            if (dx >= dy) {
-                if (dy >= dz) {
+            if (dx_lut >= dy_lut) {
+                if (dy_lut >= dz_lut) {
                     v0 = i000; v1 = i100; v2 = i110; v3 = i111;
-                    w0 = 128 - dx; w1 = dx - dy; w2 = dy - dz; w3 = dz;
-                } else if (dx >= dz) {
+                    w0 = 128 - dx_lut; w1 = dx_lut - dy_lut; w2 = dy_lut - dz_lut; w3 = dz_lut;
+                } else if (dx_lut >= dz_lut) {
                     v0 = i000; v1 = i100; v2 = i101; v3 = i111;
-                    w0 = 128 - dx; w1 = dx - dz; w2 = dz - dy; w3 = dy;
+                    w0 = 128 - dx_lut; w1 = dx_lut - dz_lut; w2 = dz_lut - dy_lut; w3 = dy_lut;
                 } else {
                     v0 = i000; v1 = i001; v2 = i101; v3 = i111;
-                    w0 = 128 - dz; w1 = dz - dx; w2 = dx - dy; w3 = dy;
+                    w0 = 128 - dz_lut; w1 = dz_lut - dx_lut; w2 = dx_lut - dy_lut; w3 = dy_lut;
                 }
             } else {
-                if (dz >= dy) {
+                if (dz_lut >= dy_lut) {
                     v0 = i000; v1 = i001; v2 = i011; v3 = i111;
-                    w0 = 128 - dz; w1 = dz - dy; w2 = dy - dx; w3 = dx;
-                } else if (dz >= dx) {
+                    w0 = 128 - dz_lut; w1 = dz_lut - dy_lut; w2 = dy_lut - dx_lut; w3 = dx_lut;
+                } else if (dz_lut >= dx_lut) {
                     v0 = i000; v1 = i010; v2 = i011; v3 = i111;
-                    w0 = 128 - dy; w1 = dy - dz; w2 = dz - dx; w3 = dx;
+                    w0 = 128 - dy_lut; w1 = dy_lut - dz_lut; w2 = dz_lut - dx_lut; w3 = dx_lut;
                 } else {
                     v0 = i000; v1 = i010; v2 = i110; v3 = i111;
-                    w0 = 128 - dy; w1 = dy - dx; w2 = dx - dz; w3 = dz;
+                    w0 = 128 - dy_lut; w1 = dy_lut - dx_lut; w2 = dx_lut - dz_lut; w3 = dz_lut;
                 }
             }
 
-            // >> 7 divides by 128. Blazing fast pure integer math.
-            int outR = (pR[v0]*w0 + pR[v1]*w1 + pR[v2]*w2 + pR[v3]*w3) >> 7;
-            int outG = (pG[v0]*w0 + pG[v1]*w1 + pG[v2]*w2 + pG[v3]*w3) >> 7;
-            int outB = (pB[v0]*w0 + pB[v1]*w1 + pB[v2]*w2 + pB[v3]*w3) >> 7;
+            int lutR = (pR[v0]*w0 + pR[v1]*w1 + pR[v2]*w2 + pR[v3]*w3) >> 7;
+            int lutG = (pG[v0]*w0 + pG[v1]*w1 + pG[v2]*w2 + pG[v3]*w3) >> 7;
+            int lutB = (pB[v0]*w0 + pB[v1]*w1 + pB[v2]*w2 + pB[v3]*w3) >> 7;
 
-            row[x]   = outR > 255 ? 255 : (outR < 0 ? 0 : outR);
-            row[x+1] = outG > 255 ? 255 : (outG < 0 ? 0 : outG);
-            row[x+2] = outB > 255 ? 255 : (outB < 0 ? 0 : outB);
+            // 4. OPACITY BLEND
+            int outR = origR + (((lutR - origR) * opacity) >> 8);
+            int outG = origG + (((lutG - origG) * opacity) >> 8);
+            int outB = origB + (((lutB - origB) * opacity) >> 8);
+
+            // 5. AUTHENTIC FILM GRAIN
+            if (grain > 0) {
+                // Luminance calculation (0-255)
+                int lum = (outR*77 + outG*150 + outB*29) >> 8; 
+                // Midtone mask (strongest at 128, zero at 0/255)
+                int mask = 128 - abs(lum - 128); 
+                // Fast Random Generator
+                random_seed = (214013 * random_seed + 2531011);
+                int noise = ((random_seed >> 16) & 0xFF) - 128; // -128 to 127
+                // Apply masked noise
+                int grain_val = (noise * mask * grain) >> 14; 
+                outR += grain_val;
+                outG += grain_val;
+                outB += grain_val;
+            }
+
+            // CLAMP AND WRITE
+            row[x]   = (unsigned char)(outR < 0 ? 0 : (outR > 255 ? 255 : outR));
+            row[x+1] = (unsigned char)(outG < 0 ? 0 : (outG > 255 ? 255 : outG));
+            row[x+2] = (unsigned char)(outB < 0 ? 0 : (outB > 255 ? 255 : outB));
         }
         jpeg_write_scanlines(cinfo_c, buffer, 1);
     }
