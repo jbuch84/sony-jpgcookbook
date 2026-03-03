@@ -13,22 +13,7 @@ jobs:
         tar -xzf 2.1.5.1.tar.gz
         mv libjpeg-turbo-2.1.5.1 libjpeg-turbo
 
-    - name: The Cloaking Script (Total DNA Mutation)
-      run: |
-        echo "Mutating library DNA to prevent Sony OS collision..."
-        find app/src/main/cpp -type f \( -name "*.[ch]" -o -name "*.cpp" \) -exec sed -i 's/\bjpeg_/cook_jpeg_/g' {} +
-        find app/src/main/cpp -type f \( -name "*.[ch]" -o -name "*.cpp" \) -exec sed -i 's/\bjinit_/cook_jinit_/g' {} +
-        find app/src/main/cpp -type f \( -name "*.[ch]" -o -name "*.cpp" \) -exec sed -i 's/\bjsimd_/cook_jsimd_/g' {} +
-        find app/src/main/cpp -type f \( -name "*.[ch]" -o -name "*.cpp" \) -exec sed -i 's/\bjcopy_/cook_jcopy_/g' {} +
-        find app/src/main/cpp -type f \( -name "*.[ch]" -o -name "*.cpp" \) -exec sed -i 's/\bjzero_/cook_jzero_/g' {} +
-        find app/src/main/cpp -type f \( -name "*.[ch]" -o -name "*.cpp" \) -exec sed -i 's/\bjdiv_/cook_jdiv_/g' {} +
-        find app/src/main/cpp -type f \( -name "*.[ch]" -o -name "*.cpp" \) -exec sed -i 's/\bjround_/cook_jround_/g' {} +
-        
-        echo "Healing broken include paths..."
-        find app/src/main/cpp -type f \( -name "*.[ch]" -o -name "*.cpp" \) -exec sed -i 's/#include "cook_/#include "/g' {} +
-        find app/src/main/cpp -type f \( -name "*.[ch]" -o -name "*.cpp" \) -exec sed -i 's/#include <cook_/#include </g' {} +
-
-    - name: Create Clean Room SDK & NDK
+    - name: Create Clean Room SDK & NDK 16.1
       run: |
         mkdir $HOME/clean-sdk
         cp -r $ANDROID_SDK_ROOT/licenses $HOME/clean-sdk/
@@ -37,10 +22,11 @@ jobs:
         unzip -q commandlinetools-linux-8512546_latest.zip -d $HOME/clean-sdk/cmdline-tools
         
         export JAVA_HOME=$JAVA_HOME_11_X64
-        yes | $HOME/clean-sdk/cmdline-tools/cmdline-tools/bin/sdkmanager --sdk_root=$HOME/clean-sdk "platforms;android-25" "build-tools;26.0.2" "ndk;21.4.7075529" > /dev/null
+        # FORCING DOWNGRADE TO NDK 16.1 (LAST VERSION TO SUPPORT ANDROID 2.3 API 10)
+        yes | $HOME/clean-sdk/cmdline-tools/cmdline-tools/bin/sdkmanager --sdk_root=$HOME/clean-sdk "platforms;android-10" "build-tools;26.0.2" "ndk;16.1.4479499" "cmake;3.6.4111459" > /dev/null
         
         echo "sdk.dir=$HOME/clean-sdk" > local.properties
-        echo "ndk.dir=$HOME/clean-sdk/ndk/21.4.7075529" >> local.properties
+        echo "ndk.dir=$HOME/clean-sdk/ndk/16.1.4479499" >> local.properties
 
     - name: Build with Isolated Legacy Gradle
       run: |

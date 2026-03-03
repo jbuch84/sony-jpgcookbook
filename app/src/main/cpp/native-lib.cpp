@@ -18,11 +18,25 @@ struct my_error_mgr {
     jmp_buf setjmp_buffer;
 };
 
+// -------------------------------------------------------------
+// SAFETY MUZZLES: Prevent libjpeg from crashing the camera 
+// by trying to write to a non-existent Linux Console/stderr
+// -------------------------------------------------------------
 METHODDEF(void) my_error_exit (j_common_ptr cinfo) {
     LOGE("CRITICAL: LibJpeg threw an internal error!");
     my_error_mgr * myerr = (my_error_mgr *) cinfo->err;
     longjmp(myerr->setjmp_buffer, 1);
 }
+
+METHODDEF(void) my_emit_message (j_common_ptr cinfo, int msg_level) {
+    // Muzzled. Do nothing.
+}
+
+METHODDEF(void) my_output_message (j_common_ptr cinfo) {
+    // Muzzled. Do nothing.
+}
+// -------------------------------------------------------------
+
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_github_ma1co_pmcademo_app_LutEngine_loadLutNative(JNIEnv* env, jobject, jstring path) {
@@ -94,6 +108,8 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
     LOGE("C++: Setting up Decompressor Error Handler");
     cinfo_d->err = jpeg_std_error(&jerr_d->pub);
     jerr_d->pub.error_exit = my_error_exit;
+    jerr_d->pub.emit_message = my_emit_message;     // Muzzle
+    jerr_d->pub.output_message = my_output_message; // Muzzle
     
     if (setjmp(jerr_d->setjmp_buffer)) {
         LOGE("C++: FATAL JUMP - Decompressor crashed!");
@@ -107,7 +123,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
     
     LOGE("C++: Calling jpeg_create_decompress...");
     jpeg_create_decompress(cinfo_d);
-    LOGE("C++: Decompressor created successfully! Internal Collision Dodged!");
+    LOGE("C++: Decompressor created successfully! Architecture Matched!");
     
     jpeg_stdio_src(cinfo_d, infile);
     jpeg_read_header(cinfo_d, TRUE);
@@ -117,6 +133,8 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
     LOGE("C++: Setup Compressor Error Handler");
     cinfo_c->err = jpeg_std_error(&jerr_c->pub);
     jerr_c->pub.error_exit = my_error_exit;
+    jerr_c->pub.emit_message = my_emit_message;     // Muzzle
+    jerr_c->pub.output_message = my_output_message; // Muzzle
     
     if (setjmp(jerr_c->setjmp_buffer)) {
         LOGE("C++: FATAL JUMP - Compressor crashed!");
