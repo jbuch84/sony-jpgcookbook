@@ -3,7 +3,7 @@ package com.github.ma1co.pmcademo.app;
 import com.jpgcookbook.sony.R;
 import android.app.Activity;
 import android.content.Intent;
-import android.graphics.*;
+import android.graphics.Color;
 import android.hardware.Camera;
 import android.net.Uri;
 import android.os.AsyncTask;
@@ -21,8 +21,6 @@ import com.sony.scalar.hardware.CameraEx;
 import com.sony.scalar.sysutil.ScalarInput;
 import java.io.*;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Comparator;
 import java.util.List;
 
 public class MainActivity extends Activity implements SurfaceHolder.Callback, CameraEx.ShutterSpeedChangeListener {
@@ -34,7 +32,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     
     private ArrayList<String> recipeList = new ArrayList<String>();
     private int recipeIndex = 0;
-    private int qualityIndex = 0; 
     
     private boolean isProcessing = false;
     private boolean isReady = false; 
@@ -75,7 +72,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         contentRoot.addView(tvStatus, statusParams);
 
         tvQuality = new TextView(this);
-        tvQuality.setText("SIZE: PROXY (1.5MP)");
+        // Updated to reflect the new Native capability
+        tvQuality.setText("ENGINE: NATIVE C++ (FULL RES)");
         tvQuality.setTextColor(Color.LTGRAY);
         tvQuality.setTextSize(18); 
         FrameLayout.LayoutParams qualityParams = new FrameLayout.LayoutParams(
@@ -169,7 +167,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                     @Override public void onShutterStopped(CameraEx cameraEx) {}
                 });
             }
-            tvStatus.setText("STATUS: PRELOADING...");
+            tvStatus.setText("STATUS: PRELOADING NATIVE...");
             tvStatus.setTextColor(Color.CYAN);
         }
 
@@ -193,7 +191,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
             if (success) {
                 isReady = true;
-                tvStatus.setText("STATUS: READY TO SHOOT");
+                tvStatus.setText("STATUS: NATIVE ENGINE READY");
                 tvStatus.setTextColor(Color.GREEN);
             } else {
                 tvStatus.setText("STATUS: ERROR LOADING LUT");
@@ -210,12 +208,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                     @Override public void onShutterStopped(CameraEx cameraEx) {}
                 });
             }
-            tvStatus.setText("STATUS: PREPARING...");
+            tvStatus.setText("STATUS: NATIVE PROCESSING...");
             tvStatus.setTextColor(Color.YELLOW);
         }
 
         @Override protected void onProgressUpdate(Integer... values) {
-            tvStatus.setText("STATUS: PROCESSING [" + values[0] + "%]");
+            // Unused since Native processing is a single instant step
         }
 
         @Override protected String doInBackground(String... params) {
@@ -223,61 +221,46 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 File original = new File(params[0]);
                 if (!original.exists()) return "ERR: FILE MISSING";
 
-                int sample = (qualityIndex == 1) ? 2 : 4; 
-                
-                BitmapFactory.Options b = new BitmapFactory.Options();
-                b.inJustDecodeBounds = true;
-                BitmapFactory.decodeFile(original.getAbsolutePath(), b);
-
-                int targetW = b.outWidth / sample;
-                int targetH = b.outHeight / sample;
-
-                Bitmap finalBmp = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888);
-                Canvas canvas = new Canvas(finalBmp);
-
-                BitmapRegionDecoder decoder = BitmapRegionDecoder.newInstance(original.getAbsolutePath(), false);
-                BitmapFactory.Options s = new BitmapFactory.Options();
-                s.inSampleSize = sample;
-                s.inPreferredConfig = Bitmap.Config.ARGB_8888;
-
-                int stripH = (b.outHeight / 10 / sample) * sample; 
-                int destY = 0; // FIXED VARIABLE NAME
-
-                for (int y = 0; y < b.outHeight; y += stripH) {
-                    int h = Math.min(stripH, b.outHeight - y);
-                    Bitmap strip = decoder.decodeRegion(new Rect(0, y, b.outWidth, y + h), s);
-                    Bitmap mutableStrip = strip.copy(Bitmap.Config.ARGB_8888, true);
-                    strip.recycle();
-
-                    mEngine.applyLutToBitmap(mutableStrip, null);
-                    
-                    canvas.drawBitmap(mutableStrip, 0, destY, null); // FIXED VARIABLE NAME
-                    destY += mutableStrip.getHeight(); // FIXED VARIABLE NAME
-                    mutableStrip.recycle();
-
-                    publishProgress((int) (((float) (y + h) / b.outHeight) * 100));
+                // 1. Read the raw compressed JPEG into a byte array
+                // A compressed 24MP JPEG is usually ~10MB, which easily fits in Java's RAM
+                ByteArrayOutputStream bos = new ByteArrayOutputStream();
+                FileInputStream fis = new FileInputStream(original);
+                byte[] buffer = new byte[8192];
+                int read;
+                while ((read = fis.read(buffer)) != -1) {
+                    bos.write(buffer, 0, read);
                 }
-                decoder.recycle();
+                fis.close();
+                byte[] rawJpegBytes = bos.toByteArray();
+                bos.close();
 
+                // 2. Hand the raw bytes to the C++ Engine. 
+                // All decoding, math, and re-encoding happens instantly in native memory!
+                byte[] processedJpegBytes = mEngine.applyLutToJpeg(rawJpegBytes);
+
+                if (processedJpegBytes == null) {
+                    return "CRASH: NATIVE C++ FAILURE";
+                }
+
+                // 3. Save the returned bytes straight to the SD card
                 File rootDir = Environment.getExternalStorageDirectory();
                 File outDir = new File(rootDir, "GRADED");
                 if (!outDir.exists()) outDir.mkdirs();
                 
                 File outFile = new File(outDir, original.getName());
-
                 FileOutputStream fos = new FileOutputStream(outFile);
-                finalBmp.compress(Bitmap.CompressFormat.JPEG, 98, fos); 
+                fos.write(processedJpegBytes);
                 fos.flush();
                 fos.close();
-                finalBmp.recycle();
 
+                // 4. Copy EXIF and notify the gallery
                 copyExif(original.getAbsolutePath(), outFile.getAbsolutePath());
-
                 sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(outFile)));
-                return "SUCCESS: SAVED";
+                
+                return "SUCCESS: SAVED 24MP";
                 
             } catch (Throwable t) {
-                return "CRASH: " + t.getMessage();
+                return "ERR: " + t.getMessage();
             }
         }
 
@@ -332,9 +315,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                     tvStatus.setText("STATUS: RAW MODE");
                     tvStatus.setTextColor(Color.LTGRAY);
                 }
-            } else if (mDialMode == DialMode.quality) {
-                qualityIndex = (qualityIndex == 0) ? 1 : 0;
-                tvQuality.setText(qualityIndex == 0 ? "SIZE: PROXY (1.5MP)" : "SIZE: HIGH (6.0MP)");
             }
             syncUI();
         } catch (Exception e) {}
@@ -417,14 +397,4 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     @Override public void onShutterSpeedChange(CameraEx.ShutterSpeedInfo i, CameraEx c) { syncUI(); }
     @Override public void surfaceChanged(SurfaceHolder h, int f, int w, int h1) {}
     @Override public void surfaceDestroyed(SurfaceHolder h) {}
-
-    // --- NEW NDK CODE BELOW ---
-    // This loads the C++ library when the app starts up
-    static {
-        System.loadLibrary("native-lib");
-    }
-    
-    // This defines the "Bridge" that lets Java talk to C++
-    public native String stringFromJNI();
-    // --- NEW NDK CODE ABOVE ---
 }

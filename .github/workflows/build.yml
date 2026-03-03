@@ -6,36 +6,32 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - name: Download STB Image Headers
+      run: |
+        mkdir -p app/src/main/cpp
+        wget -q https://raw.githubusercontent.com/nothings/stb/master/stb_image.h -O app/src/main/cpp/stb_image.h
+        wget -q https://raw.githubusercontent.com/nothings/stb/master/stb_image_write.h -O app/src/main/cpp/stb_image_write.h
+
     - name: Create Clean Room SDK & NDK
       run: |
         mkdir $HOME/clean-sdk
-        # Copy Google licenses so the installer doesn't pause to ask for permission
         cp -r $ANDROID_SDK_ROOT/licenses $HOME/clean-sdk/
         
-        # Download isolated Android command line tools
         wget -q https://dl.google.com/android/repository/commandlinetools-linux-8512546_latest.zip
         unzip -q commandlinetools-linux-8512546_latest.zip -d $HOME/clean-sdk/cmdline-tools
         
-        # Temporarily use the server's Java 11 to run the modern downloader
         export JAVA_HOME=$JAVA_HOME_11_X64
-        
-        # Install ONLY the vintage files we need into the Clean Room. No modern files allowed.
         yes | $HOME/clean-sdk/cmdline-tools/cmdline-tools/bin/sdkmanager --sdk_root=$HOME/clean-sdk "platforms;android-25" "build-tools;26.0.2" "ndk;21.4.7075529" > /dev/null
         
-        # Write the VIP pass: Tell the project to ONLY look inside the Clean Room
         echo "sdk.dir=$HOME/clean-sdk" > local.properties
         echo "ndk.dir=$HOME/clean-sdk/ndk/21.4.7075529" >> local.properties
 
     - name: Build with Isolated Legacy Gradle
       run: |
-        # Switch to the server's Java 8 for the 2014 Sony compiler
         export JAVA_HOME=$JAVA_HOME_8_X64
-        
-        # Download the exact 4.10.3 Gradle binary to avoid the server's Gradle 9.3
         wget -q https://services.gradle.org/distributions/gradle-4.10.3-bin.zip
         unzip -q gradle-4.10.3-bin.zip
         
-        # Execute the binary directly
         ./gradle-4.10.3/bin/gradle assembleDebug --stacktrace
 
     - name: Upload Result
