@@ -21,17 +21,17 @@ Sony JPG Cookbook turns your older Sony Alpha camera into a modern film-simulati
 ## 📖 How to Use
 
 **1. Prep your SD Card**
-Create a folder named `LUTS` on the absolute root of your SD card. Drop your favorite standard `.cube` files into this folder. 
+- Create a folder named `LUTS` on the absolute root of your SD card. Drop your favorite standard `.cube` files into this folder. 
 
 **2. Select your Recipe**
-Open the app. Press **DOWN** on your control wheel to highlight **Recipe**, then spin the wheel to select your LUT.
+- Open the app. Press **DOWN** on your control wheel to highlight **Recipe**, then spin the wheel to select your LUT.
 * *Note: Wait for the status to say `READY TO SHOOT`. The shutter is locked while the LUT is preloading.*
 
 **3. Choose your Size**
-Press **DOWN** to highlight **SIZE**. Spin the dial to choose between `PROXY (1.5MP)` for speed or `HIGH (6.0MP)` for quality.
+- Press **DOWN** to highlight **SIZE**. Spin the dial to choose between `PROXY (1.5MP)` for speed or `HIGH (6.0MP)` for quality.
 
 **4. Shoot!**
-Take a picture normally. The app will automatically see the new photo and begin `PROCESSING`. Once it says `SUCCESS`, your photo is in the `GRADED` folder!
+- Take a picture normally. The app will automatically see the new photo and begin `PROCESSING`. Once it says `SUCCESS`, your photo is in the `GRADED` folder!
 
 ## 📷 Supported Cameras
 Compatible with PMCA cameras (Android 2.3.7 / API 10) including: **a5100, a6000, a6300, a6500, a7S II, a7R II, RX100 III/IV/V.**
