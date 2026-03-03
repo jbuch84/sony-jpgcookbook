@@ -12,6 +12,13 @@ set(WITH_SIMD ON CACHE BOOL "" FORCE)
 add_subdirectory(libjpeg-turbo)
 
 add_library(native-lib SHARED native-lib.cpp)
+
+# NEW: Tell the compiler where to find the auto-generated ghost files (jconfig.h)
+target_include_directories(native-lib PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/libjpeg-turbo
+    ${CMAKE_CURRENT_BINARY_DIR}/libjpeg-turbo
+)
+
 find_library(log-lib log)
 
 # 3. Link explicitly to "jpeg-static" (the internal name used by libjpeg-turbo)

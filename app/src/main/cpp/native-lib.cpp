@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <setjmp.h>
-#include "libjpeg-turbo/jpeglib.h"
+#include "jpeglib.h"
 #include <android/log.h>
 
 #define LOG_TAG "NDK_ENGINE"
