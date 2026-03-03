@@ -21,7 +21,6 @@ android {
         externalNativeBuild {
             cmake {
                 cppFlags "-O3 -mfpu=neon"
-                abiFilters "armeabi-v7a"
             }
         }
     }
