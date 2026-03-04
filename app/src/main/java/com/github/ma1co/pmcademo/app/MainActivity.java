@@ -1,6 +1,5 @@
 package com.github.ma1co.pmcademo.app;
 
-import com.jpgcookbook.sony.R;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.SharedPreferences;
