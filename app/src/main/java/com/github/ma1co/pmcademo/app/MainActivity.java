@@ -26,7 +26,8 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
-import android.widget.LinearLayout;
+import android.widget.TableLayout;
+import android.widget.TableRow;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import com.sony.scalar.hardware.CameraEx;
@@ -43,9 +44,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     // UI Elements
     private FrameLayout mainUIContainer;
     private ScrollView menuScrollView;
-    private LinearLayout menuContainer;
+    private TableLayout menuTable;
     private TextView tvBottomBar, tvTopStatus; 
-    private TextView[] menuItems = new TextView[10]; // Expanded for 10 items
+    private TextView[] menuLabels = new TextView[10]; // Left Column
+    private TextView[] menuValues = new TextView[10]; // Right Column
     
     // Playback Elements
     private FrameLayout playbackContainer;
@@ -151,21 +153,31 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         botParams.setMargins(0, 0, 0, 30);
         mainUIContainer.addView(tvBottomBar, botParams);
 
+        // THE TABULAR MENU
         menuScrollView = new ScrollView(this);
-        menuScrollView.setBackgroundColor(Color.argb(220, 20, 20, 20));
-        FrameLayout.LayoutParams scrollParams = new FrameLayout.LayoutParams(650, 350, Gravity.CENTER);
+        menuScrollView.setBackgroundColor(Color.argb(230, 15, 15, 15));
+        FrameLayout.LayoutParams scrollParams = new FrameLayout.LayoutParams(700, 350, Gravity.CENTER);
         
-        menuContainer = new LinearLayout(this);
-        menuContainer.setOrientation(LinearLayout.VERTICAL);
-        menuContainer.setPadding(40, 40, 40, 40);
-        menuScrollView.addView(menuContainer);
+        menuTable = new TableLayout(this);
+        menuTable.setColumnStretchable(1, true); // Pushes values to the far right edge
+        menuTable.setPadding(40, 40, 40, 40);
+        menuScrollView.addView(menuTable);
 
-        // Build 10 Menu Items
         for (int i = 0; i < 10; i++) {
-            menuItems[i] = new TextView(this);
-            menuItems[i].setTextSize(20);
-            menuItems[i].setPadding(0, 12, 0, 12);
-            menuContainer.addView(menuItems[i]);
+            TableRow row = new TableRow(this);
+            row.setPadding(0, 10, 0, 10);
+            
+            menuLabels[i] = new TextView(this);
+            menuLabels[i].setTextSize(20);
+            menuLabels[i].setPadding(0, 0, 40, 0); 
+            
+            menuValues[i] = new TextView(this);
+            menuValues[i].setTextSize(20);
+            menuValues[i].setGravity(Gravity.RIGHT);
+            
+            row.addView(menuLabels[i]);
+            row.addView(menuValues[i]);
+            menuTable.addView(row);
         }
         menuScrollView.setVisibility(View.GONE);
         rootLayout.addView(menuScrollView, scrollParams);
@@ -192,7 +204,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         renderMenu();
     }
 
-    // --- HIGH-QUALITY, ROTATION-AWARE PLAYBACK ---
     private void refreshPlaybackFiles() {
         playbackFiles.clear();
         File outDir = new File(Environment.getExternalStorageDirectory(), "GRADED");
@@ -282,7 +293,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         }
     }
 
-    // --- BULLETPROOF SD CARD SYNC ---
     private File getLutDir() {
         File lutDir = new File(Environment.getExternalStorageDirectory(), "LUTS");
         if (!lutDir.exists()) lutDir = new File("/storage/sdcard0/LUTS");
@@ -291,6 +301,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     }
 
     private void savePreferences() {
+        // Internal App Memory
         SharedPreferences.Editor editor = getSharedPreferences("RTL_PREFS", MODE_PRIVATE).edit();
         editor.putBoolean("has_saved", true);
         editor.putInt("qualityIndex", qualityIndex);
@@ -304,22 +315,36 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         }
         editor.commit(); 
 
+        // FAT32 8.3 FILENAME FIX applied here!
         try {
             File lutDir = getLutDir();
-            if (lutDir.exists()) {
-                File backupFile = new File(lutDir, "rtl_backup.txt");
-                BufferedWriter bw = new BufferedWriter(new FileWriter(backupFile));
-                bw.write("quality=" + qualityIndex + "\n");
-                bw.write("slot=" + currentSlot + "\n");
-                for(int i=0; i<10; i++) {
-                    bw.write(i + "," + recipeList.get(profiles[i].lutIndex) + "," + 
-                             profiles[i].opacity + "," + profiles[i].grain + "," + 
-                             profiles[i].rollOff + "," + profiles[i].vignette + "\n");
-                }
-                bw.flush();
-                bw.close();
+            if (!lutDir.exists()) lutDir.mkdirs(); 
+            
+            File backupFile = new File(lutDir, "RTLBAK.TXT");
+            if (!backupFile.exists()) backupFile.createNewFile();
+
+            FileOutputStream fos = new FileOutputStream(backupFile);
+            StringBuilder sb = new StringBuilder();
+            sb.append("quality=").append(qualityIndex).append("\n");
+            sb.append("slot=").append(currentSlot).append("\n");
+            for(int i=0; i<10; i++) {
+                sb.append(i).append(",")
+                  .append(recipeList.get(profiles[i].lutIndex)).append(",")
+                  .append(profiles[i].opacity).append(",")
+                  .append(profiles[i].grain).append(",")
+                  .append(profiles[i].rollOff).append(",")
+                  .append(profiles[i].vignette).append("\n");
             }
-        } catch (Exception e) {}
+            
+            fos.write(sb.toString().getBytes());
+            fos.flush();
+            fos.getFD().sync(); // Force physical write to SD Card
+            fos.close();
+            
+            sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(backupFile)));
+        } catch (Exception e) {
+            Log.e("COOKBOOK", "Failed to save TXT: " + e.getMessage());
+        }
     }
 
     private void loadPreferences() {
@@ -327,7 +352,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         boolean hasSaved = prefs.getBoolean("has_saved", false);
         
         File lutDir = getLutDir();
-        File backupFile = new File(lutDir, "rtl_backup.txt");
+        // FAT32 8.3 FILENAME FIX applied here!
+        File backupFile = new File(lutDir, "RTLBAK.TXT");
 
         if (!hasSaved && backupFile.exists()) {
             try {
@@ -343,7 +369,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                             String lutName = parts[1];
                             int foundIndex = recipeList.indexOf(lutName);
                             profiles[idx].lutIndex = (foundIndex != -1) ? foundIndex : 0;
-                            // Math.min forces old 0-100 values to safely cap at 5
                             profiles[idx].opacity = Math.min(5, Integer.parseInt(parts[2]));
                             profiles[idx].grain = Math.min(5, Integer.parseInt(parts[3]));
                             profiles[idx].rollOff = Math.min(5, Integer.parseInt(parts[4]));
@@ -371,7 +396,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     }
 
     @Override public boolean onKeyUp(int keyCode, KeyEvent event) {
-        if (event.getScanCode() == ScalarInput.ISV_KEY_PLAY) return true; // Stop Sony Gallery
+        if (event.getScanCode() == ScalarInput.ISV_KEY_PLAY) return true; 
         return super.onKeyUp(keyCode, event);
     }
 
@@ -395,14 +420,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             } else {
                 menuScrollView.setVisibility(View.GONE);
                 mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE);
-                savePreferences();
+                savePreferences(); // Pushes data to RTLBAK.TXT here
                 triggerLutPreload();
                 updateMainHUD();
             }
             return true;
         }
 
-        // ISV_KEY_ENTER for toggling review or clean screen
         if (sc == ScalarInput.ISV_KEY_ENTER) {
             if(!isMenuOpen) {
                 if (mDialMode == DialMode.review) {
@@ -458,30 +482,29 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         String[] qLabels = {"PROXY (1.5MP)", "HIGH (6MP)", "ULTRA (24MP)"};
         String lutName = recipeList.get(p.lutIndex).split("\\.")[0].toUpperCase();
 
-        menuItems[0].setText("Global Quality: < " + qLabels[qualityIndex] + " >");
-        menuItems[1].setText("RTL Slot: < " + (currentSlot + 1) + " >");
-        menuItems[2].setText("LUT: < " + lutName + " >");
-        menuItems[3].setText("Opacity: < " + p.opacity + " >");
-        menuItems[4].setText("Grain: < " + p.grain + " >");
-        menuItems[5].setText("Highlight Roll: < " + p.rollOff + " >");
-        menuItems[6].setText("Vignette: < " + p.vignette + " >");
-        
-        // PLACEHOLDERS RESTORED
-        menuItems[7].setText("[LOCKED] W.Bal: < " + p.whiteBalance + " >");
-        menuItems[8].setText("[LOCKED] WB Shift: < " + p.wbShift + " >");
-        menuItems[9].setText("[LOCKED] DRO: < " + p.dro + " >");
+        // TABULAR BINDING
+        menuLabels[0].setText("Global Quality");  menuValues[0].setText("< " + qLabels[qualityIndex] + " >");
+        menuLabels[1].setText("RTL Slot");        menuValues[1].setText("< " + (currentSlot + 1) + " >");
+        menuLabels[2].setText("LUT");             menuValues[2].setText("< " + lutName + " >");
+        menuLabels[3].setText("Opacity");         menuValues[3].setText("< " + p.opacity + " >");
+        menuLabels[4].setText("Grain");           menuValues[4].setText("< " + p.grain + " >");
+        menuLabels[5].setText("Highlight Roll");  menuValues[5].setText("< " + p.rollOff + " >");
+        menuLabels[6].setText("Vignette");        menuValues[6].setText("< " + p.vignette + " >");
+        menuLabels[7].setText("[LOCKED] W.Bal");  menuValues[7].setText("< " + p.whiteBalance + " >");
+        menuLabels[8].setText("[LOCKED] WB Shift");menuValues[8].setText("< " + p.wbShift + " >");
+        menuLabels[9].setText("[LOCKED] DRO");    menuValues[9].setText("< " + p.dro + " >");
 
         for (int i = 0; i < 10; i++) {
-            menuItems[i].setTextColor(i == menuSelection ? Color.GREEN : (i > 6 ? Color.DKGRAY : Color.WHITE));
+            menuLabels[i].setTextColor(i == menuSelection ? Color.GREEN : (i > 6 ? Color.DKGRAY : Color.WHITE));
+            menuValues[i].setTextColor(i == menuSelection ? Color.GREEN : (i > 6 ? Color.DKGRAY : Color.WHITE));
         }
 
-        // PERFECT AUTO-CENTERING SCROLL LOGIC
         menuScrollView.post(new Runnable() {
             @Override
             public void run() {
-                if (menuItems[menuSelection] != null) {
-                    int targetTop = menuItems[menuSelection].getTop();
-                    int itemHeight = menuItems[menuSelection].getHeight();
+                if (menuLabels[menuSelection] != null) {
+                    int targetTop = ((View)menuLabels[menuSelection].getParent()).getTop();
+                    int itemHeight = ((View)menuLabels[menuSelection].getParent()).getHeight();
                     int scrollHeight = menuScrollView.getHeight();
                     int scrollY = targetTop - (scrollHeight / 2) + (itemHeight / 2);
                     menuScrollView.smoothScrollTo(0, Math.max(0, scrollY));
