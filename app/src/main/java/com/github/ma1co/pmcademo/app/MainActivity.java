@@ -4,6 +4,8 @@ import com.jpgcookbook.sony.R;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.hardware.Camera;
 import android.net.Uri;
@@ -21,6 +23,7 @@ import android.view.SurfaceView;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -42,11 +45,20 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private TextView tvBottomBar, tvTopStatus; 
     private TextView[] menuItems = new TextView[7];
     
+    // IN-APP PLAYBACK ELEMENTS
+    private FrameLayout playbackContainer;
+    private ImageView playbackImageView;
+    private TextView tvPlaybackInfo;
+    private List<File> playbackFiles = new ArrayList<File>();
+    private int playbackIndex = 0;
+    private Bitmap currentPlaybackBitmap = null;
+    
     // State & Engine
     private boolean isProcessing = false;
     private boolean isReady = false; 
     private boolean isMenuOpen = false;
-    private int displayState = 0; // 0 = Standard, 1 = Clean Screen
+    private boolean isPlaybackMode = false;
+    private int displayState = 0; 
     
     private LutEngine mEngine = new LutEngine();
     private PreloadLutTask currentPreloadTask = null; 
@@ -57,7 +69,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private long lastNewestFileTime = 0;
     private ArrayList<String> recipeList = new ArrayList<String>();
 
-    // --- REAL TIME LOOKS (RTL) DATA STRUCTURE ---
     class RTLProfile {
         int lutIndex = 0;
         int opacity = 100;
@@ -67,8 +78,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     }
     
     private RTLProfile[] profiles = new RTLProfile[10];
-    private int currentSlot = 0; // 0 to 9
-    private int qualityIndex = 1; // 0=Proxy, 1=High, 2=Ultra
+    private int currentSlot = 0; 
+    private int qualityIndex = 1; 
     private int menuSelection = 0; 
 
     public enum DialMode { rtl, shutter, aperture, iso, exposure }
@@ -133,7 +144,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         botParams.setMargins(0, 0, 0, 30);
         mainUIContainer.addView(tvBottomBar, botParams);
 
-        // Menu Overlay
+        // Menu Overlay 
         menuScrollView = new ScrollView(this);
         menuScrollView.setBackgroundColor(Color.argb(220, 20, 20, 20));
         FrameLayout.LayoutParams scrollParams = new FrameLayout.LayoutParams(600, 350, Gravity.CENTER);
@@ -152,8 +163,100 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         menuScrollView.setVisibility(View.GONE);
         rootLayout.addView(menuScrollView, scrollParams);
         
+        // Custom Playback Engine Overlay
+        playbackContainer = new FrameLayout(this);
+        playbackContainer.setBackgroundColor(Color.BLACK);
+        playbackContainer.setVisibility(View.GONE);
+        
+        playbackImageView = new ImageView(this);
+        playbackImageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        playbackContainer.addView(playbackImageView, new FrameLayout.LayoutParams(-1, -1));
+        
+        tvPlaybackInfo = new TextView(this);
+        tvPlaybackInfo.setTextColor(Color.WHITE);
+        tvPlaybackInfo.setTextSize(18);
+        tvPlaybackInfo.setShadowLayer(3, 0, 0, Color.BLACK);
+        FrameLayout.LayoutParams pbInfoParams = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.RIGHT);
+        pbInfoParams.setMargins(0, 30, 30, 0);
+        playbackContainer.addView(tvPlaybackInfo, pbInfoParams);
+        
+        rootLayout.addView(playbackContainer, new FrameLayout.LayoutParams(-1, -1));
+
         updateMainHUD();
         renderMenu();
+    }
+
+    // --- IN-APP PLAYBACK LOGIC ---
+    private void refreshPlaybackFiles() {
+        playbackFiles.clear();
+        File outDir = new File(Environment.getExternalStorageDirectory(), "GRADED");
+        if (outDir.exists()) {
+            File[] files = outDir.listFiles();
+            if (files != null) {
+                for (File f : files) {
+                    if (f.getName().toUpperCase().endsWith(".JPG")) playbackFiles.add(f);
+                }
+            }
+        }
+        // Sort descending so the newest photo is first (Index 0)
+        java.util.Collections.sort(playbackFiles, new java.util.Comparator<File>() {
+            public int compare(File f1, File f2) {
+                return Long.valueOf(f2.lastModified()).compareTo(f1.lastModified());
+            }
+        });
+    }
+
+    private void showPlaybackImage(int index) {
+        if (playbackFiles.isEmpty()) {
+            tvPlaybackInfo.setText("NO GRADED PHOTOS");
+            return;
+        }
+        if (index < 0) index = 0;
+        if (index >= playbackFiles.size()) index = playbackFiles.size() - 1;
+        playbackIndex = index;
+        
+        File imgFile = playbackFiles.get(playbackIndex);
+        
+        // Memory safety: Free old image before loading new one
+        if (currentPlaybackBitmap != null && !currentPlaybackBitmap.isRecycled()) {
+            playbackImageView.setImageBitmap(null);
+            currentPlaybackBitmap.recycle();
+            currentPlaybackBitmap = null;
+        }
+        
+        // Read dimensions first
+        BitmapFactory.Options options = new BitmapFactory.Options();
+        options.inJustDecodeBounds = true;
+        BitmapFactory.decodeFile(imgFile.getAbsolutePath(), options);
+        
+        // Calculate safe down-sampling scale for the camera's VGA display
+        int scale = 1;
+        while (options.outWidth / scale / 2 >= 640 && options.outHeight / scale / 2 >= 480) {
+            scale *= 2;
+        }
+        
+        options.inJustDecodeBounds = false;
+        options.inSampleSize = scale;
+        
+        try {
+            currentPlaybackBitmap = BitmapFactory.decodeFile(imgFile.getAbsolutePath(), options);
+            playbackImageView.setImageBitmap(currentPlaybackBitmap);
+            tvPlaybackInfo.setText((playbackIndex + 1) + " / " + playbackFiles.size() + "\n" + imgFile.getName());
+        } catch (OutOfMemoryError e) {
+            tvPlaybackInfo.setText("MEMORY ERROR");
+        }
+    }
+
+    private void exitPlayback() {
+        playbackContainer.setVisibility(View.GONE);
+        mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE);
+        isPlaybackMode = false;
+        
+        if (currentPlaybackBitmap != null && !currentPlaybackBitmap.isRecycled()) {
+            playbackImageView.setImageBitmap(null);
+            currentPlaybackBitmap.recycle();
+            currentPlaybackBitmap = null;
+        }
     }
 
     private void savePreferences() {
@@ -185,10 +288,39 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         }
     }
 
+    // Prevent Sony OS from stealing the Playback button press
+    @Override public boolean onKeyUp(int keyCode, KeyEvent event) {
+        if (event.getScanCode() == ScalarInput.ISV_KEY_PLAY) return true;
+        return super.onKeyUp(keyCode, event);
+    }
+
     @Override public boolean onKeyDown(int keyCode, KeyEvent event) {
         int sc = event.getScanCode();
         if (sc == ScalarInput.ISV_KEY_DELETE) { finish(); return true; }
         
+        // INTERCEPT PHYSICAL PLAY BUTTON
+        if (sc == ScalarInput.ISV_KEY_PLAY) {
+            if (!isPlaybackMode) {
+                isPlaybackMode = true;
+                refreshPlaybackFiles();
+                playbackContainer.setVisibility(View.VISIBLE);
+                mainUIContainer.setVisibility(View.GONE);
+                menuScrollView.setVisibility(View.GONE);
+                showPlaybackImage(0); // Show newest
+            } else {
+                exitPlayback();
+            }
+            return true;
+        }
+
+        if (isPlaybackMode) {
+            // PLAYBACK NAVIGATION
+            if (sc == ScalarInput.ISV_KEY_LEFT || sc == ScalarInput.ISV_DIAL_1_COUNTERCW) { showPlaybackImage(playbackIndex + 1); return true; }
+            if (sc == ScalarInput.ISV_KEY_RIGHT || sc == ScalarInput.ISV_DIAL_1_CLOCKWISE) { showPlaybackImage(playbackIndex - 1); return true; }
+            if (sc == ScalarInput.ISV_KEY_ENTER || sc == ScalarInput.ISV_KEY_MENU) { exitPlayback(); return true; }
+            return true; // Consume other keys so they don't break playback
+        }
+
         // OPEN/CLOSE MENU
         if (sc == ScalarInput.ISV_KEY_MENU) {
             isMenuOpen = !isMenuOpen;
@@ -206,7 +338,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             return true;
         }
 
-        // TOGGLE CLEAN SCREEN (Mapped to Center 'ENTER' button)
+        // TOGGLE CLEAN SCREEN
         if (sc == ScalarInput.ISV_KEY_ENTER) {
             if(!isMenuOpen) {
                 displayState = (displayState == 0) ? 1 : 0;
@@ -217,18 +349,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
         if (!isProcessing) {
             if (isMenuOpen) {
-                // NAVIGATE MENU
                 if (sc == ScalarInput.ISV_KEY_UP) { menuSelection = (menuSelection - 1 + 7) % 7; renderMenu(); return true; }
                 if (sc == ScalarInput.ISV_KEY_DOWN) { menuSelection = (menuSelection + 1) % 7; renderMenu(); return true; }
                 if (sc == ScalarInput.ISV_KEY_LEFT || sc == ScalarInput.ISV_DIAL_1_COUNTERCW) { handleMenuChange(-1); return true; }
                 if (sc == ScalarInput.ISV_KEY_RIGHT || sc == ScalarInput.ISV_DIAL_1_CLOCKWISE) { handleMenuChange(1); return true; }
             } else {
-                // INTUITIVE MAIN SCREEN NAVIGATION
-                // Left/Right toggles the active text horizontally
                 if (sc == ScalarInput.ISV_KEY_LEFT) { cycleMode(-1); return true; }
                 if (sc == ScalarInput.ISV_KEY_RIGHT) { cycleMode(1); return true; }
-                
-                // Up/Down/Dial changes the value of the active item
                 if (sc == ScalarInput.ISV_KEY_UP || sc == ScalarInput.ISV_DIAL_1_CLOCKWISE) { handleInput(1); return true; }
                 if (sc == ScalarInput.ISV_KEY_DOWN || sc == ScalarInput.ISV_DIAL_1_COUNTERCW) { handleInput(-1); return true; }
             }
