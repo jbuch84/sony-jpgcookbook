@@ -29,12 +29,11 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.content.Context;
+import java.lang.reflect.Method;
+import java.lang.reflect.Field;
 
-// SONY SCALAR & AF HUD IMPORTS
 import com.sony.scalar.hardware.CameraEx;
 import com.sony.scalar.sysutil.ScalarInput;
-import com.sony.scalar.sysutil.ScalarWebAPI;
-import com.sony.scalar.sysutil.FocusArea;
 
 import java.io.*;
 import java.util.ArrayList;
@@ -403,6 +402,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     @Override public boolean onKeyDown(int keyCode, KeyEvent event) {
         int sc = event.getScanCode();
         
+        // IMMERSIVE MODE: Hide UI on Half-Press
+        if (sc == ScalarInput.ISV_KEY_S1_1) {
+            if (displayState == 0 && !isMenuOpen && !isPlaybackMode) {
+                tvTopStatus.setVisibility(View.GONE);
+                tvBottomBar.setVisibility(View.GONE);
+            }
+            return super.onKeyDown(keyCode, event);
+        }
+
         if (sc == ScalarInput.ISV_KEY_DELETE) { 
             finish(); 
             return true; 
@@ -458,6 +466,19 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             }
         }
         return super.onKeyDown(keyCode, event);
+    }
+
+    @Override public boolean onKeyUp(int keyCode, KeyEvent event) {
+        int sc = event.getScanCode();
+        
+        // IMMERSIVE MODE: Restore UI on Half-Press Release
+        if (sc == ScalarInput.ISV_KEY_S1_1) {
+            if (displayState == 0 && !isMenuOpen && !isPlaybackMode) {
+                tvTopStatus.setVisibility(View.VISIBLE);
+                tvBottomBar.setVisibility(View.VISIBLE);
+            }
+        }
+        return super.onKeyUp(keyCode, event);
     }
 
     private void handleMenuChange(int dir) {
@@ -715,11 +736,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
 
     // =========================================================================
-    // CUSTOM AF HUD OVERLAY
+    // CUSTOM AF HUD OVERLAY (BYPASSING COMPILER WITH REFLECTION)
     // =========================================================================
     private class FocusOverlayView extends View {
         private Paint greenPaint;
         private boolean isPolling = false;
+        private Object scalarInstance = null;
+        private Method getIntMethod = null;
+        private Method getFocusAreasMethod = null;
+        private Field xField, yField, rightField, bottomField;
 
         public FocusOverlayView(Context context) {
             super(context);
@@ -728,10 +753,33 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             greenPaint.setStyle(Paint.Style.STROKE);
             greenPaint.setStrokeWidth(6);
             greenPaint.setAntiAlias(true);
+
+            // Reflection: Setup the Scalar hooks without causing build errors
+            try {
+                Class<?> scalarClass = Class.forName("com.sony.scalar.sysutil.ScalarWebAPI");
+                Class<?> focusClass = Class.forName("com.sony.scalar.sysutil.FocusArea");
+                
+                // Usually it's getInstance(), but could be a constructor. We try both.
+                try {
+                    Method getInstance = scalarClass.getMethod("getInstance", Context.class);
+                    scalarInstance = getInstance.invoke(null, context);
+                } catch (Exception e) {
+                    scalarInstance = scalarClass.getConstructor(Context.class).newInstance(context);
+                }
+
+                getIntMethod = scalarClass.getMethod("getInt", String.class);
+                getFocusAreasMethod = scalarClass.getMethod("getFocusAreas");
+
+                xField = focusClass.getField("x");
+                yField = focusClass.getField("y");
+                rightField = focusClass.getField("right");
+                bottomField = focusClass.getField("bottom");
+
+            } catch (Exception e) {}
         }
 
         public void startPolling() {
-            if (!isPolling) {
+            if (!isPolling && scalarInstance != null) {
                 isPolling = true;
                 invalidate(); 
             }
@@ -744,37 +792,37 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         @Override
         protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);
-            if (!isPolling) return;
+            if (!isPolling || scalarInstance == null) return;
 
             try {
-                // Correctly instantiating the Scalar API object
-                ScalarWebAPI scalar = new ScalarWebAPI(getContext());
+                int afStatus = (Integer) getIntMethod.invoke(scalarInstance, "afStatus");
                 
-                if (scalar.getInt("afStatus") == 1) { 
-                    FocusArea[] areas = scalar.getFocusAreas();
+                if (afStatus == 1) { 
+                    Object[] areas = (Object[]) getFocusAreasMethod.invoke(scalarInstance);
                     if (areas != null) {
-                        for (FocusArea area : areas) {
+                        for (Object area : areas) {
                             
-                            float left = area.x;
-                            float top = area.y;
-                            float right = area.right;
-                            float bottom = area.bottom;
+                            float left = xField.getInt(area);
+                            float top = yField.getInt(area);
+                            float right = rightField.getInt(area);
+                            float bottom = bottomField.getInt(area);
 
+                            // Dynamic Math for different camera sensor return values
                             if (right <= 100 && bottom <= 100) { 
-                                left = (area.x / 100f) * getWidth();
-                                top = (area.y / 100f) * getHeight();
-                                right = (area.right / 100f) * getWidth();
-                                bottom = (area.bottom / 100f) * getHeight();
+                                left = (left / 100f) * getWidth();
+                                top = (top / 100f) * getHeight();
+                                right = (right / 100f) * getWidth();
+                                bottom = (bottom / 100f) * getHeight();
                             } else if (right <= 1000 && bottom <= 1000) { 
-                                left = (area.x / 1000f) * getWidth();
-                                top = (area.y / 1000f) * getHeight();
-                                right = (area.right / 1000f) * getWidth();
-                                bottom = (area.bottom / 1000f) * getHeight();
+                                left = (left / 1000f) * getWidth();
+                                top = (top / 1000f) * getHeight();
+                                right = (right / 1000f) * getWidth();
+                                bottom = (bottom / 1000f) * getHeight();
                             } else if (right > 1000) { 
-                                left = (area.x / 6000f) * getWidth();
-                                top = (area.y / 4000f) * getHeight();
-                                right = (area.right / 6000f) * getWidth();
-                                bottom = (area.bottom / 4000f) * getHeight();
+                                left = (left / 6000f) * getWidth();
+                                top = (top / 4000f) * getHeight();
+                                right = (right / 6000f) * getWidth();
+                                bottom = (bottom / 4000f) * getHeight();
                             }
 
                             canvas.drawRect(left, top, right, bottom, greenPaint);
