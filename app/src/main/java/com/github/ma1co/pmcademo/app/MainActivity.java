@@ -16,6 +16,7 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.os.FileObserver;
 import android.text.Html;
+import android.util.Log;
 import android.util.Pair;
 import android.view.Gravity;
 import android.view.KeyEvent;
@@ -27,6 +28,8 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.content.Context;
+import java.lang.reflect.Method;
+import java.lang.reflect.Field;
 
 import com.sony.scalar.hardware.CameraEx;
 import com.sony.scalar.sysutil.ScalarInput;
@@ -390,23 +393,98 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         }
     }
 
+    // =========================================================================
+    // THE DIAGNOSTIC PROBE
+    // =========================================================================
+    private void runAfDiagnostics() {
+        Log.i("COOKBOOK_AF_DIAG", "--- STARTING AF DIAGNOSTICS ---");
+
+        // TEST 1: Standard Android Camera API Parameters
+        try {
+            if (mCamera != null) {
+                Camera.Parameters params = mCamera.getParameters();
+                Log.i("COOKBOOK_AF_DIAG", "Test 1: Standard Android Parameters");
+                Log.i("COOKBOOK_AF_DIAG", "FocusMode: " + params.getFocusMode());
+                if (params.getMaxNumFocusAreas() > 0) {
+                    List<Camera.Area> focusAreas = params.getFocusAreas();
+                    if (focusAreas != null) {
+                        Log.i("COOKBOOK_AF_DIAG", "FocusAreas found: " + focusAreas.size());
+                        for (Camera.Area a : focusAreas) {
+                            Log.i("COOKBOOK_AF_DIAG", "Area: " + a.rect.toString() + " weight: " + a.weight);
+                        }
+                    } else {
+                        Log.i("COOKBOOK_AF_DIAG", "FocusAreas supported but returned null.");
+                    }
+                } else {
+                    Log.i("COOKBOOK_AF_DIAG", "MaxNumFocusAreas is 0 (Not supported by standard API).");
+                }
+            }
+        } catch (Throwable t) {
+            Log.e("COOKBOOK_AF_DIAG", "Test 1 Failed: " + t.getMessage());
+        }
+
+        // TEST 2: Standard AutoFocus Callback
+        try {
+            if (mCamera != null) {
+                Log.i("COOKBOOK_AF_DIAG", "Test 2: Requesting Standard autoFocus callback");
+                mCamera.autoFocus(new Camera.AutoFocusCallback() {
+                    @Override
+                    public void onAutoFocus(boolean success, Camera camera) {
+                        Log.i("COOKBOOK_AF_DIAG", "Standard AF Callback Result: " + success);
+                    }
+                });
+            }
+        } catch (Throwable t) {
+            Log.e("COOKBOOK_AF_DIAG", "Test 2 Failed: " + t.getMessage());
+        }
+
+        // TEST 3: Sony FocusController Reflection
+        try {
+            Log.i("COOKBOOK_AF_DIAG", "Test 3: Checking com.sony.scalar.sysutil.FocusController");
+            Class<?> fcClass = Class.forName("com.sony.scalar.sysutil.FocusController");
+            Log.i("COOKBOOK_AF_DIAG", "FocusController class found!");
+            Method[] methods = fcClass.getDeclaredMethods();
+            for (Method m : methods) {
+                if (m.getName().toLowerCase().contains("af") || m.getName().toLowerCase().contains("focus")) {
+                    Log.i("COOKBOOK_AF_DIAG", "Found method: " + m.getName());
+                }
+            }
+        } catch (Throwable t) {
+            Log.e("COOKBOOK_AF_DIAG", "Test 3 Failed (Class not found): " + t.getMessage());
+        }
+
+        // TEST 4: CameraEx.ParametersModifier AF Methods
+        try {
+            Log.i("COOKBOOK_AF_DIAG", "Test 4: Checking CameraEx.ParametersModifier for AF methods");
+            if (mCameraEx != null && mCamera != null) {
+                CameraEx.ParametersModifier pm = mCameraEx.createParametersModifier(mCamera.getParameters());
+                Method[] methods = pm.getClass().getDeclaredMethods();
+                for (Method m : methods) {
+                    if (m.getName().toLowerCase().contains("focus") || m.getName().toLowerCase().contains("af")) {
+                        Log.i("COOKBOOK_AF_DIAG", "Found modifier method: " + m.getName());
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            Log.e("COOKBOOK_AF_DIAG", "Test 4 Failed: " + t.getMessage());
+        }
+
+        Log.i("COOKBOOK_AF_DIAG", "--- END AF DIAGNOSTICS ---");
+    }
+
     @Override public boolean onKeyDown(int keyCode, KeyEvent event) {
         int sc = event.getScanCode();
         
-        // -------------------------------------------------------------
-        // IMMERSIVE MODE (HALF-PRESS): Hides UI, lets hardware focus
-        // -------------------------------------------------------------
-        if (sc == ScalarInput.ISV_KEY_S1_1) {
+        // IMMERSIVE MODE & AF PROBE (HALF-PRESS)
+        if (sc == ScalarInput.ISV_KEY_S1_1 && event.getRepeatCount() == 0) {
             if (displayState == 0 && !isMenuOpen && !isPlaybackMode) {
                 tvTopStatus.setVisibility(View.GONE);
                 tvBottomBar.setVisibility(View.GONE);
             }
-            // DO NOT return true. We must pass this to the hardware!
-            return super.onKeyDown(keyCode, event);
-        }
-
-        // FULL-PRESS: Let hardware take the photo via startDirectShutter
-        if (sc == ScalarInput.ISV_KEY_S1_2) {
+            
+            // FIRE THE PROBE!
+            runAfDiagnostics();
+            
             return super.onKeyDown(keyCode, event);
         }
 
@@ -470,11 +548,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     @Override public boolean onKeyUp(int keyCode, KeyEvent event) {
         int sc = event.getScanCode();
         
-        // IMMERSIVE MODE: Restore UI on Half-Press Release
+        // IMMERSIVE MODE (HALF-PRESS RELEASE)
         if (sc == ScalarInput.ISV_KEY_S1_1) {
             if (displayState == 0 && !isMenuOpen && !isPlaybackMode) {
                 tvTopStatus.setVisibility(View.VISIBLE);
                 tvBottomBar.setVisibility(View.VISIBLE);
+            }
+            if (mCamera != null) {
+                try { mCamera.cancelAutoFocus(); } catch (Exception e) {}
             }
             return super.onKeyUp(keyCode, event);
         }
