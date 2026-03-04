@@ -32,8 +32,7 @@ import android.widget.TextView;
 import android.content.Context;
 import java.lang.reflect.Method;
 import java.lang.reflect.Field;
-import java.lang.reflect.InvocationHandler;
-import java.lang.reflect.Proxy;
+import java.lang.reflect.Constructor;
 import java.util.List;
 
 import com.sony.scalar.hardware.CameraEx;
@@ -76,7 +75,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private boolean isPolling = false;
     private long lastNewestFileTime = 0;
     
-    private FocusOverlayView afOverlay;
+    private FocusReticleView afReticle;
 
     private ArrayList<String> recipePaths = new ArrayList<String>();
     private ArrayList<String> recipeNames = new ArrayList<String>();
@@ -158,8 +157,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         botParams.setMargins(0, 0, 0, 30);
         mainUIContainer.addView(tvBottomBar, botParams);
 
-        afOverlay = new FocusOverlayView(this);
-        mainUIContainer.addView(afOverlay, new FrameLayout.LayoutParams(-1, -1));
+        afReticle = new FocusReticleView(this);
+        mainUIContainer.addView(afReticle, new FrameLayout.LayoutParams(-1, -1));
 
         menuContainer = new LinearLayout(this);
         menuContainer.setOrientation(LinearLayout.VERTICAL);
@@ -212,6 +211,50 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
         updateMainHUD();
         renderMenu();
+    }
+
+    // =========================================================================
+    // THE OPENMEMORIES IPC PROBE (TESTING SCALARWEBAPI)
+    // =========================================================================
+    private void testIpcTheory() {
+        Log.i("COOKBOOK_AF_IPC", "=== STARTING OPENMEMORIES IPC TEST ===");
+        try {
+            Log.i("COOKBOOK_AF_IPC", "Test 1: Checking for ScalarWebAPI class...");
+            Class<?> scalarClass = Class.forName("com.sony.scalar.sysutil.ScalarWebAPI");
+            Log.i("COOKBOOK_AF_IPC", "SUCCESS: ScalarWebAPI class found!");
+
+            Log.i("COOKBOOK_AF_IPC", "Test 2: Attempting to get Instance...");
+            Method getInstance = scalarClass.getMethod("getInstance", Context.class);
+            Object scalarInstance = getInstance.invoke(null, getApplicationContext());
+            Log.i("COOKBOOK_AF_IPC", "SUCCESS: Instance retrieved! Connection to Daemon established.");
+
+            Log.i("COOKBOOK_AF_IPC", "Test 3: Reading afStatus...");
+            Method getInt = scalarClass.getMethod("getInt", String.class);
+            int afStatus = (Integer) getInt.invoke(scalarInstance, "afStatus");
+            Log.i("COOKBOOK_AF_IPC", "SUCCESS: afStatus = " + afStatus);
+
+            Log.i("COOKBOOK_AF_IPC", "Test 4: Reading isoSensitivity...");
+            int iso = (Integer) getInt.invoke(scalarInstance, "isoSensitivity");
+            Log.i("COOKBOOK_AF_IPC", "SUCCESS: isoSensitivity = " + iso);
+
+            Log.i("COOKBOOK_AF_IPC", "Test 5: Getting Focus Areas...");
+            Method getFocusAreas = scalarClass.getMethod("getFocusAreas");
+            Object[] areas = (Object[]) getFocusAreas.invoke(scalarInstance);
+            if (areas != null) {
+                Log.i("COOKBOOK_AF_IPC", "SUCCESS: Found " + areas.length + " focus areas via IPC!");
+            } else {
+                Log.i("COOKBOOK_AF_IPC", "SUCCESS: Method called, but returned null.");
+            }
+
+        } catch (ClassNotFoundException e) {
+            Log.e("COOKBOOK_AF_IPC", "FAILED: ScalarWebAPI Class NOT FOUND in this ClassLoader.");
+        } catch (NoSuchMethodException e) {
+            Log.e("COOKBOOK_AF_IPC", "FAILED: Method not found - " + e.getMessage());
+        } catch (Exception e) {
+            Log.e("COOKBOOK_AF_IPC", "FAILED: " + e.toString());
+            if (e.getCause() != null) Log.e("COOKBOOK_AF_IPC", "Cause: " + e.getCause().toString());
+        }
+        Log.i("COOKBOOK_AF_IPC", "=== END OPENMEMORIES IPC TEST ===");
     }
 
     private void refreshPlaybackFiles() {
@@ -405,14 +448,39 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     @Override public boolean onKeyDown(int keyCode, KeyEvent event) {
         int sc = event.getScanCode();
         
-        // IMMERSIVE MODE & SHUTTER OVERRIDE
-        if (sc == ScalarInput.ISV_KEY_S1_1) {
+        // -------------------------------------------------------------
+        // IMMERSIVE MODE, IPC TEST, & AF RETICLE
+        // -------------------------------------------------------------
+        if (sc == ScalarInput.ISV_KEY_S1_1 && event.getRepeatCount() == 0) {
+            
+            // FIRE THE IPC THEORY PROBE
+            testIpcTheory();
+
+            // Hide UI
             if (displayState == 0 && !isMenuOpen && !isPlaybackMode) {
                 tvTopStatus.setVisibility(View.GONE);
                 tvBottomBar.setVisibility(View.GONE);
             }
-            if (afOverlay != null) { afOverlay.triggerManualUpdate(); }
-            return super.onKeyDown(keyCode, event); // Pass through to AF hardware
+            
+            // Set reticle to Yellow (Searching) and trigger standard focus
+            afReticle.setState(FocusReticleView.State.SEARCHING);
+            if (mCamera != null) {
+                try {
+                    mCamera.autoFocus(new Camera.AutoFocusCallback() {
+                        @Override
+                        public void onAutoFocus(boolean success, Camera camera) {
+                            if (success) afReticle.setState(FocusReticleView.State.LOCKED);
+                            else afReticle.setState(FocusReticleView.State.FAILED);
+                        }
+                    });
+                } catch (Exception e) { afReticle.setState(FocusReticleView.State.IDLE); }
+            }
+            
+            return super.onKeyDown(keyCode, event);
+        }
+
+        if (sc == ScalarInput.ISV_KEY_S1_2) {
+            return super.onKeyDown(keyCode, event); // Pass through to startDirectShutter
         }
 
         if (sc == ScalarInput.ISV_KEY_DELETE) { 
@@ -475,13 +543,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     @Override public boolean onKeyUp(int keyCode, KeyEvent event) {
         int sc = event.getScanCode();
         
-        // RESTORE IMMERSIVE MODE & CLEAR BOXES
+        // RESTORE IMMERSIVE MODE & RETICLE RESET (HALF-PRESS RELEASE)
         if (sc == ScalarInput.ISV_KEY_S1_1) {
             if (displayState == 0 && !isMenuOpen && !isPlaybackMode) {
                 tvTopStatus.setVisibility(View.VISIBLE);
                 tvBottomBar.setVisibility(View.VISIBLE);
             }
-            if (afOverlay != null) { afOverlay.clearBoxes(); }
+            afReticle.setState(FocusReticleView.State.IDLE);
+            if (mCamera != null) {
+                try { mCamera.cancelAutoFocus(); } catch (Exception e) {}
+            }
             return super.onKeyUp(keyCode, event);
         }
         return super.onKeyUp(keyCode, event);
@@ -703,7 +774,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         if (mCameraEx == null && hasSurface) {
             try { 
                 mCameraEx = CameraEx.open(0, null); mCamera = mCameraEx.getNormalCamera();
-                mCameraEx.startDirectShutter();
+                mCameraEx.startDirectShutter(); 
                 CameraEx.AutoPictureReviewControl apr = new CameraEx.AutoPictureReviewControl();
                 mCameraEx.setAutoPictureReviewControl(apr); apr.setPictureReviewTime(0);
                 mCamera.setPreviewDisplay(mSurfaceView.getHolder()); mCamera.startPreview(); 
@@ -738,134 +809,63 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
 
     // =========================================================================
-    // SONY NOTIFICATION MANAGER PROXY
+    // CUSTOM AF HUD OVERLAY (CENTER RETICLE)
     // =========================================================================
-    private class FocusOverlayView extends View {
-        private Paint greenPaint;
-        private List<Object> currentRects = new ArrayList<Object>();
-        
-        private Object proxyListener;
-        private Method getFocusAreaInfosMethod;
-        private Field rectListField, leftField, topField, rightField, bottomField;
+    private class FocusReticleView extends View {
+        private Paint paint;
+        public enum State { IDLE, SEARCHING, LOCKED, FAILED }
+        private State currentState = State.IDLE;
 
-        public FocusOverlayView(Context context) {
+        public FocusReticleView(Context context) {
             super(context);
-            greenPaint = new Paint();
-            greenPaint.setColor(Color.GREEN);
-            greenPaint.setStyle(Paint.Style.STROKE);
-            greenPaint.setStrokeWidth(6);
-            greenPaint.setAntiAlias(true);
-
-            try {
-                // Setup the reflection fields we will need to extract the rect data later
-                Class<?> cameraExClass = Class.forName("com.sony.scalar.hardware.CameraEx");
-                getFocusAreaInfosMethod = cameraExClass.getMethod("getFocusAreaInfos");
-                
-                Class<?> infosClass = Class.forName("com.sony.scalar.hardware.CameraEx$FocusAreaInfos");
-                rectListField = infosClass.getField("focusAreaRectInfoList");
-
-                Class<?> rectClass = Class.forName("com.sony.scalar.hardware.CameraEx$FocusAreaRectInfo");
-                leftField = rectClass.getField("left");
-                topField = rectClass.getField("top");
-                rightField = rectClass.getField("right");
-                bottomField = rectClass.getField("bottom");
-
-                // --- THE HACK: Hooking into Sony's NotificationManager ---
-                Log.i("COOKBOOK_AF", "Setting up NotificationManager Proxy...");
-                
-                Class<?> listenerInterface = Class.forName("com.sony.imaging.app.base.common.NotificationManager$NotificationListener");
-                Class<?> notifManagerClass = Class.forName("com.sony.imaging.app.base.common.NotificationManager");
-                
-                // We create a listener that pretends to be a Sony UI component
-                proxyListener = Proxy.newProxyInstance(
-                    listenerInterface.getClassLoader(),
-                    new Class<?>[]{listenerInterface},
-                    new InvocationHandler() {
-                        @Override
-                        public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
-                            // "onNotify" is the method Sony calls to broadcast events
-                            if (method.getName().equals("onNotify")) {
-                                String eventName = (String) args[0]; // e.g. "FocusChange", "AutoFocusArea"
-                                Log.i("COOKBOOK_AF", "PROXY CAUGHT EVENT: " + eventName);
-
-                                // If the camera tells us focus changed or an area was found, update immediately!
-                                if ("FocusChange".equals(eventName) || "AutoFocusArea".equals(eventName) || "DoneAutoFocus".equals(eventName)) {
-                                    triggerManualUpdate();
-                                }
-                            }
-                            return null;
-                        }
-                    }
-                );
-
-                // Now we register our spy listener to the system for those specific events
-                Method addListenerMethod = notifManagerClass.getMethod("addNotificationListener", String.class, listenerInterface);
-                addListenerMethod.invoke(null, "FocusChange", proxyListener);
-                addListenerMethod.invoke(null, "AutoFocusArea", proxyListener);
-                addListenerMethod.invoke(null, "DoneAutoFocus", proxyListener);
-
-                Log.i("COOKBOOK_AF", "Proxy successfully registered to NotificationManager!");
-
-            } catch (Exception e) {
-                Log.e("COOKBOOK_AF", "Failed to hook NotificationManager: " + e.getMessage(), e);
-            }
+            paint = new Paint();
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(4);
+            paint.setAntiAlias(true);
         }
 
-        // We call this manually on half-press AND automatically when the proxy catches an event
-        public void triggerManualUpdate() {
-            if (mCameraEx == null || getFocusAreaInfosMethod == null) return;
-            try {
-                Object infos = getFocusAreaInfosMethod.invoke(mCameraEx);
-                if (infos != null) {
-                    currentRects = (List<Object>) rectListField.get(infos);
-                    post(new Runnable() {
-                        @Override
-                        public void run() { invalidate(); } // Force redraw
-                    });
-                }
-            } catch (Exception e) {}
-        }
-
-        public void clearBoxes() {
-            currentRects = new ArrayList<Object>();
-            invalidate();
+        public void setState(State state) {
+            this.currentState = state;
+            invalidate(); // Redraw the UI immediately
         }
 
         @Override
         protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);
-            
-            if (currentRects != null && !currentRects.isEmpty()) {
-                try {
-                    for (Object rectObj : currentRects) {
-                        int left = leftField.getInt(rectObj);
-                        int top = topField.getInt(rectObj);
-                        int right = rightField.getInt(rectObj);
-                        int bottom = bottomField.getInt(rectObj);
 
-                        float dLeft, dTop, dRight, dBottom;
-
-                        if (right <= 100 && bottom <= 100) { 
-                            dLeft = (left / 100f) * getWidth();
-                            dTop = (top / 100f) * getHeight();
-                            dRight = (right / 100f) * getWidth();
-                            dBottom = (bottom / 100f) * getHeight();
-                        } else if (right <= 1000 && bottom <= 1000) { 
-                            dLeft = ((left + 1000) / 2000f) * getWidth();
-                            dTop = ((top + 1000) / 2000f) * getHeight();
-                            dRight = ((right + 1000) / 2000f) * getWidth();
-                            dBottom = ((bottom + 1000) / 2000f) * getHeight();
-                        } else { 
-                            dLeft = (left / 6000f) * getWidth();
-                            dTop = (top / 4000f) * getHeight();
-                            dRight = (right / 6000f) * getWidth();
-                            dBottom = (bottom / 4000f) * getHeight();
-                        }
-
-                        canvas.drawRect(dLeft, dTop, dRight, dBottom, greenPaint);
-                    }
-                } catch (Exception e) {}
+            // Determine color based on Focus State
+            switch (currentState) {
+                case IDLE:      paint.setColor(Color.argb(100, 255, 255, 255)); break; // Faint White
+                case SEARCHING: paint.setColor(Color.YELLOW); break;
+                case LOCKED:    paint.setColor(Color.GREEN); break;
+                case FAILED:    paint.setColor(Color.RED); break;
             }
+
+            int cx = getWidth() / 2;
+            int cy = getHeight() / 2;
+            int size = 60; // Size of the reticle
+            int bracket = 15; // Length of the "L" bracket arms
+
+            // Draw Top-Left Bracket
+            canvas.drawLine(cx - size, cy - size, cx - size + bracket, cy - size, paint);
+            canvas.drawLine(cx - size, cy - size, cx - size, cy - size + bracket, paint);
+
+            // Draw Top-Right Bracket
+            canvas.drawLine(cx + size, cy - size, cx + size - bracket, cy - size, paint);
+            canvas.drawLine(cx + size, cy - size, cx + size, cy - size + bracket, paint);
+
+            // Draw Bottom-Left Bracket
+            canvas.drawLine(cx - size, cy + size, cx - size + bracket, cy + size, paint);
+            canvas.drawLine(cx - size, cy + size, cx - size, cy + size - bracket, paint);
+
+            // Draw Bottom-Right Bracket
+            canvas.drawLine(cx + size, cy + size, cx - size, cy + size - bracket, paint);
+            canvas.drawLine(cx + size, cy + size, cx - size, cy + size - bracket, paint);
+            
+            // Draw Center Dot
+            paint.setStyle(Paint.Style.FILL);
+            canvas.drawCircle(cx, cy, 3, paint);
+            paint.setStyle(Paint.Style.STROKE);
         }
     }
 }
