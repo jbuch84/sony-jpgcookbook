@@ -125,7 +125,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     }
 
     private void buildUI(FrameLayout rootLayout) {
-        // Main HUD
         mainUIContainer = new FrameLayout(this);
         rootLayout.addView(mainUIContainer, new FrameLayout.LayoutParams(-1, -1));
 
@@ -144,7 +143,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         botParams.setMargins(0, 0, 0, 30);
         mainUIContainer.addView(tvBottomBar, botParams);
 
-        // Menu Overlay 
         menuScrollView = new ScrollView(this);
         menuScrollView.setBackgroundColor(Color.argb(220, 20, 20, 20));
         FrameLayout.LayoutParams scrollParams = new FrameLayout.LayoutParams(600, 350, Gravity.CENTER);
@@ -163,7 +161,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         menuScrollView.setVisibility(View.GONE);
         rootLayout.addView(menuScrollView, scrollParams);
         
-        // Custom Playback Engine Overlay
         playbackContainer = new FrameLayout(this);
         playbackContainer.setBackgroundColor(Color.BLACK);
         playbackContainer.setVisibility(View.GONE);
@@ -198,7 +195,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 }
             }
         }
-        // Sort descending so the newest photo is first (Index 0)
         java.util.Collections.sort(playbackFiles, new java.util.Comparator<File>() {
             public int compare(File f1, File f2) {
                 return Long.valueOf(f2.lastModified()).compareTo(f1.lastModified());
@@ -217,19 +213,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         
         File imgFile = playbackFiles.get(playbackIndex);
         
-        // Memory safety: Free old image before loading new one
         if (currentPlaybackBitmap != null && !currentPlaybackBitmap.isRecycled()) {
             playbackImageView.setImageBitmap(null);
             currentPlaybackBitmap.recycle();
             currentPlaybackBitmap = null;
         }
         
-        // Read dimensions first
         BitmapFactory.Options options = new BitmapFactory.Options();
         options.inJustDecodeBounds = true;
         BitmapFactory.decodeFile(imgFile.getAbsolutePath(), options);
         
-        // Calculate safe down-sampling scale for the camera's VGA display
         int scale = 1;
         while (options.outWidth / scale / 2 >= 640 && options.outHeight / scale / 2 >= 480) {
             scale *= 2;
@@ -259,8 +252,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         }
     }
 
+    // --- PORTABLE SD CARD MEMORY SYNC ---
     private void savePreferences() {
         SharedPreferences.Editor editor = getSharedPreferences("RTL_PREFS", MODE_PRIVATE).edit();
+        editor.putBoolean("has_saved", true);
         editor.putInt("qualityIndex", qualityIndex);
         editor.putInt("currentSlot", currentSlot);
         for(int i=0; i<10; i++) {
@@ -270,11 +265,64 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             editor.putInt("slot_" + i + "_roll", profiles[i].rollOff);
             editor.putInt("slot_" + i + "_vig", profiles[i].vignette);
         }
-        editor.commit();
+        editor.commit(); // Writes to non-volatile internal flash memory
+
+        // MASTER BACKUP TO SD CARD (Silently writes backup file)
+        try {
+            File lutDir = new File(Environment.getExternalStorageDirectory(), "LUTS");
+            if (!lutDir.exists()) lutDir = new File("/storage/sdcard0/LUTS");
+            if (lutDir.exists()) {
+                File backupFile = new File(lutDir, "rtl_backup.txt");
+                BufferedWriter bw = new BufferedWriter(new FileWriter(backupFile));
+                bw.write("quality=" + qualityIndex + "\n");
+                bw.write("slot=" + currentSlot + "\n");
+                for(int i=0; i<10; i++) {
+                    bw.write(i + "," + recipeList.get(profiles[i].lutIndex) + "," + 
+                             profiles[i].opacity + "," + profiles[i].grain + "," + 
+                             profiles[i].rollOff + "," + profiles[i].vignette + "\n");
+                }
+                bw.close();
+            }
+        } catch (Exception e) {}
     }
 
     private void loadPreferences() {
         SharedPreferences prefs = getSharedPreferences("RTL_PREFS", MODE_PRIVATE);
+        boolean hasSaved = prefs.getBoolean("has_saved", false);
+        
+        File lutDir = new File(Environment.getExternalStorageDirectory(), "LUTS");
+        if (!lutDir.exists()) lutDir = new File("/storage/sdcard0/LUTS");
+        File backupFile = new File(lutDir, "rtl_backup.txt");
+
+        // RESTORE FROM SD CARD ON FRESH INSTALL
+        if (!hasSaved && backupFile.exists()) {
+            try {
+                BufferedReader br = new BufferedReader(new FileReader(backupFile));
+                String line;
+                while ((line = br.readLine()) != null) {
+                    if (line.startsWith("quality=")) qualityIndex = Integer.parseInt(line.split("=")[1]);
+                    else if (line.startsWith("slot=")) currentSlot = Integer.parseInt(line.split("=")[1]);
+                    else {
+                        String[] parts = line.split(",");
+                        if (parts.length == 6) {
+                            int idx = Integer.parseInt(parts[0]);
+                            String lutName = parts[1];
+                            int foundIndex = recipeList.indexOf(lutName);
+                            profiles[idx].lutIndex = (foundIndex != -1) ? foundIndex : 0;
+                            profiles[idx].opacity = Integer.parseInt(parts[2]);
+                            profiles[idx].grain = Integer.parseInt(parts[3]);
+                            profiles[idx].rollOff = Integer.parseInt(parts[4]);
+                            profiles[idx].vignette = Integer.parseInt(parts[5]);
+                        }
+                    }
+                }
+                br.close();
+                savePreferences(); // Lock the imported SD card settings into the camera permanently
+                return;
+            } catch (Exception e) {}
+        }
+
+        // NORMAL LOAD FROM CAMERA MEMORY
         qualityIndex = prefs.getInt("qualityIndex", 1);
         currentSlot = prefs.getInt("currentSlot", 0);
         for(int i=0; i<10; i++) {
@@ -288,7 +336,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         }
     }
 
-    // Prevent Sony OS from stealing the Playback button press
     @Override public boolean onKeyUp(int keyCode, KeyEvent event) {
         if (event.getScanCode() == ScalarInput.ISV_KEY_PLAY) return true;
         return super.onKeyUp(keyCode, event);
@@ -298,7 +345,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         int sc = event.getScanCode();
         if (sc == ScalarInput.ISV_KEY_DELETE) { finish(); return true; }
         
-        // INTERCEPT PHYSICAL PLAY BUTTON
         if (sc == ScalarInput.ISV_KEY_PLAY) {
             if (!isPlaybackMode) {
                 isPlaybackMode = true;
@@ -306,7 +352,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 playbackContainer.setVisibility(View.VISIBLE);
                 mainUIContainer.setVisibility(View.GONE);
                 menuScrollView.setVisibility(View.GONE);
-                showPlaybackImage(0); // Show newest
+                showPlaybackImage(0); 
             } else {
                 exitPlayback();
             }
@@ -314,14 +360,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         }
 
         if (isPlaybackMode) {
-            // PLAYBACK NAVIGATION
             if (sc == ScalarInput.ISV_KEY_LEFT || sc == ScalarInput.ISV_DIAL_1_COUNTERCW) { showPlaybackImage(playbackIndex + 1); return true; }
             if (sc == ScalarInput.ISV_KEY_RIGHT || sc == ScalarInput.ISV_DIAL_1_CLOCKWISE) { showPlaybackImage(playbackIndex - 1); return true; }
             if (sc == ScalarInput.ISV_KEY_ENTER || sc == ScalarInput.ISV_KEY_MENU) { exitPlayback(); return true; }
-            return true; // Consume other keys so they don't break playback
+            return true; 
         }
 
-        // OPEN/CLOSE MENU
         if (sc == ScalarInput.ISV_KEY_MENU) {
             isMenuOpen = !isMenuOpen;
             if (isMenuOpen) {
@@ -338,7 +382,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             return true;
         }
 
-        // TOGGLE CLEAN SCREEN
         if (sc == ScalarInput.ISV_KEY_ENTER) {
             if(!isMenuOpen) {
                 displayState = (displayState == 0) ? 1 : 0;
