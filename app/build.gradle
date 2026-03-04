@@ -26,7 +26,6 @@ repositories {
 }
 
 dependencies {
-    // We NEED the stubs so the compiler knows what CameraEx and ScalarInput are!
-    // 'compileOnly' means it uses it to build, but doesn't package it (since the camera already has it).
+    // This tells the compiler what CameraEx is, allowing the app to build!
     compileOnly 'com.github.ma1co.OpenMemories-Framework:stubs:-SNAPSHOT'
 }
