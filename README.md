@@ -14,7 +14,7 @@ Sony JPG Cookbook turns your older Sony Alpha camera into a modern film-simulati
 * **Organic Grain Engine:** High-fidelity noise with quadratic shadow suppression for a true analog look without shadow mud.
 * **Native UI:** A full-screen, table-based menu built for speed and tactile dial navigation—no clunky Android scrolling.
 * **High-Efficiency C++ Engine:** Cache-interleaved memory management and optimized I/O for faster processing on aging hardware without sacrificing image quality.
-* **Web Dashboard:** A built-in WiFi server to browse, review detailed binary EXIF data (Aperture, Shutter, ISO), and download your "Recipes" or "Originals" from any browser.
+* **Companion App Web Dashboard:** WiFi server to browse, review detailed binary EXIF data (Aperture, Shutter, ISO), and download your "Recipes" or "Originals" from any browser.
 * **Pro-Grade Optics:** Corrects the legacy Sony 4:3 Android stretch for perfect 3:2 image review on the camera's LCD.
 
 
