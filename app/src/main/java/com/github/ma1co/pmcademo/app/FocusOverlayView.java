@@ -18,19 +18,17 @@ public class FocusOverlayView extends View {
         paint.setStyle(Paint.Style.STROKE);
         paint.setStrokeWidth(6);
         paint.setAntiAlias(true);
-
-        // Initialize our manual IPC wrapper
         scalarWrapper = new ScalarWebAPIWrapper(context);
     }
 
     public void startPolling() {
-        if (!isPolling && scalarWrapper.isAvailable()) {
+        if (scalarWrapper.isAvailable()) {
             isPolling = true;
             invalidate();
         }
     }
 
-    public void stopPolling() {
+    public void clearBoxes() {
         isPolling = false;
         invalidate();
     }
@@ -38,43 +36,23 @@ public class FocusOverlayView extends View {
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
-        
         if (!isPolling || !scalarWrapper.isAvailable()) return;
 
         try {
-            // 1. Get AF Status (0 = Searching/Yellow, 1 = Locked/Green)
             int afStatus = scalarWrapper.getInt("afStatus");
             paint.setColor(afStatus == 1 ? Color.GREEN : Color.YELLOW);
 
-            // 2. Extract and draw the boxes
             Camera.Area[] areas = scalarWrapper.getFocusAreas();
-            if (areas != null && areas.length > 0) {
+            if (areas != null) {
                 for (Camera.Area area : areas) {
-                    int left = area.rect.left;
-                    int top = area.rect.top;
-                    int right = area.rect.right;
-                    int bottom = area.rect.bottom;
-
-                    // Matrix conversion math
-                    float dLeft, dTop, dRight, dBottom;
-                    if (right <= 1000 && bottom <= 1000) { 
-                        dLeft = ((left + 1000) / 2000f) * getWidth();
-                        dTop = ((top + 1000) / 2000f) * getHeight();
-                        dRight = ((right + 1000) / 2000f) * getWidth();
-                        dBottom = ((bottom + 1000) / 2000f) * getHeight();
-                    } else { 
-                        dLeft = (left / 6000f) * getWidth();
-                        dTop = (top / 4000f) * getHeight();
-                        dRight = (right / 6000f) * getWidth();
-                        dBottom = (bottom / 4000f) * getHeight();
-                    }
-
+                    float dLeft = ((area.rect.left + 1000) / 2000f) * getWidth();
+                    float dTop = ((area.rect.top + 1000) / 2000f) * getHeight();
+                    float dRight = ((area.rect.right + 1000) / 2000f) * getWidth();
+                    float dBottom = ((area.rect.bottom + 1000) / 2000f) * getHeight();
                     canvas.drawRect(dLeft, dTop, dRight, dBottom, paint);
                 }
             }
         } catch (Exception e) {}
-
-        // Poll Loop
         postInvalidateDelayed(50);
     }
 }

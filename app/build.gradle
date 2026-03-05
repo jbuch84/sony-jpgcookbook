@@ -26,6 +26,5 @@ repositories {
 }
 
 dependencies {
-    // This tells the compiler what CameraEx is, allowing the app to build!
     compileOnly 'com.github.ma1co.OpenMemories-Framework:stubs:-SNAPSHOT'
 }

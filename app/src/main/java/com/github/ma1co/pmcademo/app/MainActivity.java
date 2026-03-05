@@ -403,18 +403,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     @Override public boolean onKeyDown(int keyCode, KeyEvent event) {
         int sc = event.getScanCode();
         
-        // -------------------------------------------------------------
-        // IMMERSIVE MODE & MANUAL WRAPPER POLLING
-        // -------------------------------------------------------------
         if (sc == ScalarInput.ISV_KEY_S1_1 && event.getRepeatCount() == 0) {
             if (displayState == 0 && !isMenuOpen && !isPlaybackMode) {
                 tvTopStatus.setVisibility(View.GONE);
                 tvBottomBar.setVisibility(View.GONE);
             }
-            
             if (mCamera != null) { try { mCamera.autoFocus(null); } catch (Exception e) {} }
             if (afOverlay != null) { afOverlay.startPolling(); }
-            
             return super.onKeyDown(keyCode, event);
         }
 
@@ -481,7 +476,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
     @Override public boolean onKeyUp(int keyCode, KeyEvent event) {
         int sc = event.getScanCode();
-        
         if (sc == ScalarInput.ISV_KEY_S1_1) {
             if (displayState == 0 && !isMenuOpen && !isPlaybackMode) {
                 tvTopStatus.setVisibility(View.VISIBLE);
@@ -489,7 +483,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             }
             if (mCamera != null) { try { mCamera.cancelAutoFocus(); } catch (Exception e) {} }
             if (afOverlay != null) { afOverlay.clearBoxes(); }
-            
             return super.onKeyUp(keyCode, event);
         }
         return super.onKeyUp(keyCode, event);
@@ -515,7 +508,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private void renderMenu() {
         RTLProfile p = profiles[currentSlot];
         String[] qLabels = {"PROXY (1.5MP)", "HIGH (6MP)", "ULTRA (24MP)"};
-        
         menuLabels[0].setText("Global Quality");   menuValues[0].setText("< " + qLabels[qualityIndex] + " >");
         menuLabels[1].setText("RTL Slot");         menuValues[1].setText("< " + (currentSlot + 1) + " >");
         menuLabels[2].setText("LUT");              menuValues[2].setText("< " + recipeNames.get(p.lutIndex) + " >");
@@ -547,7 +539,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         try {
             Camera.Parameters p = mCamera.getParameters();
             CameraEx.ParametersModifier pm = mCameraEx.createParametersModifier(p);
-            
             if (mDialMode == DIAL_MODE_RTL) { currentSlot = (currentSlot + d + 10) % 10; triggerLutPreload(); }
             else if (mDialMode == DIAL_MODE_SHUTTER) { if (d > 0) mCameraEx.incrementShutterSpeed(); else mCameraEx.decrementShutterSpeed(); }
             else if (mDialMode == DIAL_MODE_APERTURE) { if (d > 0) mCameraEx.incrementAperture(); else mCameraEx.decrementAperture(); }
@@ -593,7 +584,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private void scanRecipes() { 
         recipePaths.clear(); recipeNames.clear();
         recipePaths.add("NONE"); recipeNames.add("NONE");
-        
         File lutDir = getLutDir();
         if (lutDir.exists() && lutDir.listFiles() != null) {
             for (File f : lutDir.listFiles()) {
@@ -725,21 +715,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
     @Override public void surfaceCreated(SurfaceHolder h) { hasSurface = true; openCamera(); }
     @Override public void surfaceDestroyed(SurfaceHolder h) { hasSurface = false; closeCamera(); }
-    
-    @Override protected void onResume() { 
-        super.onResume(); 
-        openCamera();
-        if (mCamera != null) updateMainHUD(); 
-        startAutoProcessPolling(); 
-    }
-    
-    @Override protected void onPause() { 
-        super.onPause(); 
-        closeCamera(); 
-        isPolling = false; 
-        savePreferences(); 
-    }
-    
+    @Override protected void onResume() { super.onResume(); openCamera(); if (mCamera != null) updateMainHUD(); startAutoProcessPolling(); }
+    @Override protected void onPause() { super.onPause(); closeCamera(); isPolling = false; savePreferences(); }
     @Override public void onShutterSpeedChange(CameraEx.ShutterSpeedInfo i, CameraEx c) { updateMainHUD(); }
     @Override public void surfaceChanged(SurfaceHolder h, int f, int w, int h1) {}
 }
