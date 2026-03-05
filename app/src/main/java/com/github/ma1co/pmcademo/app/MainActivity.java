@@ -183,13 +183,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
         menuContainer = new LinearLayout(this);
         menuContainer.setOrientation(LinearLayout.VERTICAL);
-        menuContainer.setBackgroundColor(Color.argb(245, 10, 10, 10)); 
+        menuContainer.setBackgroundColor(Color.argb(250, 15, 15, 15)); // Darker background to match Sony OS
         menuContainer.setPadding(30, 30, 30, 30);
         
         for (int i = 0; i < 11; i++) {
             menuRows[i] = new LinearLayout(this);
             menuRows[i].setOrientation(LinearLayout.HORIZONTAL);
             menuRows[i].setGravity(Gravity.CENTER_VERTICAL);
+            // Added horizontal padding to give the red selection bar breathing room
+            menuRows[i].setPadding(10, 0, 10, 0);
             
             LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, 0, 1.0f);
             menuContainer.addView(menuRows[i], rowParams);
@@ -207,6 +209,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             
             menuRows[i].addView(menuLabels[i], lpLabel);
             menuRows[i].addView(menuValues[i], lpVal);
+
+            // Add the thin Sony-style horizontal divider (except after the last item)
+            if (i < 10) {
+                View divider = new View(this);
+                divider.setBackgroundColor(Color.DKGRAY);
+                LinearLayout.LayoutParams divParams = new LinearLayout.LayoutParams(-1, 1);
+                divParams.setMargins(0, 2, 0, 2);
+                menuContainer.addView(divider, divParams);
+            }
         }
         
         menuContainer.setVisibility(View.GONE);
@@ -552,23 +563,38 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         RTLProfile p = profiles[currentSlot];
         String[] qLabels = {"PROXY (1.5MP)", "HIGH (6MP)", "ULTRA (24MP)"};
         
-        menuLabels[0].setText("Global Quality");   menuValues[0].setText("< " + qLabels[qualityIndex] + " >");
-        menuLabels[1].setText("RTL Slot");         menuValues[1].setText("< " + (currentSlot + 1) + " >");
-        menuLabels[2].setText("LUT");              menuValues[2].setText("< " + recipeNames.get(p.lutIndex) + " >");
-        menuLabels[3].setText("Opacity");          menuValues[3].setText("< " + p.opacity + "% >");
-        menuLabels[4].setText("Grain Amount");     menuValues[4].setText("< " + intensityLabels[p.grain] + " >");
-        menuLabels[5].setText("Grain Size");       menuValues[5].setText("< " + grainSizeLabels[p.grainSize] + " >");
-        menuLabels[6].setText("Highlight Roll");   menuValues[6].setText("< " + intensityLabels[p.rollOff] + " >");
-        menuLabels[7].setText("Vignette");         menuValues[7].setText("< " + intensityLabels[p.vignette] + " >");
-        menuLabels[8].setText("[LOCKED] W.Bal");   menuValues[8].setText("< " + p.whiteBalance + " >");
-        menuLabels[9].setText("[LOCKED] WB Shift");menuValues[9].setText("< " + p.wbShift + " >");
-        menuLabels[10].setText("[LOCKED] DRO");    menuValues[10].setText("< " + p.dro + " >");
+        // Removed the < > brackets to match Sony's clean native menu styling
+        menuLabels[0].setText("Global Quality");   menuValues[0].setText(qLabels[qualityIndex]);
+        menuLabels[1].setText("RTL Slot");         menuValues[1].setText(String.valueOf(currentSlot + 1));
+        menuLabels[2].setText("LUT");              menuValues[2].setText(recipeNames.get(p.lutIndex));
+        menuLabels[3].setText("Opacity");          menuValues[3].setText(p.opacity + "%");
+        menuLabels[4].setText("Grain Amount");     menuValues[4].setText(intensityLabels[p.grain]);
+        menuLabels[5].setText("Grain Size");       menuValues[5].setText(grainSizeLabels[p.grainSize]);
+        menuLabels[6].setText("Highlight Roll");   menuValues[6].setText(intensityLabels[p.rollOff]);
+        menuLabels[7].setText("Vignette");         menuValues[7].setText(intensityLabels[p.vignette]);
+        menuLabels[8].setText("[LOCKED] W.Bal");   menuValues[8].setText(p.whiteBalance);
+        menuLabels[9].setText("[LOCKED] WB Shift");menuValues[9].setText(String.valueOf(p.wbShift));
+        menuLabels[10].setText("[LOCKED] DRO");    menuValues[10].setText(p.dro);
 
         for (int i = 0; i < 11; i++) {
             boolean sel = (i == menuSelection);
-            menuRows[i].setBackgroundColor(sel ? Color.WHITE : Color.TRANSPARENT);
-            menuLabels[i].setTextColor(sel ? Color.BLACK : (i > 7 ? Color.DKGRAY : Color.WHITE));
-            menuValues[i].setTextColor(sel ? Color.BLACK : (i > 7 ? Color.DKGRAY : Color.CYAN));
+            
+            // Replaced the white selection background with the classic Sony Red/Orange
+            menuRows[i].setBackgroundColor(sel ? Color.rgb(230, 50, 15) : Color.TRANSPARENT);
+            
+            // Selected item text is always solid white for contrast against the red
+            // Unselected unlocked items are white. Unselected locked items (8, 9, 10) are grayed out.
+            int textColor;
+            if (sel) {
+                textColor = Color.WHITE;
+            } else if (i > 7) {
+                textColor = Color.GRAY;
+            } else {
+                textColor = Color.WHITE;
+            }
+
+            menuLabels[i].setTextColor(textColor);
+            menuValues[i].setTextColor(textColor);
         }
     }
 
@@ -817,6 +843,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     }
 
     @Override public void surfaceCreated(SurfaceHolder h) { hasSurface = true; openCamera(); }
+
     @Override public void surfaceDestroyed(SurfaceHolder h) { hasSurface = false; closeCamera(); }
     
     @Override 
@@ -917,7 +944,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             canvas.drawLine(cx - size, cy + size, cx - size + bracket, cy + size, paint);
             canvas.drawLine(cx - size, cy + size, cx - size, cy + size - bracket, paint);
             
-            // Bottom Right (FIXED MATH HERE)
+            // Bottom Right
             canvas.drawLine(cx + size, cy + size, cx + size - bracket, cy + size, paint);
             canvas.drawLine(cx + size, cy + size, cx + size, cy + size - bracket, paint);
             
