@@ -15,14 +15,10 @@ import android.graphics.Paint;
 import android.graphics.Typeface;
 import android.hardware.Camera;
 import android.media.ExifInterface;
-import android.net.Uri;
-import android.os.AsyncTask;
 import android.os.BatteryManager;
 import android.os.Bundle;
 import android.os.Environment;
-import android.os.FileObserver;
 import android.text.Html;
-import android.util.Log;
 import android.util.Pair;
 import android.view.Gravity;
 import android.view.KeyEvent;
@@ -52,7 +48,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private TextView[] menuLabels = new TextView[11];
     private TextView[] menuValues = new TextView[11];
     
-    // UI Elements
     private TextView tvBottomBar, tvTopStatus, tvBattery, tvMode, tvFocus, tvReview; 
     
     private FrameLayout playbackContainer;
@@ -68,34 +63,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private boolean isMenuOpen = false;
     private int displayState = 0; 
     
-    private LutEngine mEngine; 
-    private PreloadLutTask currentPreloadTask = null; 
-    private SonyFileObserver mFileObserver;
+    private ImageProcessor mProcessor;
+    private SonyFileScanner mScanner;
     private String sonyDCIMPath = "";
     
-    private boolean isPolling = false;
-    private long lastNewestFileTime = 0;
-    
     private ProReticleView afOverlay;
-
     private ArrayList<String> recipePaths = new ArrayList<String>();
     private ArrayList<String> recipeNames = new ArrayList<String>();
 
     private final String[] intensityLabels = {"OFF", "LOW", "LOW+", "MID", "MID+", "HIGH"};
     private final String[] grainSizeLabels = {"SM", "MED", "LG"};
 
-    class RTLProfile {
-        int lutIndex = 0;
-        int opacity = 100; 
-        int grain = 0;    
-        int grainSize = 1; 
-        int rollOff = 0;  
-        int vignette = 0; 
-        String whiteBalance = "AUTO";
-        int wbShift = 0;
-        String dro = "OFF";
-    }
-    
     private RTLProfile[] profiles = new RTLProfile[10];
     private int currentSlot = 0; 
     private int qualityIndex = 1; 
@@ -122,36 +100,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         }
     };
 
-    private class SonyFileObserver extends FileObserver {
-        public SonyFileObserver(String path) {
-            super(path, FileObserver.CLOSE_WRITE);
-        }
-
-        @Override
-        public void onEvent(int event, final String path) {
-            if (path == null || isProcessing || !isReady) return;
-            if (path.toUpperCase().endsWith(".JPG") && !path.startsWith("PRCS")) {
-                final String fullPath = sonyDCIMPath + "/" + path;
-                runOnUiThread(new Runnable() {
-                    @Override
-                    public void run() {
-                        new ProcessTask().execute(fullPath);
-                    }
-                });
-            }
-        }
-    }
-
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         
-        try {
-            mEngine = new LutEngine();
-        } catch (Throwable t) {
-            Log.e("COOKBOOK", "Native library failed to load: " + t.getMessage());
-        }
-
         FrameLayout rootLayout = new FrameLayout(this);
         mSurfaceView = new SurfaceView(this);
         mSurfaceView.getHolder().addCallback(this);
@@ -174,14 +126,43 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         }
         if (sonyDCIMPath.isEmpty()) sonyDCIMPath = possibleRoots[0] + "/DCIM/100MSDCF";
         
+        setupEngines();
         triggerLutPreload();
+    }
+
+    private void setupEngines() {
+        // Initialize the Brains
+        mProcessor = new ImageProcessor(this, new ImageProcessor.ProcessorCallback() {
+            @Override public void onPreloadStarted() { isReady = false; runOnUiThread(new Runnable() { @Override public void run() { updateMainHUD(); } }); }
+            @Override public void onPreloadFinished(boolean success) { isReady = true; runOnUiThread(new Runnable() { @Override public void run() { updateMainHUD(); } }); }
+            @Override public void onProcessStarted() { 
+                isProcessing = true; 
+                runOnUiThread(new Runnable() { @Override public void run() { tvTopStatus.setText("PROCESSING..."); tvTopStatus.setTextColor(Color.YELLOW); } }); 
+            }
+            @Override public void onProcessFinished(String result) { 
+                isProcessing = false; 
+                runOnUiThread(new Runnable() { @Override public void run() { tvTopStatus.setTextColor(Color.WHITE); updateMainHUD(); } }); 
+            }
+        });
+
+        // Initialize the Eyes
+        mScanner = new SonyFileScanner(sonyDCIMPath, new SonyFileScanner.ScannerCallback() {
+            @Override public boolean isReadyToProcess() { return isReady && !isProcessing && profiles[currentSlot].lutIndex != 0; }
+            @Override public void onNewPhotoDetected(final String filePath) {
+                runOnUiThread(new Runnable() {
+                    @Override public void run() {
+                        File outDir = new File(Environment.getExternalStorageDirectory(), "GRADED");
+                        mProcessor.processJpeg(filePath, outDir.getAbsolutePath(), qualityIndex, profiles[currentSlot]);
+                    }
+                });
+            }
+        });
     }
 
     private void buildUI(FrameLayout rootLayout) {
         mainUIContainer = new FrameLayout(this);
         rootLayout.addView(mainUIContainer, new FrameLayout.LayoutParams(-1, -1));
 
-        // 1. Top Status (Centered & Bold)
         tvTopStatus = new TextView(this);
         tvTopStatus.setTextColor(Color.WHITE);
         tvTopStatus.setTextSize(20);
@@ -192,7 +173,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         topParams.setMargins(0, 15, 0, 0);
         mainUIContainer.addView(tvTopStatus, topParams);
 
-        // 2. Right Side Bar (Battery & Review)
         LinearLayout rightBar = new LinearLayout(this);
         rightBar.setOrientation(LinearLayout.VERTICAL);
         rightBar.setGravity(Gravity.RIGHT);
@@ -225,7 +205,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         rightParams.setMargins(0, 20, 20, 0);
         mainUIContainer.addView(rightBar, rightParams);
 
-        // 3. Left Side Bar (PASM & Focus)
         LinearLayout leftBar = new LinearLayout(this);
         leftBar.setOrientation(LinearLayout.VERTICAL);
         tvMode = createSideIcon("M");
@@ -236,7 +215,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         leftParams.setMargins(20, 20, 0, 0);
         mainUIContainer.addView(leftBar, leftParams);
 
-        // 4. Bottom Bar (Exposure Only - Large & Clean)
         tvBottomBar = new TextView(this);
         tvBottomBar.setTextSize(26);
         tvBottomBar.setTypeface(Typeface.DEFAULT_BOLD);
@@ -249,7 +227,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         afOverlay = new ProReticleView(this);
         mainUIContainer.addView(afOverlay, new FrameLayout.LayoutParams(-1, -1));
 
-        // Settings Menu
         menuContainer = new LinearLayout(this);
         menuContainer.setOrientation(LinearLayout.VERTICAL);
         menuContainer.setBackgroundColor(Color.argb(250, 15, 15, 15)); 
@@ -261,23 +238,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             menuRows[i].setGravity(Gravity.CENTER_VERTICAL);
             menuRows[i].setPadding(10, 0, 10, 0);
             
-            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, 0, 1.0f);
-            menuContainer.addView(menuRows[i], rowParams);
+            menuContainer.addView(menuRows[i], new LinearLayout.LayoutParams(-1, 0, 1.0f));
             
-            menuLabels[i] = new TextView(this);
-            menuLabels[i].setTextSize(22);
-            menuLabels[i].setTypeface(Typeface.DEFAULT_BOLD);
-            
-            menuValues[i] = new TextView(this);
-            menuValues[i].setTextSize(22);
-            menuValues[i].setGravity(Gravity.RIGHT);
+            menuLabels[i] = new TextView(this); menuLabels[i].setTextSize(22); menuLabels[i].setTypeface(Typeface.DEFAULT_BOLD);
+            menuValues[i] = new TextView(this); menuValues[i].setTextSize(22); menuValues[i].setGravity(Gravity.RIGHT);
             
             menuRows[i].addView(menuLabels[i], new LinearLayout.LayoutParams(0, -2, 1.0f));
             menuRows[i].addView(menuValues[i], new LinearLayout.LayoutParams(-2, -2));
 
             if (i < 10) {
-                View divider = new View(this);
-                divider.setBackgroundColor(Color.DKGRAY);
+                View divider = new View(this); divider.setBackgroundColor(Color.DKGRAY);
                 menuContainer.addView(divider, new LinearLayout.LayoutParams(-1, 1));
             }
         }
@@ -285,7 +255,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         menuContainer.setVisibility(View.GONE);
         rootLayout.addView(menuContainer, new FrameLayout.LayoutParams(-1, -1));
 
-        // Playback Container
         playbackContainer = new FrameLayout(this);
         playbackContainer.setBackgroundColor(Color.BLACK);
         playbackContainer.setVisibility(View.GONE);
@@ -346,10 +315,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     }
 
     private void showPlaybackImage(int index) {
-        if (playbackFiles.isEmpty()) {
-            tvPlaybackInfo.setText("NO GRADED PHOTOS");
-            return;
-        }
+        if (playbackFiles.isEmpty()) { tvPlaybackInfo.setText("NO GRADED PHOTOS"); return; }
         
         if (index < 0) index = 0;
         if (index >= playbackFiles.size()) index = playbackFiles.size() - 1;
@@ -357,9 +323,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         File imgFile = playbackFiles.get(playbackIndex);
         
         if (currentPlaybackBitmap != null && !currentPlaybackBitmap.isRecycled()) {
-            playbackImageView.setImageBitmap(null);
-            currentPlaybackBitmap.recycle();
-            currentPlaybackBitmap = null;
+            playbackImageView.setImageBitmap(null); currentPlaybackBitmap.recycle(); currentPlaybackBitmap = null;
         }
         
         try {
@@ -380,9 +344,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             String apStr = fnum != null ? "f/" + fnum : "f/--";
             String isoStr = iso != null ? "ISO " + iso : "ISO --";
 
-            String metaText = (playbackIndex + 1) + " / " + playbackFiles.size() + "\n" 
-                              + imgFile.getName() + "\n" 
-                              + apStr + " | " + speedStr + " | " + isoStr;
+            String metaText = (playbackIndex + 1) + " / " + playbackFiles.size() + "\n" + imgFile.getName() + "\n" + apStr + " | " + speedStr + " | " + isoStr;
             tvPlaybackInfo.setText(metaText);
 
             BitmapFactory.Options options = new BitmapFactory.Options();
@@ -390,14 +352,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             BitmapFactory.decodeFile(imgFile.getAbsolutePath(), options);
             
             int scale = 1; 
-            while ((options.outWidth / scale) > 1200 || (options.outHeight / scale) > 1200) { 
-                scale *= 2; 
-            }
+            while ((options.outWidth / scale) > 1200 || (options.outHeight / scale) > 1200) { scale *= 2; }
             
-            options.inJustDecodeBounds = false; 
-            options.inSampleSize = scale;
-            options.inPreferQualityOverSpeed = true; 
-            
+            options.inJustDecodeBounds = false; options.inSampleSize = scale; options.inPreferQualityOverSpeed = true; 
             Bitmap rawBitmap = BitmapFactory.decodeFile(imgFile.getAbsolutePath(), options);
             
             int orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL);
@@ -414,20 +371,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             if (currentPlaybackBitmap != rawBitmap) rawBitmap.recycle();
             
             playbackImageView.setImageBitmap(currentPlaybackBitmap);
-            
-        } catch (Exception e) {
-            tvPlaybackInfo.setText("DECODE ERROR");
-        }
+        } catch (Exception e) { tvPlaybackInfo.setText("DECODE ERROR"); }
     }
 
     private void exitPlayback() {
-        playbackContainer.setVisibility(View.GONE);
-        mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE);
+        playbackContainer.setVisibility(View.GONE); mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE);
         isPlaybackMode = false;
         if (currentPlaybackBitmap != null && !currentPlaybackBitmap.isRecycled()) {
-            playbackImageView.setImageBitmap(null);
-            currentPlaybackBitmap.recycle();
-            currentPlaybackBitmap = null;
+            playbackImageView.setImageBitmap(null); currentPlaybackBitmap.recycle(); currentPlaybackBitmap = null;
         }
     }
 
@@ -440,15 +391,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
     private void savePreferences() {
         SharedPreferences.Editor editor = getSharedPreferences("RTL_PREFS", MODE_PRIVATE).edit();
-        editor.putBoolean("has_saved", true);
-        editor.putInt("qualityIndex", qualityIndex);
-        editor.putInt("currentSlot", currentSlot);
+        editor.putBoolean("has_saved", true); editor.putInt("qualityIndex", qualityIndex); editor.putInt("currentSlot", currentSlot);
         for(int i=0; i<10; i++) {
             editor.putString("slot_" + i + "_lutPath", recipePaths.get(profiles[i].lutIndex));
-            editor.putInt("slot_" + i + "_opac", profiles[i].opacity);
-            editor.putInt("slot_" + i + "_grain", profiles[i].grain);
-            editor.putInt("slot_" + i + "_gSize", profiles[i].grainSize);
-            editor.putInt("slot_" + i + "_roll", profiles[i].rollOff);
+            editor.putInt("slot_" + i + "_opac", profiles[i].opacity); editor.putInt("slot_" + i + "_grain", profiles[i].grain);
+            editor.putInt("slot_" + i + "_gSize", profiles[i].grainSize); editor.putInt("slot_" + i + "_roll", profiles[i].rollOff);
             editor.putInt("slot_" + i + "_vig", profiles[i].vignette);
         }
         editor.commit(); 
@@ -458,24 +405,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             if (!lutDir.exists()) lutDir.mkdirs(); 
             File backupFile = new File(lutDir, "RTLBAK.TXT");
             if (!backupFile.exists()) backupFile.createNewFile();
-            
             FileOutputStream fos = new FileOutputStream(backupFile);
             StringBuilder sb = new StringBuilder();
-            sb.append("quality=").append(qualityIndex).append("\n");
-            sb.append("slot=").append(currentSlot).append("\n");
+            sb.append("quality=").append(qualityIndex).append("\n").append("slot=").append(currentSlot).append("\n");
             for(int i=0; i<10; i++) {
-                sb.append(i).append(",")
-                  .append(recipePaths.get(profiles[i].lutIndex)).append(",")
-                  .append(profiles[i].opacity).append(",")
-                  .append(profiles[i].grain).append(",")
-                  .append(profiles[i].grainSize).append(",")
-                  .append(profiles[i].rollOff).append(",")
-                  .append(profiles[i].vignette).append("\n");
+                sb.append(i).append(",").append(recipePaths.get(profiles[i].lutIndex)).append(",")
+                  .append(profiles[i].opacity).append(",").append(profiles[i].grain).append(",")
+                  .append(profiles[i].grainSize).append(",").append(profiles[i].rollOff).append(",").append(profiles[i].vignette).append("\n");
             }
-            fos.write(sb.toString().getBytes());
-            fos.flush(); 
-            fos.getFD().sync(); 
-            fos.close();
+            fos.write(sb.toString().getBytes()); fos.flush(); fos.getFD().sync(); fos.close();
             sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(backupFile)));
         } catch (Exception e) {}
     }
@@ -495,66 +433,46 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                     else {
                         String[] parts = line.split(",");
                         if (parts.length >= 6) {
-                            int idx = Integer.parseInt(parts[0]);
-                            int foundIndex = recipePaths.indexOf(parts[1]);
+                            int idx = Integer.parseInt(parts[0]); int foundIndex = recipePaths.indexOf(parts[1]);
                             profiles[idx].lutIndex = (foundIndex != -1) ? foundIndex : 0;
-                            profiles[idx].opacity = Integer.parseInt(parts[2]);
-                            if (profiles[idx].opacity <= 5) profiles[idx].opacity = 100;
+                            profiles[idx].opacity = Integer.parseInt(parts[2]); if (profiles[idx].opacity <= 5) profiles[idx].opacity = 100;
                             profiles[idx].grain = Math.min(5, Integer.parseInt(parts[3]));
                             if (parts.length == 7) {
                                 profiles[idx].grainSize = Math.min(2, Integer.parseInt(parts[4]));
-                                profiles[idx].rollOff = Math.min(5, Integer.parseInt(parts[5]));
-                                profiles[idx].vignette = Math.min(5, Integer.parseInt(parts[6]));
+                                profiles[idx].rollOff = Math.min(5, Integer.parseInt(parts[5])); profiles[idx].vignette = Math.min(5, Integer.parseInt(parts[6]));
                             } else {
-                                profiles[idx].grainSize = 1;
-                                profiles[idx].rollOff = Math.min(5, Integer.parseInt(parts[4]));
-                                profiles[idx].vignette = Math.min(5, Integer.parseInt(parts[5]));
+                                profiles[idx].grainSize = 1; profiles[idx].rollOff = Math.min(5, Integer.parseInt(parts[4])); profiles[idx].vignette = Math.min(5, Integer.parseInt(parts[5]));
                             }
                         }
                     }
                 }
-                br.close(); 
-                savePreferences(); 
-                return;
+                br.close(); savePreferences(); return;
             } catch (Exception e) {}
         }
 
-        qualityIndex = prefs.getInt("qualityIndex", 1);
-        currentSlot = prefs.getInt("currentSlot", 0);
+        qualityIndex = prefs.getInt("qualityIndex", 1); currentSlot = prefs.getInt("currentSlot", 0);
         for(int i=0; i<10; i++) {
-            String savedPath = prefs.getString("slot_" + i + "_lutPath", "NONE");
-            int foundIndex = recipePaths.indexOf(savedPath);
+            String savedPath = prefs.getString("slot_" + i + "_lutPath", "NONE"); int foundIndex = recipePaths.indexOf(savedPath);
             profiles[i].lutIndex = (foundIndex != -1) ? foundIndex : 0; 
-            profiles[i].opacity = prefs.getInt("slot_" + i + "_opac", 100);
-            if (profiles[i].opacity <= 5) profiles[i].opacity = 100; 
-            profiles[i].grain = Math.min(5, prefs.getInt("slot_" + i + "_grain", 0));
-            profiles[i].grainSize = Math.min(2, prefs.getInt("slot_" + i + "_gSize", 1));
-            profiles[i].rollOff = Math.min(5, prefs.getInt("slot_" + i + "_roll", 0));
-            profiles[i].vignette = Math.min(5, prefs.getInt("slot_" + i + "_vig", 0));
+            profiles[i].opacity = prefs.getInt("slot_" + i + "_opac", 100); if (profiles[i].opacity <= 5) profiles[i].opacity = 100; 
+            profiles[i].grain = Math.min(5, prefs.getInt("slot_" + i + "_grain", 0)); profiles[i].grainSize = Math.min(2, prefs.getInt("slot_" + i + "_gSize", 1));
+            profiles[i].rollOff = Math.min(5, prefs.getInt("slot_" + i + "_roll", 0)); profiles[i].vignette = Math.min(5, prefs.getInt("slot_" + i + "_vig", 0));
         }
     }
 
     @Override 
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         int sc = event.getScanCode();
-        
         if (sc == ScalarInput.ISV_KEY_S1_1 && event.getRepeatCount() == 0) {
             if (displayState == 0 && !isMenuOpen && !isPlaybackMode) {
-                tvTopStatus.setVisibility(View.GONE);
-                tvBottomBar.setVisibility(View.GONE);
-                tvBattery.setVisibility(View.GONE);
-                tvMode.setVisibility(View.GONE);
-                tvFocus.setVisibility(View.GONE);
+                tvTopStatus.setVisibility(View.GONE); tvBottomBar.setVisibility(View.GONE);
+                tvBattery.setVisibility(View.GONE); tvMode.setVisibility(View.GONE); tvFocus.setVisibility(View.GONE);
             }
             if (afOverlay != null) { afOverlay.startFocus(mCamera); }
             return super.onKeyDown(keyCode, event);
         }
 
-        if (sc == ScalarInput.ISV_KEY_DELETE) { 
-            finish(); 
-            return true; 
-        }
-
+        if (sc == ScalarInput.ISV_KEY_DELETE) { finish(); return true; }
         if (isPlaybackMode) {
             if (sc == ScalarInput.ISV_KEY_LEFT || sc == ScalarInput.ISV_DIAL_1_COUNTERCW) { showPlaybackImage(playbackIndex + 1); return true; }
             if (sc == ScalarInput.ISV_KEY_RIGHT || sc == ScalarInput.ISV_DIAL_1_CLOCKWISE) { showPlaybackImage(playbackIndex - 1); return true; }
@@ -565,15 +483,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         if (sc == ScalarInput.ISV_KEY_MENU) {
             isMenuOpen = !isMenuOpen;
             if (isMenuOpen) {
-                menuContainer.setVisibility(View.VISIBLE); 
-                mainUIContainer.setVisibility(View.GONE); 
-                renderMenu();
+                menuContainer.setVisibility(View.VISIBLE); mainUIContainer.setVisibility(View.GONE); renderMenu();
             } else {
-                menuContainer.setVisibility(View.GONE); 
-                mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE);
-                savePreferences(); 
-                triggerLutPreload(); 
-                updateMainHUD();
+                menuContainer.setVisibility(View.GONE); mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE);
+                savePreferences(); triggerLutPreload(); updateMainHUD();
             }
             return true;
         }
@@ -581,15 +494,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         if (sc == ScalarInput.ISV_KEY_ENTER) {
             if(!isMenuOpen) {
                 if (mDialMode == DIAL_MODE_REVIEW) {
-                    isPlaybackMode = true; 
-                    refreshPlaybackFiles();
-                    playbackContainer.setVisibility(View.VISIBLE); 
-                    mainUIContainer.setVisibility(View.GONE); 
-                    menuContainer.setVisibility(View.GONE);
+                    isPlaybackMode = true; refreshPlaybackFiles();
+                    playbackContainer.setVisibility(View.VISIBLE); mainUIContainer.setVisibility(View.GONE); menuContainer.setVisibility(View.GONE);
                     showPlaybackImage(0); 
                 } else {
-                    displayState = (displayState == 0) ? 1 : 0; 
-                    mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE);
+                    displayState = (displayState == 0) ? 1 : 0; mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE);
                 }
             }
             return true;
@@ -613,18 +522,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
     @Override 
     public boolean onKeyUp(int keyCode, KeyEvent event) {
-        int sc = event.getScanCode();
-        
-        if (sc == ScalarInput.ISV_KEY_S1_1) {
+        if (event.getScanCode() == ScalarInput.ISV_KEY_S1_1) {
             if (displayState == 0 && !isMenuOpen && !isPlaybackMode) {
-                tvTopStatus.setVisibility(View.VISIBLE);
-                tvBottomBar.setVisibility(View.VISIBLE);
-                tvBattery.setVisibility(View.VISIBLE);
-                tvMode.setVisibility(View.VISIBLE);
-                tvFocus.setVisibility(View.VISIBLE);
+                tvTopStatus.setVisibility(View.VISIBLE); tvBottomBar.setVisibility(View.VISIBLE);
+                tvBattery.setVisibility(View.VISIBLE); tvMode.setVisibility(View.VISIBLE); tvFocus.setVisibility(View.VISIBLE);
             }
             if (afOverlay != null) { afOverlay.stopFocus(mCamera); }
-            return super.onKeyUp(keyCode, event);
         }
         return super.onKeyUp(keyCode, event);
     }
@@ -665,24 +568,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         for (int i = 0; i < 11; i++) {
             boolean sel = (i == menuSelection);
             menuRows[i].setBackgroundColor(sel ? Color.rgb(230, 50, 15) : Color.TRANSPARENT);
-            
-            int textColor;
-            if (sel) {
-                textColor = Color.WHITE;
-            } else if (i > 7) {
-                textColor = Color.GRAY;
-            } else {
-                textColor = Color.WHITE;
-            }
-
-            menuLabels[i].setTextColor(textColor);
-            menuValues[i].setTextColor(textColor);
+            menuLabels[i].setTextColor(sel ? Color.WHITE : (i > 7 ? Color.GRAY : Color.WHITE));
+            menuValues[i].setTextColor(sel ? Color.WHITE : (i > 7 ? Color.GRAY : Color.WHITE));
         }
     }
 
     private void cycleMode(int dir) {
-        int ord = (mDialMode + dir + 6) % 6;
-        mDialMode = ord;
+        mDialMode = (mDialMode + dir + 6) % 6;
         updateMainHUD();
     }
 
@@ -692,25 +584,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             Camera.Parameters p = mCamera.getParameters();
             CameraEx.ParametersModifier pm = mCameraEx.createParametersModifier(p);
             
-            if (mDialMode == DIAL_MODE_RTL) { 
-                currentSlot = (currentSlot + d + 10) % 10; 
-                triggerLutPreload(); 
-            }
-            else if (mDialMode == DIAL_MODE_SHUTTER) { 
-                if (d > 0) mCameraEx.incrementShutterSpeed(); 
-                else mCameraEx.decrementShutterSpeed(); 
-            }
-            else if (mDialMode == DIAL_MODE_APERTURE) { 
-                if (d > 0) mCameraEx.incrementAperture(); 
-                else mCameraEx.decrementAperture(); 
-            }
+            if (mDialMode == DIAL_MODE_RTL) { currentSlot = (currentSlot + d + 10) % 10; triggerLutPreload(); }
+            else if (mDialMode == DIAL_MODE_SHUTTER) { if (d > 0) mCameraEx.incrementShutterSpeed(); else mCameraEx.decrementShutterSpeed(); }
+            else if (mDialMode == DIAL_MODE_APERTURE) { if (d > 0) mCameraEx.incrementAperture(); else mCameraEx.decrementAperture(); }
             else if (mDialMode == DIAL_MODE_ISO) {
                 List<Integer> isos = (List<Integer>) pm.getSupportedISOSensitivities();
                 int idx = isos.indexOf(pm.getISOSensitivity());
-                if (idx != -1) { 
-                    pm.setISOSensitivity(isos.get(Math.max(0, Math.min(isos.size()-1, idx + d)))); 
-                    mCamera.setParameters(p); 
-                }
+                if (idx != -1) { pm.setISOSensitivity(isos.get(Math.max(0, Math.min(isos.size()-1, idx + d)))); mCamera.setParameters(p); }
             }
             else if (mDialMode == DIAL_MODE_EXPOSURE) { 
                 p.setExposureCompensation(Math.max(p.getMinExposureCompensation(), Math.min(p.getMaxExposureCompensation(), p.getExposureCompensation() + d))); 
@@ -724,13 +604,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         if(mCamera == null) return;
         RTLProfile prof = profiles[currentSlot];
         
-        // Truncate LUT name and highlight green only in RTL dial mode
         String rawName = recipeNames.get(prof.lutIndex);
         String displayName = rawName.length() > 15 ? rawName.substring(0, 12) + "..." : rawName;
         tvTopStatus.setText("RTL " + (currentSlot + 1) + " [" + displayName + "]\n" + (isReady ? "READY" : "LOADING..."));
         tvTopStatus.setTextColor(mDialMode == DIAL_MODE_RTL ? Color.GREEN : Color.WHITE);
         
-        // Right side review logic
         tvReview.setVisibility(mDialMode == DIAL_MODE_REVIEW ? View.VISIBLE : View.GONE);
         if(mDialMode == DIAL_MODE_REVIEW) tvReview.setBackgroundColor(Color.rgb(230, 50, 15)); 
         else tvReview.setBackgroundColor(Color.argb(140, 40, 40, 40));
@@ -745,9 +623,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             String iso = pm.getISOSensitivity() == 0 ? "ISO AUTO" : "ISO " + pm.getISOSensitivity();
             String exp = String.format("%+.1f", params.getExposureCompensation() * params.getExposureCompensationStep());
 
-            String cAct = "<font color='#00FF00'>"; 
-            String cDef = "<font color='#FFFFFF'>"; 
-            String cEnd = "</font>";
+            String cAct = "<font color='#00FF00'>"; String cDef = "<font color='#FFFFFF'>"; String cEnd = "</font>";
             String space = "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"; 
 
             StringBuilder sb = new StringBuilder();
@@ -761,11 +637,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     }
 
     private void scanRecipes() { 
-        recipePaths.clear(); 
-        recipeNames.clear();
-        recipePaths.add("NONE"); 
-        recipeNames.add("NONE");
-        
+        recipePaths.clear(); recipeNames.clear(); recipePaths.add("NONE"); recipeNames.add("NONE");
         File lutDir = getLutDir();
         if (lutDir.exists() && lutDir.listFiles() != null) {
             for (File f : lutDir.listFiles()) {
@@ -792,124 +664,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     }
 
     private void triggerLutPreload() {
-        if (currentPreloadTask != null) currentPreloadTask.cancel(true);
-        if (profiles[currentSlot].lutIndex > 0) {
-            currentPreloadTask = new PreloadLutTask(); 
-            currentPreloadTask.execute(profiles[currentSlot].lutIndex);
-        } else {
-            isReady = true; 
-            updateMainHUD();
-        }
-    }
-
-    private void startAutoProcessPolling() {
-        isPolling = true;
-        new Thread(new Runnable() {
-            @Override 
-            public void run() {
-                while (isPolling) {
-                    try {
-                        Thread.sleep(150); 
-                        File dcim = new File(Environment.getExternalStorageDirectory(), "DCIM");
-                        File sonyDir = new File(dcim, "100MSDCF");
-                        if (sonyDir.exists()) {
-                            File[] files = sonyDir.listFiles();
-                            if (files != null && files.length > 0) {
-                                File newest = null; 
-                                long maxModified = 0;
-                                for (File f : files) {
-                                    if (f.getName().toUpperCase().endsWith(".JPG") && !f.getName().startsWith("PRCS") && !f.getName().startsWith("GRADED")) {
-                                        if (f.lastModified() > maxModified) { 
-                                            maxModified = f.lastModified(); 
-                                            newest = f; 
-                                        }
-                                    }
-                                }
-                                if (newest != null) {
-                                    if (lastNewestFileTime == 0) { 
-                                        lastNewestFileTime = maxModified; 
-                                    } else if (maxModified > lastNewestFileTime) {
-                                        lastNewestFileTime = maxModified;
-                                        if (!isProcessing && (isReady || profiles[currentSlot].lutIndex == 0)) {
-                                            final String path = newest.getAbsolutePath();
-                                            runOnUiThread(new Runnable() { 
-                                                @Override 
-                                                public void run() { 
-                                                    if (!isProcessing) new ProcessTask().execute(path); 
-                                                } 
-                                            });
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } catch (Exception e) {}
-                }
-            }
-        }).start();
-    }
-
-    private class PreloadLutTask extends AsyncTask<Integer, Void, Boolean> {
-        @Override 
-        protected void onPreExecute() { 
-            isReady = false; 
-            updateMainHUD(); 
-        }
-        @Override 
-        protected Boolean doInBackground(Integer... params) {
-            if (mEngine == null) return false;
-            return mEngine.loadLut(new File(recipePaths.get(params[0])), recipeNames.get(params[0]));
-        }
-        @Override 
-        protected void onPostExecute(Boolean success) { 
-            if (isCancelled()) return; 
-            isReady = true; 
-            updateMainHUD(); 
-        }
-    }
-
-    private class ProcessTask extends AsyncTask<String, Void, String> {
-        @Override 
-        protected void onPreExecute() { 
-            isProcessing = true; 
-            tvTopStatus.setText("PROCESSING..."); 
-            tvTopStatus.setTextColor(Color.YELLOW);
-        }
-        @Override 
-        protected String doInBackground(String... params) {
-            try {
-                File original = new File(params[0]);
-                if (!original.exists()) return "ERR";
-                long lastSize = -1; 
-                int timeout = 0;
-                while (timeout < 100) {
-                    long currentSize = original.length();
-                    if (currentSize > 0 && currentSize == lastSize) break;
-                    lastSize = currentSize; 
-                    Thread.sleep(50); 
-                    timeout++;
-                }
-
-                int scale = (qualityIndex == 0) ? 4 : (qualityIndex == 2 ? 1 : 2);
-                File outDir = new File(Environment.getExternalStorageDirectory(), "GRADED");
-                if (!outDir.exists()) outDir.mkdirs();
-                File outFile = new File(outDir, original.getName());
-
-                RTLProfile p = profiles[currentSlot];
-                if (mEngine != null && mEngine.applyLutToJpeg(original.getAbsolutePath(), outFile.getAbsolutePath(), scale, p.opacity, p.grain * 20, p.grainSize, p.vignette * 20, p.rollOff * 20)) {
-                    sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(outFile)));
-                    return "SAVED " + (scale==1?"24MP":(scale==2?"6MP":"1.5MP"));
-                }
-                return "FAILED";
-            } catch (Throwable t) { 
-                return "ERR"; 
-            }
-        }
-        @Override 
-        protected void onPostExecute(String result) {
-            isProcessing = false; 
-            tvTopStatus.setTextColor(Color.WHITE); 
-            updateMainHUD(); 
+        if(mProcessor != null) {
+            mProcessor.triggerLutPreload(recipePaths.get(profiles[currentSlot].lutIndex), recipeNames.get(profiles[currentSlot].lutIndex));
         }
     }
 
@@ -930,32 +686,23 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     }
 
     private void closeCamera() {
-        if (mCameraEx != null) { 
-            mCameraEx.release(); 
-            mCameraEx = null; 
-            mCamera = null; 
-        }
+        if (mCameraEx != null) { mCameraEx.release(); mCameraEx = null; mCamera = null; }
     }
 
     @Override public void surfaceCreated(SurfaceHolder h) { hasSurface = true; openCamera(); }
-
     @Override public void surfaceDestroyed(SurfaceHolder h) { hasSurface = false; closeCamera(); }
     
-    @Override 
-    protected void onResume() { 
-        super.onResume(); 
-        openCamera();
+    @Override protected void onResume() { 
+        super.onResume(); openCamera(); 
         if (mCamera != null) updateMainHUD(); 
         registerReceiver(batteryReceiver, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
-        startAutoProcessPolling(); 
+        if (mScanner != null) mScanner.start(); 
     }
     
-    @Override 
-    protected void onPause() { 
-        super.onPause(); 
-        closeCamera(); 
+    @Override protected void onPause() { 
+        super.onPause(); closeCamera(); 
         try { unregisterReceiver(batteryReceiver); } catch (Exception e) {}
-        isPolling = false; 
+        if (mScanner != null) mScanner.stop(); 
         savePreferences(); 
     }
     
@@ -973,10 +720,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
         public ProReticleView(Context context) {
             super(context);
-            paint = new Paint();
-            paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeWidth(6);
-            paint.setAntiAlias(true);
+            paint = new Paint(); paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(6); paint.setAntiAlias(true);
         }
 
         public void startFocus(Camera cam) {
@@ -984,33 +728,19 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             if (cam != null) {
                 try {
                     cam.autoFocus(new Camera.AutoFocusCallback() {
-                        @Override
-                        public void onAutoFocus(boolean success, Camera camera) {
-                            fallbackState = success ? STATE_LOCKED : STATE_FAILED;
-                            invalidate();
-                        }
+                        @Override public void onAutoFocus(boolean success, Camera camera) { fallbackState = success ? STATE_LOCKED : STATE_FAILED; invalidate(); }
                     });
-                } catch (Exception e) { 
-                    fallbackState = STATE_IDLE; 
-                }
+                } catch (Exception e) { fallbackState = STATE_IDLE; }
             }
-            isPolling = true;
-            invalidate();
+            isPolling = true; invalidate();
         }
 
         public void stopFocus(Camera cam) {
-            if (cam != null) { 
-                try { 
-                    cam.cancelAutoFocus(); 
-                } catch (Exception e) {} 
-            }
-            isPolling = false;
-            fallbackState = STATE_IDLE;
-            invalidate();
+            if (cam != null) { try { cam.cancelAutoFocus(); } catch (Exception e) {} }
+            isPolling = false; fallbackState = STATE_IDLE; invalidate();
         }
 
-        @Override
-        protected void onDraw(Canvas canvas) {
+        @Override protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);
             if (!isPolling) return;
             switch (fallbackState) {
@@ -1019,20 +749,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 case STATE_LOCKED:    paint.setColor(Color.GREEN); break;
                 case STATE_FAILED:    paint.setColor(Color.RED); break;
             }
-            int cx = getWidth() / 2;
-            int cy = getHeight() / 2;
-            int size = 60, bracket = 15;
-            canvas.drawLine(cx-size, cy-size, cx-size+bracket, cy-size, paint);
-            canvas.drawLine(cx-size, cy-size, cx-size, cy-size+bracket, paint);
-            canvas.drawLine(cx+size, cy-size, cx+size-bracket, cy-size, paint);
-            canvas.drawLine(cx+size, cy-size, cx+size, cy-size+bracket, paint);
-            canvas.drawLine(cx-size, cy+size, cx-size+bracket, cy+size, paint);
-            canvas.drawLine(cx-size, cy+size, cx-size, cy+size-bracket, paint);
-            canvas.drawLine(cx+size, cy+size, cx+size-bracket, cy+size, paint);
-            canvas.drawLine(cx+size, cy+size, cx+size, cy+size-bracket, paint);
-            paint.setStyle(Paint.Style.FILL);
-            canvas.drawCircle(cx, cy, 3, paint);
-            paint.setStyle(Paint.Style.STROKE);
+            int cx = getWidth() / 2, cy = getHeight() / 2, size = 60, bracket = 15;
+            canvas.drawLine(cx-size, cy-size, cx-size+bracket, cy-size, paint); canvas.drawLine(cx-size, cy-size, cx-size, cy-size+bracket, paint);
+            canvas.drawLine(cx+size, cy-size, cx+size-bracket, cy-size, paint); canvas.drawLine(cx+size, cy-size, cx+size, cy-size+bracket, paint);
+            canvas.drawLine(cx-size, cy+size, cx-size+bracket, cy+size, paint); canvas.drawLine(cx-size, cy+size, cx-size, cy+size-bracket, paint);
+            canvas.drawLine(cx+size, cy+size, cx+size-bracket, cy+size, paint); canvas.drawLine(cx+size, cy+size, cx+size, cy+size-bracket, paint);
+            paint.setStyle(Paint.Style.FILL); canvas.drawCircle(cx, cy, 3, paint); paint.setStyle(Paint.Style.STROKE);
             postInvalidateDelayed(50);
         }
     }
