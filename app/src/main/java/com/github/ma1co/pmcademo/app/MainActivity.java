@@ -439,7 +439,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     }
 
     @Override 
-    public boolean onKeyDown(int keyCode, KeyEvent event) {
+    public boolean 
+    Down(int keyCode, KeyEvent event) {
         int sc = event.getScanCode();
         
         if (sc == ScalarInput.ISV_KEY_S1_1 && event.getRepeatCount() == 0) {
@@ -817,6 +818,45 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     }
 
     @Override public void surfaceCreated(SurfaceHolder h) { hasSurface = true; openCamera(); }
+
+        // Autofocus handling methods
+    @Override
+    public boolean onKeyDown(int keyCode, KeyEvent event) {
+        if (keyCode == KeyEvent.KEYCODE_FOCUS) {
+            onFocusKeyDown();
+            return true;
+        } else if (keyCode == KeyEvent.KEYCODE_CAMERA) {
+            // Camera shutter button pressed
+            return true;
+        }
+        return super.onKeyDown(keyCode, event);
+    }
+
+    @Override
+    public boolean onKeyUp(int keyCode, KeyEvent event) {
+        if (keyCode == KeyEvent.KEYCODE_FOCUS) {
+            onFocusKeyUp();
+            return true;
+        } else if (keyCode == KeyEvent.KEYCODE_CAMERA) {
+            // Take photo
+            return true;
+        }
+        return super.onKeyUp(keyCode, event);
+    }
+
+    private void onFocusKeyDown() {
+        // Half-press shutter button to focus
+        Log.d(TAG, "Focus key down - autofocus triggered");
+        // TODO: Implement AF light control and focus indicator
+        // camera.setAutofocusMode(CameraEx.AUTOFOCUS_MODE_CONTINUOUS);
+    }
+
+    private void onFocusKeyUp() {
+        // Release focus
+        Log.d(TAG, "Focus key up - autofocus released");
+        // TODO: Turn off AF light and clear indicators
+    }
+
     @Override public void surfaceDestroyed(SurfaceHolder h) { hasSurface = false; closeCamera(); }
     
     @Override 
