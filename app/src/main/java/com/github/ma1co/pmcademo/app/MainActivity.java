@@ -206,14 +206,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         rightParams.setMargins(0, 20, 20, 0);
         mainUIContainer.addView(rightBar, rightParams);
 
-        // Phase 2.2: Large, Escapable Touch Buttons
         LinearLayout leftBar = new LinearLayout(this);
         leftBar.setOrientation(LinearLayout.VERTICAL);
         
         tvMode = createSideTextIcon("M");
         tvMode.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
-                // Tap to toggle on, tap again to escape to RTL
                 mDialMode = (mDialMode == DIAL_MODE_PASM) ? DIAL_MODE_RTL : DIAL_MODE_PASM;
                 updateMainHUD();
             }
@@ -223,7 +221,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         tvFocusMode = createSideTextIcon("AF-S");
         tvFocusMode.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
-                // Tap to toggle on, tap again to escape to RTL
                 mDialMode = (mDialMode == DIAL_MODE_FOCUS) ? DIAL_MODE_RTL : DIAL_MODE_FOCUS;
                 updateMainHUD();
             }
@@ -285,7 +282,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         tvPlaybackInfo = new TextView(this);
         tvPlaybackInfo.setTextColor(Color.WHITE);
         tvPlaybackInfo.setTextSize(18);
-        tvPlaybackInfo.setShadowLayer(3, 0, Color.BLACK);
+        tvPlaybackInfo.setShadowLayer(3, 0, 0, Color.BLACK);
         FrameLayout.LayoutParams pbInfoParams = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.RIGHT);
         pbInfoParams.setMargins(0, 30, 30, 0);
         playbackContainer.addView(tvPlaybackInfo, pbInfoParams);
@@ -300,9 +297,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         TextView tv = new TextView(this);
         tv.setText(text); 
         tv.setTextColor(Color.WHITE); 
-        tv.setTextSize(22); // Larger text
+        tv.setTextSize(22); 
         tv.setTypeface(Typeface.MONOSPACE, Typeface.BOLD); 
-        tv.setPadding(25, 15, 25, 15); // Much larger touch target
+        tv.setPadding(25, 15, 25, 15); 
         tv.setBackgroundColor(Color.argb(140, 40, 40, 40));
         tv.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
@@ -490,21 +487,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         int sc = event.getScanCode();
         if (sc == ScalarInput.ISV_KEY_S1_1 && event.getRepeatCount() == 0) {
-            // Hide UI during half-press
             if (displayState == 0 && !isMenuOpen && !isPlaybackMode) {
                 tvTopStatus.setVisibility(View.GONE); tvBottomBar.setVisibility(View.GONE);
                 tvBattery.setVisibility(View.GONE); tvMode.setVisibility(View.GONE); tvFocusMode.setVisibility(View.GONE); tvReview.setVisibility(View.GONE);
             }
-            
-            // Check MF to prevent "chattering"
-            if (afOverlay != null && mCamera != null) { 
-                try {
-                    String fm = mCamera.getParameters().getFocusMode();
-                    if (!"manual".equals(fm)) {
-                        afOverlay.startFocus(mCamera); 
-                    }
-                } catch (Exception e) {}
-            }
+            if (afOverlay != null) { afOverlay.startFocus(mCamera); }
             return super.onKeyDown(keyCode, event);
         }
 
@@ -559,20 +546,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     @Override 
     public boolean onKeyUp(int keyCode, KeyEvent event) {
         if (event.getScanCode() == ScalarInput.ISV_KEY_S1_1) {
-            // Restore UI after half-press
             if (displayState == 0 && !isMenuOpen && !isPlaybackMode) {
                 tvTopStatus.setVisibility(View.VISIBLE); tvBottomBar.setVisibility(View.VISIBLE);
                 tvBattery.setVisibility(View.VISIBLE); tvMode.setVisibility(View.VISIBLE); tvFocusMode.setVisibility(View.VISIBLE);
                 if (mDialMode == DIAL_MODE_REVIEW) tvReview.setVisibility(View.VISIBLE);
             }
-            if (afOverlay != null && mCamera != null) { 
-                try {
-                    String fm = mCamera.getParameters().getFocusMode();
-                    if (!"manual".equals(fm)) {
-                        afOverlay.stopFocus(mCamera); 
-                    }
-                } catch (Exception e) {}
-            }
+            if (afOverlay != null) { afOverlay.stopFocus(mCamera); }
         }
         return super.onKeyUp(keyCode, event);
     }
@@ -817,20 +796,37 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         }
 
         public void startFocus(Camera cam) {
-            fallbackState = STATE_SEARCHING;
-            if (cam != null) {
-                try {
-                    cam.autoFocus(new Camera.AutoFocusCallback() {
-                        @Override public void onAutoFocus(boolean success, Camera camera) { fallbackState = success ? STATE_LOCKED : STATE_FAILED; invalidate(); }
-                    });
-                } catch (Exception e) { fallbackState = STATE_IDLE; }
-            }
-            isPolling = true; invalidate();
+            if (cam == null) return;
+            try {
+                // Abort completely if the camera is in Manual Focus mode
+                if ("manual".equals(cam.getParameters().getFocusMode())) return;
+                
+                fallbackState = STATE_SEARCHING;
+                cam.autoFocus(new Camera.AutoFocusCallback() {
+                    @Override public void onAutoFocus(boolean success, Camera camera) { 
+                        fallbackState = success ? STATE_LOCKED : STATE_FAILED; 
+                        invalidate(); 
+                    }
+                });
+                isPolling = true; 
+                invalidate();
+            } catch (Exception e) {}
         }
 
         public void stopFocus(Camera cam) {
-            if (cam != null) { try { cam.cancelAutoFocus(); } catch (Exception e) {} }
-            isPolling = false; fallbackState = STATE_IDLE; invalidate();
+            // Always clear the UI to prevent it getting stuck
+            isPolling = false; 
+            fallbackState = STATE_IDLE; 
+            invalidate();
+            
+            if (cam != null) { 
+                try { 
+                    // Only send cancel command if not in MF
+                    if (!"manual".equals(cam.getParameters().getFocusMode())) {
+                        cam.cancelAutoFocus(); 
+                    }
+                } catch (Exception e) {} 
+            }
         }
 
         @Override protected void onDraw(Canvas canvas) {
