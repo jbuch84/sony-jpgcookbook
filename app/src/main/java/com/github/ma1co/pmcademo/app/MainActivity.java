@@ -75,7 +75,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private boolean isMenuOpen = false;
     private boolean isProcessing = false;
     private boolean isReady = false;
-    private int displayState = 0; // 0: HUD, 1: Clean
+    private int displayState = 0; 
     
     // --- UI Toggles ---
     private boolean prefShowFocusMeter = true;
@@ -98,9 +98,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             int level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
             int scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
             if (level >= 0 && scale > 0) {
-                int pct = (level * 100) / scale;
-                tvBattery.setText(pct + "%");
-                batteryIcon.setLevel(pct);
+                final int pct = (level * 100) / scale;
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        tvBattery.setText(pct + "%");
+                        batteryIcon.setLevel(pct);
+                    }
+                });
             }
         }
     };
@@ -109,7 +114,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         
-        // Init Managers
         cameraManager = new SonyCameraManager(this);
         inputManager = new InputManager(this);
         recipeManager = new RecipeManager();
@@ -130,19 +134,22 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     private void setupEngines() {
         mProcessor = new ImageProcessor(this, new ImageProcessor.ProcessorCallback() {
-            @Override public void onPreloadStarted() { isReady = false; runOnUiThread(() -> updateMainHUD()); }
-            @Override public void onPreloadFinished(boolean success) { isReady = true; runOnUiThread(() -> updateMainHUD()); }
-            @Override public void onProcessStarted() { isProcessing = true; runOnUiThread(() -> { tvTopStatus.setText("PROCESSING..."); tvTopStatus.setTextColor(Color.YELLOW); }); }
-            @Override public void onProcessFinished(String res) { isProcessing = false; runOnUiThread(() -> { tvTopStatus.setTextColor(Color.WHITE); updateMainHUD(); }); }
+            @Override public void onPreloadStarted() { isReady = false; runOnUiThread(new Runnable() { @Override public void run() { updateMainHUD(); } }); }
+            @Override public void onPreloadFinished(boolean success) { isReady = true; runOnUiThread(new Runnable() { @Override public void run() { updateMainHUD(); } }); }
+            @Override public void onProcessStarted() { isProcessing = true; runOnUiThread(new Runnable() { @Override public void run() { tvTopStatus.setText("PROCESSING..."); tvTopStatus.setTextColor(Color.YELLOW); } }); }
+            @Override public void onProcessFinished(String res) { isProcessing = false; runOnUiThread(new Runnable() { @Override public void run() { tvTopStatus.setTextColor(Color.WHITE); updateMainHUD(); } }); }
         });
 
         String dcim = Environment.getExternalStorageDirectory().getAbsolutePath() + "/DCIM/100MSDCF";
         mScanner = new SonyFileScanner(dcim, new SonyFileScanner.ScannerCallback() {
             @Override public boolean isReadyToProcess() { return isReady && !isProcessing && recipeManager.getCurrentProfile().lutIndex != 0; }
-            @Override public void onNewPhotoDetected(String path) {
-                runOnUiThread(() -> {
-                    File outDir = new File(Environment.getExternalStorageDirectory(), "GRADED");
-                    mProcessor.processJpeg(path, outDir.getAbsolutePath(), recipeManager.getQualityIndex(), recipeManager.getCurrentProfile());
+            @Override public void onNewPhotoDetected(final String path) {
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        File outDir = new File(Environment.getExternalStorageDirectory(), "GRADED");
+                        mProcessor.processJpeg(path, outDir.getAbsolutePath(), recipeManager.getQualityIndex(), recipeManager.getCurrentProfile());
+                    }
                 });
             }
         });
@@ -262,16 +269,19 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     // --- CameraEventListener ---
     @Override public void onCameraReady() { applyHardwareRecipe(); updateMainHUD(); }
-    @Override public void onShutterSpeedChanged() { runOnUiThread(() -> updateMainHUD()); }
-    @Override public void onApertureChanged() { runOnUiThread(() -> updateMainHUD()); }
-    @Override public void onIsoChanged() { runOnUiThread(() -> updateMainHUD()); }
-    @Override public void onFocusPositionChanged(float ratio) {
-        runOnUiThread(() -> {
-            if (focusMeter != null && mDialMode == InputManager.DIAL_MODE_FOCUS) {
-                Camera c = cameraManager.getCamera();
-                if (c != null) {
-                    float ap = cameraManager.getCameraEx().createParametersModifier(c.getParameters()).getAperture() / 100.0f;
-                    focusMeter.update(ratio, ap, true);
+    @Override public void onShutterSpeedChanged() { runOnUiThread(new Runnable() { @Override public void run() { updateMainHUD(); } }); }
+    @Override public void onApertureChanged() { runOnUiThread(new Runnable() { @Override public void run() { updateMainHUD(); } }); }
+    @Override public void onIsoChanged() { runOnUiThread(new Runnable() { @Override public void run() { updateMainHUD(); } }); }
+    @Override public void onFocusPositionChanged(final float ratio) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (focusMeter != null && mDialMode == InputManager.DIAL_MODE_FOCUS) {
+                    Camera c = cameraManager.getCamera();
+                    if (c != null) {
+                        float ap = cameraManager.getCameraEx().createParametersModifier(c.getParameters()).getAperture() / 100.0f;
+                        focusMeter.update(ratio, ap, true);
+                    }
                 }
             }
         });
@@ -289,7 +299,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (dir.exists() && dir.listFiles() != null) {
             for (File f : dir.listFiles()) if (f.getName().toLowerCase().endsWith(".jpg")) playbackFiles.add(f);
         }
-        Collections.sort(playbackFiles, (f1, f2) -> Long.valueOf(f2.lastModified()).compareTo(f1.lastModified()));
+        Collections.sort(playbackFiles, new Comparator<File>() {
+            @Override
+            public int compare(File f1, File f2) {
+                return Long.valueOf(f2.lastModified()).compareTo(f1.lastModified());
+            }
+        });
         
         if (playbackFiles.isEmpty()) return;
         isPlaybackMode = true;
@@ -323,7 +338,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         int sel = menuManager.getSelection();
         int pg = menuManager.getCurrentPage();
 
-        if (pg == 1) { // Base
+        if (pg == 1) { 
             switch(sel) {
                 case 0: recipeManager.setCurrentSlot(recipeManager.getCurrentSlot() + dir); break;
                 case 1: p.lutIndex = (p.lutIndex + dir + recipeManager.getRecipePaths().size()) % recipeManager.getRecipePaths().size(); break;
@@ -333,16 +348,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 case 5: p.rollOff = Math.max(0, Math.min(5, p.rollOff + dir)); break;
                 case 6: p.vignette = Math.max(0, Math.min(5, p.vignette + dir)); break;
             }
-        } else if (pg == 2) { // Color
+        } else if (pg == 2) { 
             switch(sel) {
-                case 0: /* Logic for WB cycle labels in MenuManager */ break;
                 case 1: p.wbShift = Math.max(-7, Math.min(7, p.wbShift + dir)); break;
                 case 2: p.wbShiftGM = Math.max(-7, Math.min(7, p.wbShiftGM + dir)); break;
                 case 4: p.contrast = Math.max(-3, Math.min(3, p.contrast + dir)); break;
                 case 5: p.saturation = Math.max(-3, Math.min(3, p.saturation + dir)); break;
                 case 6: p.sharpness = Math.max(-3, Math.min(3, p.sharpness + dir)); break;
             }
-        } else if (pg == 3) { // Global
+        } else if (pg == 3) { 
             switch(sel) {
                 case 0: recipeManager.setQualityIndex(recipeManager.getQualityIndex() + dir); break;
                 case 2: prefShowFocusMeter = !prefShowFocusMeter; break;
@@ -374,7 +388,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     }
     @Override protected void onPause() { 
         super.onPause(); 
-        cameraManager.close(); // WALLED GARDEN RESTORE TRIGGERS HERE
+        cameraManager.close(); 
         connectivityManager.stopNetworking(); 
         recipeManager.savePreferences(); 
         unregisterReceiver(batteryReceiver);
