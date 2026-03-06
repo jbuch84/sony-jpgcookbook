@@ -36,9 +36,8 @@ public class HttpServer extends NanoHTTPD {
         File root = Environment.getExternalStorageDirectory();
 
         try {
-            // PURE RAW BINARY STREAM LISTENER 
-            // Completely bypasses NanoHTTPD's internal parser and Temp File limits
             if (Method.POST.equals(session.getMethod()) && uri.equals("/api/upload_lut")) {
+                FileOutputStream out = null;
                 try {
                     Map<String, String> headers = session.getHeaders();
                     String fileName = headers.get("x-file-name");
@@ -54,15 +53,13 @@ public class HttpServer extends NanoHTTPD {
                     if (!lutDir.exists()) lutDir.mkdirs();
                     File destFile = new File(lutDir, fileName);
 
-                    // Stream raw bytes directly from the network socket to the SD card
                     InputStream in = session.getInputStream();
-                    FileOutputStream out = new FileOutputStream(destFile);
+                    out = new FileOutputStream(destFile);
                     
                     byte[] buffer = new byte[8192];
                     int read;
                     int totalRead = 0;
                     
-                    // Read exactly the amount of bytes sent by the browser
                     while (totalRead < contentLength) {
                         int bytesToRead = Math.min(buffer.length, contentLength - totalRead);
                         read = in.read(buffer, 0, bytesToRead);
@@ -70,13 +67,12 @@ public class HttpServer extends NanoHTTPD {
                         out.write(buffer, 0, read);
                         totalRead += read;
                     }
-                    
                     out.flush();
-                    out.close();
-
                     return newFixedLengthResponse(Response.Status.OK, "application/json", "{\"status\":\"success\"}");
                 } catch (Exception e) {
                     return newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "application/json", "{\"error\":\"Upload failed\"}");
+                } finally {
+                    try { if (out != null) out.close(); } catch (Exception e) {}
                 }
             }
 

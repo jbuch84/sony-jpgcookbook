@@ -951,6 +951,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             } 
         } catch (Exception e) {}
         
+        savePreferences(); // INSTANT SAVE
         renderMenu();
         uiHandler.removeCallbacks(applySettingsRunnable);
         uiHandler.postDelayed(applySettingsRunnable, 400);
@@ -1059,9 +1060,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             else if (mDialMode == DIAL_MODE_PASM) {
                 List<String> modes = p.getSupportedSceneModes();
                 if (modes != null) { 
-                    // Make SURE shutter-priority is captured properly
+                    // FILTER: Only allow professional PASM modes. 
                     List<String> validPasm = new ArrayList<String>();
-                    String[] desired = {"manual-exposure", "aperture-priority", "shutter-priority", "program-auto", "auto", "intelligent-active"};
+                    String[] desired = {"manual-exposure", "aperture-priority", "shutter-priority", "program-auto"}; 
                     for(String m : desired) { if (modes.contains(m)) validPasm.add(m); }
                     
                     if(!validPasm.isEmpty()) {
@@ -1111,12 +1112,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             tvMode.setBackgroundColor(mDialMode == DIAL_MODE_PASM ? Color.rgb(230, 50, 15) : Color.argb(140, 40, 40, 40));
             String sceneMode = params.getSceneMode();
             if (sceneMode != null) {
-                // BUG FIX: Ensure exact string matching for PASM letters, particularly 'S'
+                // Precise mapping for professional modes. 
                 if (sceneMode.equals("manual-exposure")) tvMode.setText("M");
                 else if (sceneMode.equals("aperture-priority")) tvMode.setText("A");
                 else if (sceneMode.equals("shutter-priority")) tvMode.setText("S");
                 else if (sceneMode.equals("program-auto")) tvMode.setText("P");
-                else if (sceneMode.equals("auto") || sceneMode.equals("intelligent-active")) tvMode.setText("AUTO");
                 else tvMode.setText("SCN"); 
             }
 
