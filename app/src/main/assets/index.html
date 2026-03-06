@@ -356,14 +356,17 @@
 
             document.getElementById('lut-upload-status').innerText = `UPLOADING: ${file.name.toUpperCase()}...`;
             document.getElementById('lut-upload-status').style.color = 'yellow';
-            
-            const formData = new FormData();
-            formData.append('file', file);
 
             try {
+                // Send the raw file object directly into the stream
                 const res = await fetch('/api/upload_lut', {
                     method: 'POST',
-                    body: formData
+                    headers: {
+                        'X-File-Name': file.name,
+                        'Content-Length': file.size,
+                        'Content-Type': 'application/octet-stream'
+                    },
+                    body: file 
                 });
                 
                 if (res.ok) {
@@ -378,7 +381,7 @@
                 document.getElementById('lut-upload-status').style.color = 'red';
             }
             
-            event.target.value = ''; // Reset input so you can upload the same file again if needed
+            event.target.value = ''; 
         }
 
         init();

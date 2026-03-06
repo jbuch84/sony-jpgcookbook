@@ -51,6 +51,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private SurfaceView mSurfaceView;
     private boolean hasSurface = false; 
     
+    private String originalCameraParams = null; // Snapshot of base camera settings
+    
     private FrameLayout mainUIContainer;
     private LinearLayout menuContainer; 
     private TextView tvMenuTitle;
@@ -163,7 +165,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         @Override
         public void run() {
             if (displayState == 0 && !isMenuOpen && !isPlaybackMode && !isProcessing && hasSurface && mCamera != null) {
-                if (ScalarInput.getKeyStatus(ScalarInput.ISV_KEY_S1_1).status == 0) {
+                
+                boolean s1_1_free = ScalarInput.getKeyStatus(ScalarInput.ISV_KEY_S1_1).status == 0;
+                boolean s1_2_free = ScalarInput.getKeyStatus(ScalarInput.ISV_KEY_S1_2).status == 0;
+                
+                // Only force UI back on if NEITHER shutter stage is pressed
+                if (s1_1_free && s1_2_free) {
                     if (afOverlay != null && afOverlay.isPolling()) {
                         afOverlay.stopFocus(mCamera);
                     }
@@ -735,7 +742,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 p.setWhiteBalance(targetWb);
             }
 
-            // Phase 9.4: Safe HAL Injection 
             if (p.get("dro-mode") != null) {
                 if ("OFF".equals(prof.dro)) {
                     p.set("dro-mode", "off");
@@ -1103,15 +1109,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private void updateMainHUD() {
         if(mCamera == null) return;
         
-        if (displayState == 0 && !isMenuOpen && !isPlaybackMode) {
-            tvTopStatus.setVisibility(View.VISIBLE);
-            llBottomBar.setVisibility(View.VISIBLE);
-            tvBattery.setVisibility(View.VISIBLE);
-            tvMode.setVisibility(View.VISIBLE);
-            tvFocusMode.setVisibility(View.VISIBLE);
-            tvReview.setVisibility(View.VISIBLE);
-        }
-        
         RTLProfile prof = profiles[currentSlot];
         
         String rawName = recipeNames.get(prof.lutIndex);
@@ -1126,7 +1123,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
         gridLines.setVisibility(prefShowGridLines ? View.VISIBLE : View.GONE);
         cinemaMattes.setVisibility(prefShowCinemaMattes ? View.VISIBLE : View.GONE);
-        if(focusMeter != null) focusMeter.setVisibility(prefShowFocusMeter ? View.VISIBLE : View.GONE);
 
         try {
             Camera.Parameters params = mCamera.getParameters();
@@ -1220,6 +1216,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 mCamera = mCameraEx.getNormalCamera();
                 mCameraEx.startDirectShutter(); 
                 
+                if (originalCameraParams == null && mCamera != null) {
+                    originalCameraParams = mCamera.getParameters().flatten();
+                }
+                
                 try {
                     Class<?> apListenerClass = Class.forName("com.sony.scalar.hardware.CameraEx$ApertureChangeListener");
                     Object apProxy = java.lang.reflect.Proxy.newProxyInstance(
@@ -1303,7 +1303,19 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     }
 
     private void closeCamera() {
-        if (mCameraEx != null) { mCameraEx.release(); mCameraEx = null; mCamera = null; }
+        if (mCamera != null && originalCameraParams != null) {
+            try {
+                Camera.Parameters p = mCamera.getParameters();
+                p.unflatten(originalCameraParams);
+                mCamera.setParameters(p);
+            } catch (Exception e) {}
+        }
+        
+        if (mCameraEx != null) { 
+            mCameraEx.release(); 
+            mCameraEx = null; 
+            mCamera = null; 
+        }
     }
 
     @Override public void surfaceCreated(SurfaceHolder h) { hasSurface = true; openCamera(); }
