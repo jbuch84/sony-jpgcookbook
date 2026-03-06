@@ -38,24 +38,20 @@ public class HttpServer extends NanoHTTPD {
         super(PORT);
         this.context = context;
         
-        // Route NanoHTTPD Temp files to Android Cache to prevent Sony /tmp crash
         this.setTempFileManagerFactory(new TempFileManagerFactory() {
             @Override
             public TempFileManager create() {
-                return new AndroidTempFileManager(HttpServer.this.context);
+                return new AndroidTempFileManager();
             }
         });
     }
 
-    // Android-Safe Temporary File Handlers
+    // Phase 9.4: Force Temp Files to SD Card to prevent OS Crash from out-of-memory
     private static class AndroidTempFile implements TempFile {
         private File file;
         private OutputStream fstream;
-        public AndroidTempFile(Context ctx) throws IOException {
-            File cacheDir = ctx.getCacheDir();
-            if (cacheDir == null) {
-                cacheDir = new File(Environment.getExternalStorageDirectory(), "LUTS/.tmp");
-            }
+        public AndroidTempFile() throws IOException {
+            File cacheDir = new File(Environment.getExternalStorageDirectory(), "LUTS/.tmp");
             if (!cacheDir.exists()) cacheDir.mkdirs();
             file = File.createTempFile("NanoHTTPD-", "", cacheDir);
             fstream = new FileOutputStream(file);
@@ -66,10 +62,8 @@ public class HttpServer extends NanoHTTPD {
     }
 
     private static class AndroidTempFileManager implements TempFileManager {
-        private Context context;
         private List<TempFile> tempFiles;
-        public AndroidTempFileManager(Context context) {
-            this.context = context;
+        public AndroidTempFileManager() {
             this.tempFiles = new ArrayList<TempFile>();
         }
         @Override public void clear() {
@@ -79,7 +73,7 @@ public class HttpServer extends NanoHTTPD {
             tempFiles.clear();
         }
         @Override public TempFile createTempFile(String filename_hint) throws Exception {
-            AndroidTempFile tempFile = new AndroidTempFile(context);
+            AndroidTempFile tempFile = new AndroidTempFile();
             tempFiles.add(tempFile);
             return tempFile;
         }
@@ -91,7 +85,6 @@ public class HttpServer extends NanoHTTPD {
         File root = Environment.getExternalStorageDirectory();
 
         try {
-            // LUT UPLOAD ENDPOINT
             if (Method.POST.equals(session.getMethod()) && uri.equals("/api/upload_lut")) {
                 try {
                     Map<String, String> files = new HashMap<String, String>();

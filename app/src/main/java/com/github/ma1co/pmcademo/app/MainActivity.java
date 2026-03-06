@@ -187,12 +187,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         
-        try {
-            File tmpCache = new File(Environment.getExternalStorageDirectory(), "LUTS/.tmp");
-            tmpCache.mkdirs();
-            System.setProperty("java.io.tmpdir", tmpCache.getAbsolutePath());
-        } catch (Exception e) {}
-        
         FrameLayout rootLayout = new FrameLayout(this);
         mSurfaceView = new SurfaceView(this);
         mSurfaceView.getHolder().addCallback(this);
@@ -741,7 +735,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 p.setWhiteBalance(targetWb);
             }
 
-            // EXACT INJECTION FROM PARAMS DUMP TO PREVENT HAL CORRUPTION
+            // Phase 9.4: Safe HAL Injection 
             if (p.get("dro-mode") != null) {
                 if ("OFF".equals(prof.dro)) {
                     p.set("dro-mode", "off");
@@ -762,9 +756,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             if (p.get("white-balance-shift-mode") != null) {
                 p.set("white-balance-shift-mode", (prof.wbShift != 0 || prof.wbShiftGM != 0) ? "true" : "false");
             }
-            
-            if (p.get("light-balance-for-white-balance") != null) p.set("light-balance-for-white-balance", prof.wbShift);
-            if (p.get("color-compensation-for-white-balance") != null) p.set("color-compensation-for-white-balance", prof.wbShiftGM); 
+            if (p.get("white-balance-shift-lb") != null) p.set("white-balance-shift-lb", prof.wbShift);
+            if (p.get("white-balance-shift-cc") != null) p.set("white-balance-shift-cc", prof.wbShiftGM); 
             
             mCamera.setParameters(p);
         } catch (Exception e) {}
