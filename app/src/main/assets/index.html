@@ -27,16 +27,12 @@
         .sel-indicator { position: absolute; top: 10px; left: 10px; width: 18px; height: 18px; border: 2px solid rgba(255,255,255,0.4); border-radius: 4px; background: rgba(0,0,0,0.5); }
         .card.selected .sel-indicator { background: var(--accent); border-color: var(--accent); }
         .card.selected .sel-indicator::after { content: '✓'; color: white; font-size: 12px; position: absolute; left: 4px; top: 0px; font-weight: bold; }
-        
         .load-more-container { grid-column: 1 / -1; text-align: center; padding: 20px 0; }
-        
         #lightbox { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.95); z-index: 1000; justify-content: center; align-items: center; flex-direction: column; cursor: zoom-out; }
         #lightbox img { max-width: 90%; max-height: 65vh; border-radius: 2px; transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1); cursor: default; }
         .lb-meta { margin-top: 20px; text-align: center; max-width: 90%; pointer-events: none; }
         .exif-tag { color: var(--accent); font-family: monospace; font-size: 13px; font-weight: bold; text-transform: uppercase; background: rgba(255,80,0,0.1); padding: 4px 12px; border-radius: 4px; border: 1px solid rgba(255,80,0,0.2); }
         .lb-tools { margin-top: 25px; display: flex; gap: 15px; cursor: default; }
-
-        /* LUT Manager Modal */
         #lut-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 2000; justify-content: center; align-items: center; backdrop-filter: blur(5px); }
         .modal-content { background: var(--bg-panel); padding: 30px; border-radius: 12px; border: 1px solid #333; width: 320px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
     </style>
@@ -144,7 +140,6 @@
 
         function render(resetPage = false) {
             if (resetPage) currentPage = 1;
-            
             const container = document.getElementById('gallery');
             if (resetPage) container.innerHTML = '';
             else {
@@ -179,7 +174,6 @@
                 loadMoreDiv.innerHTML = `<button class="action-btn secondary-btn" onclick="loadMore()">LOAD MORE PHOTOS</button>`;
                 container.appendChild(loadMoreDiv);
             }
-            
             updateUI();
         }
         
@@ -191,23 +185,10 @@
         function toggleSel(name) {
             if(selected.has(name)) selected.delete(name);
             else selected.add(name);
-            
-            const cards = document.querySelectorAll('.card');
-            cards.forEach(card => {
-                const title = card.querySelector('.card-info span').innerText;
-                if (title === name) {
-                    if (selected.has(name)) card.classList.add('selected');
-                    else card.classList.remove('selected');
-                }
-            });
-            updateUI();
+            render(false);
         }
 
-        function unselectAll() { 
-            selected.clear(); 
-            document.querySelectorAll('.card').forEach(c => c.classList.remove('selected'));
-            updateUI(); 
-        }
+        function unselectAll() { selected.clear(); render(true); }
 
         function updateUI() {
             document.getElementById('sel-count').innerText = `${selected.size} ITEMS SELECTED`;
@@ -220,91 +201,9 @@
             rotation = 0;
             const lb = document.getElementById('lightbox');
             const img = document.getElementById('lb-img');
-            const meta = document.getElementById('lb-meta');
-            
             img.src = `/full/?folder=${mode}&name=${name}`;
             img.style.transform = `rotate(0deg) scale(1)`;
-            meta.innerHTML = `<span class="exif-tag">READING EXIF...</span>`;
-            
-            parseMetadata(`/full/?folder=${mode}&name=${name}`);
             lb.style.display = 'flex';
-        }
-
-        async function parseMetadata(url) {
-            try {
-                const response = await fetch(url, { headers: { 'Range': 'bytes=0-65536' } });
-                const buffer = await response.arrayBuffer();
-                const view = new DataView(buffer);
-                
-                const exif = extractExif(view);
-                if (exif) {
-                    let focal = exif.focal ? `${Math.round(exif.focal)}mm` : '';
-                    let fnum = exif.aperture ? `f/${exif.aperture.toFixed(1)}` : 'f/--';
-                    let speed = exif.shutter ? (exif.shutter < 1 ? `1/${Math.round(1/exif.shutter)}s` : `${exif.shutter}s`) : '--s';
-                    let iso = exif.iso ? `ISO ${exif.iso}` : 'ISO --';
-                    
-                    let prefix = mode === 'GRADED' ? `filmOS RECIPE • ${viewName}` : viewName;
-                    let details = [prefix, focal, fnum, speed, iso].filter(Boolean).join(' • ');
-                    document.getElementById('lb-meta').innerHTML = `<span class="exif-tag" ${mode === 'GRADED' ? 'style="color:cyan; border-color:cyan;"' : ''}>${details}</span>`;
-                } else {
-                    document.getElementById('lb-meta').innerHTML = `<span class="exif-tag">${viewName} • NO METADATA</span>`;
-                }
-            } catch (e) { 
-                document.getElementById('lb-meta').innerHTML = `<span class="exif-tag">METADATA ERROR</span>`; 
-            }
-        }
-
-        function extractExif(view) {
-            if (view.getUint16(0, false) !== 0xFFD8) return null;
-            let offset = 2;
-            while (offset < view.byteLength) {
-                if (view.getUint8(offset) !== 0xFF) break;
-                let marker = view.getUint8(offset + 1);
-                if (marker === 0xE1) return parseTags(view, offset + 4);
-                offset += 2 + view.getUint16(offset + 2, false);
-            }
-            return null;
-        }
-
-        function parseTags(view, start) {
-            if (view.getUint32(start, false) !== 0x45786966) return null; 
-            const tiffOffset = start + 6;
-            const le = view.getUint16(tiffOffset, false) === 0x4949; 
-            const ifd0Offset = view.getUint32(tiffOffset + 4, le);
-
-            let subIfdOffset = 0;
-            let entries = view.getUint16(tiffOffset + ifd0Offset, le);
-            for (let i = 0; i < entries; i++) {
-                let entryOffset = tiffOffset + ifd0Offset + 2 + (i * 12);
-                if (view.getUint16(entryOffset, le) === 0x8769) { 
-                    subIfdOffset = view.getUint32(entryOffset + 8, le);
-                    break;
-                }
-            }
-
-            if (!subIfdOffset) return null;
-
-            const targetTags = { 0x829A: 'shutter', 0x829D: 'aperture', 0x8827: 'iso', 0x920A: 'focal' };
-            let result = {};
-            entries = view.getUint16(tiffOffset + subIfdOffset, le);
-
-            for (let i = 0; i < entries; i++) {
-                let entryOffset = tiffOffset + subIfdOffset + 2 + (i * 12);
-                let tag = view.getUint16(entryOffset, le);
-
-                if (targetTags[tag]) {
-                    let type = view.getUint16(entryOffset + 2, le);
-                    if (type === 3) {
-                        result[targetTags[tag]] = view.getUint16(entryOffset + 8, le);
-                    } else if (type === 5) {
-                        let valueOffset = view.getUint32(entryOffset + 8, le);
-                        let num = view.getUint32(tiffOffset + valueOffset, le);
-                        let den = view.getUint32(tiffOffset + valueOffset + 4, le);
-                        if (den !== 0) result[targetTags[tag]] = num / den;
-                    }
-                }
-            }
-            return result;
         }
 
         function closeLightbox() { document.getElementById('lightbox').style.display = 'none'; }
@@ -337,11 +236,8 @@
             document.getElementById('lut-upload-status').innerText = '';
         }
         
-        function closeLutManager() {
-            document.getElementById('lut-modal').style.display = 'none';
-        }
+        function closeLutManager() { document.getElementById('lut-modal').style.display = 'none'; }
         
-        // COMPLETELY BYPASSES FORMDATA AND TEMP FILES. SENDS RAW BINARY.
         async function handleLutSelect(event) {
             const file = event.target.files[0];
             if (!file) return;
@@ -357,26 +253,24 @@
             document.getElementById('lut-upload-status').style.color = 'yellow';
 
             try {
+                // PHASE 10: Standard Binary Stream Body
                 const res = await fetch('/api/upload_lut', {
                     method: 'POST',
-                    headers: {
-                        'X-File-Name': file.name
-                    },
+                    headers: { 'X-File-Name': file.name, 'Content-Length': file.size },
                     body: file 
                 });
                 
                 if (res.ok) {
-                    document.getElementById('lut-upload-status').innerText = `SUCCESS: ${file.name.toUpperCase()} INSTALLED!`;
+                    document.getElementById('lut-upload-status').innerText = `SUCCESS!`;
                     document.getElementById('lut-upload-status').style.color = 'lime';
                 } else {
                     document.getElementById('lut-upload-status').innerText = 'ERROR: UPLOAD FAILED';
                     document.getElementById('lut-upload-status').style.color = 'red';
                 }
             } catch (e) {
-                document.getElementById('lut-upload-status').innerText = 'ERROR: NETWORK CONNECTION';
+                document.getElementById('lut-upload-status').innerText = 'ERROR: NETWORK';
                 document.getElementById('lut-upload-status').style.color = 'red';
             }
-            
             event.target.value = ''; 
         }
 
