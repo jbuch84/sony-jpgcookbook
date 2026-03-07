@@ -5,6 +5,7 @@
 #include <string.h>
 #include <setjmp.h>
 #include <math.h>
+#include <pthread.h>
 #include "jpeglib.h"
 #include <android/log.h>
 
@@ -24,7 +25,7 @@ METHODDEF(void) my_error_exit (j_common_ptr cinfo) {
     longjmp(myerr->setjmp_buffer, 1);
 }
 
-// Fast random number generator for film grain (avoids slow rand() calls in tight loop)
+// Fast random number generator for film grain 
 inline uint32_t fast_rand(uint32_t* state) {
     uint32_t x = *state;
     x ^= x << 13; 
@@ -34,15 +35,147 @@ inline uint32_t fast_rand(uint32_t* state) {
     return x;
 }
 
+// Data structure to pass variables into our parallel threads
+struct ThreadData {
+    int start_y;
+    int end_y;
+    unsigned char* img_buffer;
+    int row_stride;
+    long long cx;
+    long long cy_center;
+    int vignette;
+    long long vig_coef;
+    int opacity;
+    int opac_mapped;
+    int grain;
+    int grainSize;
+    int rolloff;
+    int lutMax;
+    int lutSize2;
+    int* map;
+    int* rollMap;
+};
+
+// The worker function that each CPU core will run simultaneously
+void* process_rows(void* arg) {
+    ThreadData* td = (ThreadData*)arg;
+    uint32_t master_seed = 98765;
+
+    for (int cy = td->start_y; cy < td->end_y; cy++) {
+        unsigned char* row = &td->img_buffer[cy * td->row_stride];
+        long long dy_sq = (cy - td->cy_center) * (cy - td->cy_center);
+        int prev_noise = 0; 
+        uint32_t seed = master_seed + (cy * 1337); 
+
+        for (int x = 0; x < td->row_stride; x += 3) {
+            int origR = row[x];
+            int origG = row[x+1];
+            int origB = row[x+2];
+            int outR = origR, outG = origG, outB = origB;
+
+            // Tetrahedral interpolation calculations
+            int fX = td->map[origR], fY = td->map[origG], fZ = td->map[origB];
+            int x0 = fX >> 7, y0 = fY >> 7, z0 = fZ >> 7;
+            int x1 = (x0 < td->lutMax) ? x0 + 1 : td->lutMax;
+            int y1 = (y0 < td->lutMax) ? y0 + 1 : td->lutMax;
+            int z1 = (z0 < td->lutMax) ? z0 + 1 : td->lutMax;
+
+            int dx = fX & 0x7F, dy_lut = fY & 0x7F, dz = fZ & 0x7F;
+            int i000 = x0 + y0*nativeLutSize + z0*td->lutSize2;
+            int i111 = x1 + y1*nativeLutSize + z1*td->lutSize2;
+            
+            int v1, v2, w0, w1, w2, w3;
+            if (dx >= dy_lut) {
+                if (dy_lut >= dz) { 
+                    v1=x1+y0*nativeLutSize+z0*td->lutSize2; 
+                    v2=x1+y1*nativeLutSize+z0*td->lutSize2; 
+                    w0=128-dx; w1=dx-dy_lut; w2=dy_lut-dz; w3=dz; 
+                } 
+                else if (dx >= dz) { 
+                    v1=x1+y0*nativeLutSize+z0*td->lutSize2; 
+                    v2=x1+y0*nativeLutSize+z1*td->lutSize2; 
+                    w0=128-dx; w1=dx-dz; w2=dz-dy_lut; w3=dy_lut; 
+                } 
+                else { 
+                    v1=x0+y0*nativeLutSize+z1*td->lutSize2; 
+                    v2=x1+y0*nativeLutSize+z1*td->lutSize2; 
+                    w0=128-dz; w1=dz-dx; w2=dx-dy_lut; w3=dy_lut; 
+                }
+            } else {
+                if (dz >= dy_lut) { 
+                    v1=x0+y0*nativeLutSize+z1*td->lutSize2; 
+                    v2=x0+y1*nativeLutSize+z1*td->lutSize2; 
+                    w0=128-dz; w1=dz-dy_lut; w2=dy_lut-dx; w3=dx; 
+                } 
+                else if (dz >= dx) { 
+                    v1=x0+y1*nativeLutSize+z0*td->lutSize2; 
+                    v2=x0+y1*nativeLutSize+z1*td->lutSize2; 
+                    w0=128-dy_lut; w1=dy_lut-dz; w2=dz-dx; w3=dx; 
+                } 
+                else { 
+                    v1=x0+y1*nativeLutSize+z0*td->lutSize2; 
+                    v2=x1+y1*nativeLutSize+z0*td->lutSize2; 
+                    w0=128-dy_lut; w1=dy_lut-dx; w2=dx-dz; w3=dz; 
+                }
+            }
+
+            const uint8_t* p0 = &nativeLut[i000*3];
+            const uint8_t* p1 = &nativeLut[v1*3];
+            const uint8_t* p2 = &nativeLut[v2*3];
+            const uint8_t* p3 = &nativeLut[i111*3];
+
+            int lutR = (p0[0]*w0 + p1[0]*w1 + p2[0]*w2 + p3[0]*w3) >> 7;
+            int lutG = (p0[1]*w0 + p1[1]*w1 + p2[1]*w2 + p3[1]*w3) >> 7;
+            int lutB = (p0[2]*w0 + p1[2]*w1 + p2[2]*w2 + p3[2]*w3) >> 7;
+
+            outR = origR + (((lutR - origR) * td->opac_mapped) >> 8);
+            outG = origG + (((lutG - origG) * td->opac_mapped) >> 8);
+            outB = origB + (((lutB - origB) * td->opac_mapped) >> 8);
+
+            if (td->rolloff > 0) { 
+                outR = (outR > 255) ? 255 : td->rollMap[outR]; 
+                outG = (outG > 255) ? 255 : td->rollMap[outG]; 
+                outB = (outB > 255) ? 255 : td->rollMap[outB]; 
+            }
+
+            if (td->vignette > 0) {
+                long long dist_sq = ((x/3)-td->cx)*((x/3)-td->cx) + dy_sq;
+                int vig_mult = 256 - (int)((dist_sq * td->vig_coef) >> 24);
+                if (vig_mult < 0) vig_mult = 0;
+                outR = (outR * vig_mult) >> 8; 
+                outG = (outG * vig_mult) >> 8; 
+                outB = (outB * vig_mult) >> 8;
+            }
+
+            if (td->grain > 0) {
+                int raw_noise = (fast_rand(&seed) & 0xFF) - 128; 
+                int noise = (td->grainSize == 0) ? raw_noise : (td->grainSize == 1) ? (raw_noise + prev_noise) >> 1 : (raw_noise + prev_noise * 2) / 3;
+                prev_noise = raw_noise;
+                
+                int lum = (outR*77 + outG*150 + outB*29) >> 8; 
+                int mask = (lum < 128) ? lum : 255 - lum; 
+                int grain_val = (noise * mask * td->grain) >> 15; 
+                
+                outR += grain_val; 
+                outG += grain_val; 
+                outB += grain_val;
+            }
+
+            row[x]   = (unsigned char)(outR < 0 ? 0 : outR > 255 ? 255 : outR);
+            row[x+1] = (unsigned char)(outG < 0 ? 0 : outG > 255 ? 255 : outG);
+            row[x+2] = (unsigned char)(outB < 0 ? 0 : outB > 255 ? 255 : outB);
+        }
+    }
+    return NULL;
+}
+
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_github_ma1co_pmcademo_app_ImageProcessor_loadLutNative(JNIEnv* env, jobject /* this */, jstring path) {
     const char *file_path = env->GetStringUTFChars(path, NULL);
     FILE *file = fopen(file_path, "r");
     env->ReleaseStringUTFChars(path, file_path);
     
-    if (!file) {
-        return JNI_FALSE;
-    }
+    if (!file) return JNI_FALSE;
 
     nativeLut.clear();
     char line[256];
@@ -107,7 +240,6 @@ Java_com_github_ma1co_pmcademo_app_ImageProcessor_processImageNative(
     jpeg_create_decompress(&cinfo_d);
     jpeg_stdio_src(&cinfo_d, infile);
 
-    // Save EXIF and APP markers
     for (int m = 0; m < 16; m++) {
         jpeg_save_markers(&cinfo_d, JPEG_APP0 + m, 0xFFFF);
     }
@@ -142,14 +274,12 @@ Java_com_github_ma1co_pmcademo_app_ImageProcessor_processImageNative(
     jpeg_set_quality(&cinfo_c, 95, TRUE); 
     jpeg_start_compress(&cinfo_c, TRUE);
 
-    // Write saved markers (EXIF data)
     jpeg_saved_marker_ptr marker = cinfo_d.marker_list;
     while (marker) {
         jpeg_write_marker(&cinfo_c, marker->marker, marker->data, marker->data_length);
         marker = marker->next;
     }
 
-    // Pre-calculate mappings
     int lutMax = nativeLutSize - 1;
     int lutSize2 = nativeLutSize * nativeLutSize;
     for (int i = 0; i < 256; i++) { 
@@ -185,114 +315,42 @@ Java_com_github_ma1co_pmcademo_app_ImageProcessor_processImageNative(
     long long max_dist_sq = cx*cx + cy_center*cy_center;
     long long vig_coef = ((long long)((vignette * 256) / 100) << 24) / (max_dist_sq > 0 ? max_dist_sq : 1); 
     int opac_mapped = (opacity * 256) / 100;
-    uint32_t master_seed = 98765;
 
-    // 2. PARALLEL PROCESS (Multi-core execution enabled by OpenMP)
-    #pragma omp parallel for schedule(dynamic)
-    for (int cy = 0; cy < cinfo_d.output_height; cy++) {
-        unsigned char* row = &img_buffer[cy * row_stride];
-        long long dy_sq = (cy - cy_center) * (cy - cy_center);
-        int prev_noise = 0; 
-        uint32_t seed = master_seed + (cy * 1337); 
+    // 2. PARALLEL PROCESS (Multi-core execution using POSIX threads)
+    int num_threads = 4; 
+    pthread_t threads[4];
+    ThreadData thread_data[4];
 
-        for (int x = 0; x < row_stride; x += 3) {
-            int origR = row[x];
-            int origG = row[x+1];
-            int origB = row[x+2];
-            int outR = origR, outG = origG, outB = origB;
+    int rows_per_thread = cinfo_d.output_height / num_threads;
 
-            // Tetrahedral interpolation calculations
-            int fX = map[origR], fY = map[origG], fZ = map[origB];
-            int x0 = fX >> 7, y0 = fY >> 7, z0 = fZ >> 7;
-            int x1 = (x0 < lutMax) ? x0 + 1 : lutMax;
-            int y1 = (y0 < lutMax) ? y0 + 1 : lutMax;
-            int z1 = (z0 < lutMax) ? z0 + 1 : lutMax;
+    for (int i = 0; i < num_threads; i++) {
+        thread_data[i].start_y = i * rows_per_thread;
+        // Ensure the last thread goes all the way to the end to catch remaining rows
+        thread_data[i].end_y = (i == num_threads - 1) ? cinfo_d.output_height : (i + 1) * rows_per_thread;
+        
+        thread_data[i].img_buffer = img_buffer;
+        thread_data[i].row_stride = row_stride;
+        thread_data[i].cx = cx;
+        thread_data[i].cy_center = cy_center;
+        thread_data[i].vignette = vignette;
+        thread_data[i].vig_coef = vig_coef;
+        thread_data[i].opacity = opacity;
+        thread_data[i].opac_mapped = opac_mapped;
+        thread_data[i].grain = grain;
+        thread_data[i].grainSize = grainSize;
+        thread_data[i].rolloff = rolloff;
+        thread_data[i].lutMax = lutMax;
+        thread_data[i].lutSize2 = lutSize2;
+        thread_data[i].map = map;
+        thread_data[i].rollMap = rollMap;
 
-            int dx = fX & 0x7F, dy_lut = fY & 0x7F, dz = fZ & 0x7F;
-            int i000 = x0 + y0*nativeLutSize + z0*lutSize2;
-            int i111 = x1 + y1*nativeLutSize + z1*lutSize2;
-            
-            int v1, v2, w0, w1, w2, w3;
-            if (dx >= dy_lut) {
-                if (dy_lut >= dz) { 
-                    v1=x1+y0*nativeLutSize+z0*lutSize2; 
-                    v2=x1+y1*nativeLutSize+z0*lutSize2; 
-                    w0=128-dx; w1=dx-dy_lut; w2=dy_lut-dz; w3=dz; 
-                } 
-                else if (dx >= dz) { 
-                    v1=x1+y0*nativeLutSize+z0*lutSize2; 
-                    v2=x1+y0*nativeLutSize+z1*lutSize2; 
-                    w0=128-dx; w1=dx-dz; w2=dz-dy_lut; w3=dy_lut; 
-                } 
-                else { 
-                    v1=x0+y0*nativeLutSize+z1*lutSize2; 
-                    v2=x1+y0*nativeLutSize+z1*lutSize2; 
-                    w0=128-dz; w1=dz-dx; w2=dx-dy_lut; w3=dy_lut; 
-                }
-            } else {
-                if (dz >= dy_lut) { 
-                    v1=x0+y0*nativeLutSize+z1*lutSize2; 
-                    v2=x0+y1*nativeLutSize+z1*lutSize2; 
-                    w0=128-dz; w1=dz-dy_lut; w2=dy_lut-dx; w3=dx; 
-                } 
-                else if (dz >= dx) { 
-                    v1=x0+y1*nativeLutSize+z0*lutSize2; 
-                    v2=x0+y1*nativeLutSize+z1*lutSize2; 
-                    w0=128-dy_lut; w1=dy_lut-dz; w2=dz-dx; w3=dx; 
-                } 
-                else { 
-                    v1=x0+y1*nativeLutSize+z0*lutSize2; 
-                    v2=x1+y1*nativeLutSize+z0*lutSize2; 
-                    w0=128-dy_lut; w1=dy_lut-dx; w2=dx-dz; w3=dz; 
-                }
-            }
+        // Spin up the thread
+        pthread_create(&threads[i], NULL, process_rows, &thread_data[i]);
+    }
 
-            const uint8_t* p0 = &nativeLut[i000*3];
-            const uint8_t* p1 = &nativeLut[v1*3];
-            const uint8_t* p2 = &nativeLut[v2*3];
-            const uint8_t* p3 = &nativeLut[i111*3];
-
-            int lutR = (p0[0]*w0 + p1[0]*w1 + p2[0]*w2 + p3[0]*w3) >> 7;
-            int lutG = (p0[1]*w0 + p1[1]*w1 + p2[1]*w2 + p3[1]*w3) >> 7;
-            int lutB = (p0[2]*w0 + p1[2]*w1 + p2[2]*w2 + p3[2]*w3) >> 7;
-
-            outR = origR + (((lutR - origR) * opac_mapped) >> 8);
-            outG = origG + (((lutG - origG) * opac_mapped) >> 8);
-            outB = origB + (((lutB - origB) * opac_mapped) >> 8);
-
-            if (rolloff > 0) { 
-                outR = (outR > 255) ? 255 : rollMap[outR]; 
-                outG = (outG > 255) ? 255 : rollMap[outG]; 
-                outB = (outB > 255) ? 255 : rollMap[outB]; 
-            }
-
-            if (vignette > 0) {
-                long long dist_sq = ((x/3)-cx)*((x/3)-cx) + dy_sq;
-                int vig_mult = 256 - (int)((dist_sq * vig_coef) >> 24);
-                if (vig_mult < 0) vig_mult = 0;
-                outR = (outR * vig_mult) >> 8; 
-                outG = (outG * vig_mult) >> 8; 
-                outB = (outB * vig_mult) >> 8;
-            }
-
-            if (grain > 0) {
-                int raw_noise = (fast_rand(&seed) & 0xFF) - 128; 
-                int noise = (grainSize == 0) ? raw_noise : (grainSize == 1) ? (raw_noise + prev_noise) >> 1 : (raw_noise + prev_noise * 2) / 3;
-                prev_noise = raw_noise;
-                
-                int lum = (outR*77 + outG*150 + outB*29) >> 8; 
-                int mask = (lum < 128) ? lum : 255 - lum; 
-                int grain_val = (noise * mask * grain) >> 15; 
-                
-                outR += grain_val; 
-                outG += grain_val; 
-                outB += grain_val;
-            }
-
-            row[x]   = (unsigned char)(outR < 0 ? 0 : outR > 255 ? 255 : outR);
-            row[x+1] = (unsigned char)(outG < 0 ? 0 : outG > 255 ? 255 : outG);
-            row[x+2] = (unsigned char)(outB < 0 ? 0 : outB > 255 ? 255 : outB);
-        }
+    // Wait for all 4 threads to finish processing their chunk
+    for (int i = 0; i < num_threads; i++) {
+        pthread_join(threads[i], NULL);
     }
 
     // 3. SEQUENTIAL WRITE

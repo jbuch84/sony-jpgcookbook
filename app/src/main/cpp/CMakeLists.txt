@@ -21,14 +21,12 @@ target_include_directories(native-lib PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR}/libjpeg-turbo
 )
 
-# Added OpenMP flag to Linker
-set_target_properties(native-lib PROPERTIES LINK_FLAGS "-Wl,-Bsymbolic -Wl,--exclude-libs,ALL -fopenmp")
+set_target_properties(native-lib PROPERTIES LINK_FLAGS "-Wl,-Bsymbolic -Wl,--exclude-libs,ALL")
 
-# Added -fopenmp (Multi-threading) and kept your -O3 max optimizations
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -fopenmp -mfloat-abi=hard -mfpu=neon")
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -fopenmp -mfloat-abi=hard -mfpu=neon")
-set(CMAKE_CXX_FLAGS_DEBUG "-O3 -fopenmp -mfloat-abi=hard -mfpu=neon")
-set(CMAKE_C_FLAGS_DEBUG "-O3 -fopenmp -mfloat-abi=hard -mfpu=neon")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -mfloat-abi=hard -mfpu=neon")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -mfloat-abi=hard -mfpu=neon")
+set(CMAKE_CXX_FLAGS_DEBUG "-O3 -mfloat-abi=hard -mfpu=neon")
+set(CMAKE_C_FLAGS_DEBUG "-O3 -mfloat-abi=hard -mfpu=neon")
 
 find_library(log-lib log)
 target_link_libraries(native-lib jpeg-static ${log-lib})
