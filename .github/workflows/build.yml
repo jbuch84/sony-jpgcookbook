@@ -32,6 +32,21 @@ jobs:
         echo "sdk.dir=$HOME/clean-sdk" > local.properties
         echo "ndk.dir=$HOME/clean-sdk/ndk/16.1.4479499" >> local.properties
 
+    - name: Build OpenMemories Stubs Locally (JitPack Bypass)
+      run: |
+        git clone https://github.com/ma1co/OpenMemories-Framework.git
+        cd OpenMemories-Framework
+        git checkout f8df3504d8
+        cd stubs
+        chmod +x gradlew
+        export JAVA_HOME=$JAVA_HOME_8_X64
+        ./gradlew publishToMavenLocal
+
+    - name: Add mavenLocal to local.properties
+      run: |
+        echo "org.gradle.jvmargs=-Xmx2048m -XX:MaxPermSize=512m" > gradle.properties
+        echo "mavenLocal()" >> local.properties
+
     - name: Build with Isolated Legacy Gradle
       run: |
         export JAVA_HOME=$JAVA_HOME_8_X64
@@ -44,5 +59,6 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: Sony-JPGCookbook-NDK
-        path: app/build/outputs/apk/debug/*.apk
-# Forcing GitHub to trigger
+        path: |
+          app/build/outputs/apk/debug/*.apk
+          OpenMemories-Framework/stubs/build/libs/*.jar
