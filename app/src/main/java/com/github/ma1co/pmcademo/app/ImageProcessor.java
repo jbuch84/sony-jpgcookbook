@@ -24,7 +24,7 @@ public class ImageProcessor {
     }
 
     public void triggerLutPreload(String lutPath, String name) {
-        new PreloadLutTask().executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, lutPath);
+        new PreloadLutTask().execute(lutPath);
     }
 
     public void processJpeg(String inPath, String outDir, int qualityIndex, RTLProfile profile) {
