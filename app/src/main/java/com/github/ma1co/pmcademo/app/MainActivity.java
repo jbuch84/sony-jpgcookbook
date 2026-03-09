@@ -96,13 +96,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private boolean prefShowGridLines = false;
     private int prefJpegQuality = 95; // <-- ADD THIS LINE
 
+    // --- CINEMA LENS MAPPER VARIABLES ---
     private LensProfileManager lensManager;
     private int currentLensSlot = 1;
     private boolean isCalibrating = false;
     private List<LensProfileManager.CalPoint> tempCalPoints = new ArrayList<LensProfileManager.CalPoint>();
-    private int calibStep = 0;
-    private float[] wizardDistances = {0.3f, 1.0f, 3.0f, 999.0f}; 
-    private String[] wizardLabels = {"MINIMUM FOCUS", "1.0 METER", "3.0 METERS", "INFINITY"};
+    private int calibStep = 0; // 0: ID, 1: Min, 2: 1m, 3: 3m
+    private float minDistanceInput = 0.3f;
+    private String detectedLensName = "Manual Lens";
     private TextView tvCalibrationPrompt;
     
     private boolean cachedIsManualFocus = false;
@@ -333,7 +334,18 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         triggerLutPreload();
     }
     private void processWhenFileReady(final String path) {
-        Log.d("filmOS", "--> processWhenFileReady triggered for: " + path);
+        // --- CALIBRATION IDENTIFICATION SHOT ---
+        if (isCalibrating && calibStep == 0) {
+            try {
+                ExifInterface exif = new ExifInterface(path);
+                String model = exif.getAttribute("Model");
+                if (model != null) detectedLensName = model;
+                calibStep = 1; // Move to Min Distance Input
+                runOnUiThread(new Runnable() { public void run() { updateCalibrationUI(); } });
+                return; // Block processing of the throwaway shot
+            } catch (Exception e) {}
+        }
+
         isProcessing = true; 
         runOnUiThread(new Runnable() { 
             public void run() { 
@@ -527,56 +539,49 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     @Override 
     public void onEnterPressed() {
-        if (isPlaybackMode) { 
-            exitPlayback(); 
-            return; 
-        }
-        if (isProcessing) {
-            return;
-        }
+        if (isPlaybackMode) { exitPlayback(); return; }
+        if (isProcessing) return;
         
-        // 1. WIZARD PROGRESSION: Log the point and move to the next step
+        // --- WIZARD PROGRESSION ---
         if (isCalibrating) {
-            tempCalPoints.add(new LensProfileManager.CalPoint(cachedFocusRatio, wizardDistances[calibStep]));
-            calibStep++;
-            
-            if (calibStep >= wizardDistances.length) {
-                // Finished! Save the profile and close the wizard.
-                lensManager.saveProfile("Lens " + currentLensSlot, tempCalPoints);
-                isCalibrating = false;
-                tvCalibrationPrompt.setVisibility(View.GONE);
-                setHUDVisibility(View.VISIBLE);
-            } else {
-                // Show the next step
-                updateCalibrationUI();
+            switch(calibStep) {
+                case 1: // Set Min Focus (Physical Stop at 0%)
+                    tempCalPoints.add(new LensProfileManager.CalPoint(0.0f, minDistanceInput));
+                    calibStep = 2; break;
+                case 2: // Mark 1.0m
+                    tempCalPoints.add(new LensProfileManager.CalPoint(cachedFocusRatio, 1.0f));
+                    calibStep = 3; break;
+                case 3: // Mark 3.0m + Auto Infinity
+                    tempCalPoints.add(new LensProfileManager.CalPoint(cachedFocusRatio, 3.0f));
+                    tempCalPoints.add(new LensProfileManager.CalPoint(1.0f, 999.0f));
+                    lensManager.saveProfile(detectedLensName, tempCalPoints);
+                    isCalibrating = false;
+                    tvCalibrationPrompt.setVisibility(View.GONE);
+                    setHUDVisibility(View.VISIBLE);
+                    return;
             }
+            updateCalibrationUI();
             return;
         }
 
-        // 2. NORMAL BEHAVIOR & STARTING THE WIZARD
         if (!isMenuOpen) {
             if (mDialMode == DIAL_MODE_REVIEW) {
                 enterPlayback();
             } else if (mDialMode == DIAL_MODE_FOCUS && cachedIsManualFocus) {
-                // START CALIBRATION!
                 isCalibrating = true;
                 tempCalPoints.clear();
                 calibStep = 0; 
-                setHUDVisibility(View.GONE); 
+                detectedLensName = "Manual Lens";
+                setHUDVisibility(View.VISIBLE); // Keep HUD visible for focus peaking
                 tvCalibrationPrompt.setVisibility(View.VISIBLE);
                 updateCalibrationUI();
             } else {
-                // Normal HUD Toggle
                 displayState = (displayState == 0) ? 1 : 0; 
                 mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE);
             }
         } else {
-            if (currentPage == 4) { 
-                handleConnectionAction(); 
-            } else {
-                isMenuEditing = !isMenuEditing;
-                renderMenu();
-            }
+            if (currentPage == 4) handleConnectionAction(); 
+            else { isMenuEditing = !isMenuEditing; renderMenu(); }
         }
     }
 
@@ -864,6 +869,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         
         Camera.Parameters p = c.getParameters(); 
         CameraEx.ParametersModifier pm = cx.createParametersModifier(p);
+
+        // --- DIAL TRAP FOR CALIBRATION VALUE ---
+        if (isCalibrating && calibStep == 1) {
+            minDistanceInput = Math.max(0.1f, minDistanceInput + (d * 0.05f));
+            updateCalibrationUI();
+            return;
+        }
         
         if (mDialMode == DIAL_MODE_RTL) { 
             recipeManager.setCurrentSlot(recipeManager.getCurrentSlot() + d); 
@@ -1291,18 +1303,19 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         afOverlay = new ProReticleView(this); 
         mainUIContainer.addView(afOverlay, new FrameLayout.LayoutParams(-1, -1));
         
-        // --- CALIBRATION WIZARD UI ---
+        // --- NEW FOCUS ASSIST OVERLAY ---
         tvCalibrationPrompt = new TextView(this); 
-        tvCalibrationPrompt.setTextColor(Color.YELLOW); 
-        tvCalibrationPrompt.setTextSize(22); 
-        tvCalibrationPrompt.setTypeface(Typeface.MONOSPACE, Typeface.BOLD); 
-        tvCalibrationPrompt.setGravity(Gravity.CENTER); 
-        tvCalibrationPrompt.setShadowLayer(4, 0, 0, Color.BLACK); 
-        tvCalibrationPrompt.setBackgroundColor(Color.argb(200, 15, 15, 15));
-        tvCalibrationPrompt.setPadding(30, 30, 30, 30);
+        tvCalibrationPrompt.setTextColor(Color.WHITE); 
+        tvCalibrationPrompt.setTextSize(16); 
+        tvCalibrationPrompt.setTypeface(Typeface.MONOSPACE); 
+        tvCalibrationPrompt.setGravity(Gravity.LEFT | Gravity.TOP); 
+        tvCalibrationPrompt.setBackgroundColor(Color.argb(150, 0, 0, 0)); // Semi-transparency
+        tvCalibrationPrompt.setPadding(20, 20, 20, 20);
         tvCalibrationPrompt.setVisibility(View.GONE);
         
-        FrameLayout.LayoutParams cpParams = new FrameLayout.LayoutParams(-1, -2, Gravity.CENTER); 
+        // Place it in the top-left corner so the center of the frame is clear for focusing
+        FrameLayout.LayoutParams cpParams = new FrameLayout.LayoutParams(400, -2, Gravity.TOP | Gravity.LEFT); 
+        cpParams.setMargins(20, 150, 0, 0); 
         mainUIContainer.addView(tvCalibrationPrompt, cpParams);
 
         menuContainer = new LinearLayout(this); 
@@ -1505,12 +1518,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     private void updateCalibrationUI() {
         if (!isCalibrating) return;
-        
-        tvCalibrationPrompt.setText("LENS CALIBRATION (SLOT " + currentLensSlot + ")\n\n" +
-                "Step " + (calibStep + 1) + " of 4\n" +
-                "Turn ring to focus at:\n\n" + 
-                "-->  " + wizardLabels[calibStep] + "  <--\n\n" +
-                "Press [ENTER] to save.");
+        String text = "LENS MAP: " + detectedLensName + "\n\n";
+        switch(calibStep) {
+            case 0: text += "STEP 1: IDENTIFY\nTake a photo to\nread Lens ID."; break;
+            case 1: text += "STEP 2: MIN FOCUS\nSet ring to stop.\nDial min distance:\n< " + String.format("%.2fm", minDistanceInput) + " >\n[ENTER] to set."; break;
+            case 2: text += "STEP 3: MARK 1m\nFocus on object\nexactly 1m away.\n[ENTER] to mark."; break;
+            case 3: text += "STEP 4: MARK 3m\nFocus on object\nexactly 3m away.\n[ENTER] to mark."; break;
+        }
+        tvCalibrationPrompt.setText(text);
     }
     
     private void updateMainHUD() {
