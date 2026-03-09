@@ -40,9 +40,9 @@ jobs:
         
         ./gradle-4.10.3/bin/gradle assembleRelease --stacktrace
 
-    - name: Upload Result
+    - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
-        name: Sony-JPGCookbook-NDK
-        path: app/build/outputs/apk/debug/*.apk
+        name: filmOS-App
+        path: app/build/outputs/apk/**/*.apk
 # Forcing GitHub to trigger
