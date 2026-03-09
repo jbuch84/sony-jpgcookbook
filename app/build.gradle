@@ -17,6 +17,8 @@ android {
         externalNativeBuild {
             cmake {
                 cppFlags ""
+                // THE SILVER BULLET: Forces CMake to ignore 'assembleDebug' and build for max speed
+                arguments "-DCMAKE_BUILD_TYPE=Release"
             }
         }
 

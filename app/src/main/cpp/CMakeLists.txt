@@ -6,7 +6,7 @@ set(ENABLE_EXECUTABLES OFF CACHE BOOL "" FORCE)
 set(ENABLE_TESTS OFF CACHE BOOL "" FORCE)
 set(WITH_JPEG8 ON CACHE BOOL "" FORCE)
 
-# PERFORMANCE FIX: Enable SIMD for NEON optimization on ARMv7
+# PERFORMANCE FIX: Enable SIMD for libjpeg-turbo on ARMv7
 set(WITH_SIMD ON CACHE BOOL "" FORCE)
 
 set(CMAKE_C_VISIBILITY_PRESET hidden)
@@ -23,11 +23,9 @@ target_include_directories(native-lib PRIVATE
 
 set_target_properties(native-lib PROPERTIES LINK_FLAGS "-Wl,-Bsymbolic -Wl,--exclude-libs,ALL")
 
-# HYBRID SPEED FIX: Added -mfpu=neon to allow hardware SIMD intrinsics in C++
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -mfpu=neon")
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -mfpu=neon")
-set(CMAKE_CXX_FLAGS_DEBUG "-O3 -mfpu=neon")
-set(CMAKE_C_FLAGS_DEBUG "-O3 -mfpu=neon")
+# HYBRID SPEED FIX: Force max optimization, hardware NEON, and fast math
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -mfpu=neon -ffast-math")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -mfpu=neon -ffast-math")
 
 find_library(log-lib log)
 target_link_libraries(native-lib jpeg-static ${log-lib})

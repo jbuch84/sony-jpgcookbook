@@ -38,7 +38,7 @@ jobs:
         wget -q https://services.gradle.org/distributions/gradle-4.10.3-bin.zip
         unzip -q gradle-4.10.3-bin.zip
         
-        ./gradle-4.10.3/bin/gradle assembleDebug --stacktrace
+        ./gradle-4.10.3/bin/gradle assembleRelease --stacktrace
 
     - name: Upload Result
       uses: actions/upload-artifact@v4
