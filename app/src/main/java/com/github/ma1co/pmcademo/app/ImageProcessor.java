@@ -47,11 +47,7 @@ public class ImageProcessor {
         private RTLProfile p;
         private String outDirPath;
 
-        public ProcessTask(int q, RTLProfile p, String out) { 
-            this.qualityIndex = q; 
-            this.p = p; 
-            this.outDirPath = out; 
-        }
+        public ProcessTask(int q, RTLProfile p, String out) { this.qualityIndex = q; this.p = p; this.outDirPath = out; }
 
         @Override protected void onPreExecute() { mCallback.onProcessStarted(); }
 
@@ -60,7 +56,7 @@ public class ImageProcessor {
                 File original = new File(params[0]);
                 if (!original.exists()) return "ERR";
 
-                // --- THE STABILIZATION LOOP ---
+                // --- STABILIZATION LOOP ---
                 long lastSize = -1; 
                 int timeout = 0;
                 while (timeout < 50) {
@@ -74,32 +70,22 @@ public class ImageProcessor {
                 File outDir = new File(outDirPath);
                 if (!outDir.exists()) outDir.mkdirs();
                 
-                // Keep 8.3 naming for Sony stability
                 String outName = "FLM_" + (System.currentTimeMillis() / 1000 % 10000) + ".JPG";
                 File outFile = new File(outDir, outName);
 
-                // Sony FUSE Pre-create workaround
-                new FileOutputStream(outFile).write(1);
+                // --- FIX: OPEN, WRITE, AND CLOSE IMMEDIATELY TO UNLOCK FOR C++ ---
+                FileOutputStream fos = new FileOutputStream(outFile);
+                fos.write(1);
+                fos.close();
 
-                // Multiply effect values by 20 to match your profile scale
-                boolean success = mEngine.applyLutToJpeg(
-                    original.getAbsolutePath(), 
-                    outFile.getAbsolutePath(), 
-                    qualityIndex, 
-                    p.opacity, 
-                    p.grain * 20, 
-                    p.grainSize, 
-                    p.vignette * 20, 
-                    p.rollOff * 20
-                );
+                // 0=Proxy(4x), 1=High(2x), 2=Ultra(1x)
+                int scale = (qualityIndex == 0) ? 4 : (qualityIndex == 1 ? 2 : 1);
 
-                if (success) {
+                if (mEngine.applyLutToJpeg(original.getAbsolutePath(), outFile.getAbsolutePath(), scale, p.opacity, p.grain * 20, p.grainSize, p.vignette * 20, p.rollOff * 20)) {
                     mContext.sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(outFile)));
                     return "SAVED";
                 }
-            } catch (Exception e) { 
-                Log.e("COOKBOOK", "Java error: " + e.getMessage()); 
-            }
+            } catch (Exception e) { Log.e("COOKBOOK", "Java error: " + e.getMessage()); }
             return "FAILED";
         }
 

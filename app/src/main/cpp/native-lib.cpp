@@ -50,13 +50,13 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_loadLutNative(JNIEnv* env, jobject 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     JNIEnv* env, jobject obj, jstring inPath, jstring outPath, 
-    jint qualityIdx, jint opacity, jint grain, jint grainSize, 
+    jint scaleDenom, jint opacity, jint grain, jint grainSize, 
     jint vignette, jint rollOff) {
     
     const char *in_file = env->GetStringUTFChars(inPath, NULL); 
     const char *out_file = env->GetStringUTFChars(outPath, NULL);
     FILE *infile = fopen(in_file, "rb"); 
-    FILE *outfile = fopen(out_file, "rb+");
+    FILE *outfile = fopen(out_file, "wb"); // WB to overwrite the 1kb file
     
     if (!infile || !outfile) {
         if (infile) fclose(infile); if (outfile) fclose(outfile);
@@ -64,8 +64,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
         return JNI_FALSE;
     }
 
-    // THE SPEED FIX: If qualityIdx is 0 (Proxy), jump to the 1.6MP preview
-    if (qualityIdx == 0) {
+    if (scaleDenom == 4) {
         unsigned char header[65536];
         fread(header, 1, 65536, infile);
         int soiCount = 0;
@@ -91,8 +90,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     jpeg_stdio_src(&cinfo_d, infile);
     jpeg_read_header(&cinfo_d, TRUE); 
     cinfo_d.scale_num = 1;
-    // Proxy:1 (Already small), High:2 (Half res), Ultra:1 (Full res)
-    cinfo_d.scale_denom = (qualityIdx == 0) ? 1 : (qualityIdx == 1 ? 2 : 1);
+    cinfo_d.scale_denom = (scaleDenom == 4) ? 1 : scaleDenom;
     cinfo_d.out_color_space = JCS_RGB; 
     jpeg_start_decompress(&cinfo_d);
 
@@ -110,7 +108,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     cinfo_c.input_components = 3; 
     cinfo_c.in_color_space = JCS_RGB;
     jpeg_set_defaults(&cinfo_c); 
-    jpeg_set_quality(&cinfo_c, 90, TRUE); 
+    jpeg_set_quality(&cinfo_c, 95, TRUE); 
     jpeg_start_compress(&cinfo_c, TRUE);
 
     int map[256]; 
@@ -125,8 +123,8 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     long long vig_coef = ((long long)((vignette * 256) / 100) << 24) / (max_dist_sq > 0 ? max_dist_sq : 1); 
     int opac_mapped = (opacity * 256) / 100;
     
-    unsigned char* row_buf = (unsigned char*)malloc(row_stride);
     JSAMPROW row_pointer[1];
+    unsigned char* row_buf = (unsigned char*)malloc(row_stride);
     uint32_t master_seed = 98765;
 
     while (cinfo_d.output_scanline < cinfo_d.output_height) {
@@ -134,7 +132,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
         row_pointer[0] = row_buf;
         jpeg_read_scanlines(&cinfo_d, row_pointer, 1);
         uint32_t seed = master_seed + (abs_y * 1337); 
-        int prev_noise = 0; 
+        int prev_noise = 0; // DECLARE HERE FOR PERSISTENCE PER ROW
 
         for (int x = 0; x < row_stride; x += 3) {
             int r = row_buf[x], g = row_buf[x+1], b = row_buf[x+2];
@@ -175,11 +173,14 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
                 outR = (outR * v_m) >> 8; outG = (outG * v_m) >> 8; outB = (outB * v_m) >> 8;
             }
             if (grain > 0) {
-                int n = (fast_rand(&seed) & 0xFF) - 128;
-                int noise = (grainSize == 0) ? n : (grainSize == 1) ? (n + prev_noise) >> 1 : (n + prev_noise * 2) / 3;
-                int lum = (outR*77 + outG*150 + outB*29) >> 8; int m = (lum < 128) ? lum : 255 - lum; 
-                int gv = (noise * m * grain) >> 15; outR += gv; outG += gv; outB += gv;
-                prev_noise = n;
+                int raw_noise = (fast_rand(&seed) & 0xFF) - 128;
+                int noise = (grainSize == 0) ? raw_noise : (grainSize == 1) ? (raw_noise + prev_noise) >> 1 : (raw_noise + prev_noise * 2) / 3;
+                int lum = (outR*77 + outG*150 + outB*29) >> 8; 
+                int mask = (lum < 128) ? lum : 255 - lum; 
+                if (lum < 64) mask = (mask * lum) >> 6;
+                int gv = (noise * mask * grain) >> 15; 
+                outR += gv; outG += gv; outB += gv;
+                prev_noise = raw_noise;
             }
             row_buf[x] = (unsigned char)(outR<0?0:outR>255?255:outR);
             row_buf[x+1] = (unsigned char)(outG<0?0:outG>255?255:outG);
