@@ -1,26 +1,22 @@
 package com.github.ma1co.pmcademo.app;
 
-import java.io.File;
-
 public class LutEngine {
     static { System.loadLibrary("native-lib"); }
     private String currentLutName = "";
     
     private native boolean loadLutNative(String filePath);
-    private native boolean processImageNative(String inPath, String outPath, int scaleDenom, int opacity, int grain, int grainSize, int vignette, int rollOff);
+    private native boolean processImageNative(String inPath, String outPath, int qualityIdx, int opacity, int grain, int grainSize, int vignette, int rollOff);
 
-    public String getCurrentLutName() { return currentLutName; }
-
-    public boolean loadLut(File cubeFile, String lutName) {
-        if (lutName.equals(currentLutName)) return true;
-        if (loadLutNative(cubeFile.getAbsolutePath())) {
-            currentLutName = lutName; 
+    public boolean loadLut(String path, String name) {
+        if (name.equals(currentLutName)) return true;
+        if (loadLutNative(path)) {
+            currentLutName = name; 
             return true;
         }
         return false;
     }
 
-    public boolean applyLutToJpeg(String inPath, String outPath, int scaleDenom, int opacity, int grain, int grainSize, int vignette, int rollOff) {
-        return processImageNative(inPath, outPath, scaleDenom, opacity, grain, grainSize, vignette, rollOff);
+    public boolean applyLutToJpeg(String inPath, String outPath, int qualityIdx, int opacity, int grain, int grainSize, int vignette, int rollOff) {
+        return processImageNative(inPath, outPath, qualityIdx, opacity, grain, grainSize, vignette, rollOff);
     }
 }

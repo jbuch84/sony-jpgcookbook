@@ -37,8 +37,7 @@ public class ImageProcessor {
     private class PreloadLutTask extends AsyncTask<String, Void, Boolean> {
         @Override protected void onPreExecute() { mCallback.onPreloadStarted(); }
         @Override protected Boolean doInBackground(String... params) {
-            // FIX: Pass both the File and the Name to match LutEngine.java
-            return mEngine.loadLut(new File(params[0]), params[1]);
+            return mEngine.loadLut(params[0], params[1]);
         }
         @Override protected void onPostExecute(Boolean success) { mCallback.onPreloadFinished(success); }
     }
@@ -61,10 +60,10 @@ public class ImageProcessor {
                 File original = new File(params[0]);
                 if (!original.exists()) return "ERR";
 
-                // --- STABILIZATION LOOP (Ah-hah moment) ---
+                // --- THE STABILIZATION LOOP ---
                 long lastSize = -1; 
                 int timeout = 0;
-                while (timeout < 60) {
+                while (timeout < 50) {
                     long currentSize = original.length();
                     if (currentSize > 0 && currentSize == lastSize) break;
                     lastSize = currentSize; 
@@ -75,17 +74,26 @@ public class ImageProcessor {
                 File outDir = new File(outDirPath);
                 if (!outDir.exists()) outDir.mkdirs();
                 
-                // 8.3 naming for Sony FUSE stability
-                String timeTag = Long.toHexString(System.currentTimeMillis() / 1000).toUpperCase();
-                File outFile = new File(outDir, "F" + timeTag.substring(timeTag.length()-7) + ".JPG");
+                // Keep 8.3 naming for Sony stability
+                String outName = "FLM_" + (System.currentTimeMillis() / 1000 % 10000) + ".JPG";
+                File outFile = new File(outDir, outName);
 
-                // Sony FUSE Pre-create Workaround
+                // Sony FUSE Pre-create workaround
                 new FileOutputStream(outFile).write(1);
 
-                // Correct scaling logic: 0=Proxy(4x down), 1=High(2x), 2=Ultra(1x)
-                int scale = (qualityIndex == 0) ? 4 : (qualityIndex == 1 ? 2 : 1);
+                // Multiply effect values by 20 to match your profile scale
+                boolean success = mEngine.applyLutToJpeg(
+                    original.getAbsolutePath(), 
+                    outFile.getAbsolutePath(), 
+                    qualityIndex, 
+                    p.opacity, 
+                    p.grain * 20, 
+                    p.grainSize, 
+                    p.vignette * 20, 
+                    p.rollOff * 20
+                );
 
-                if (mEngine.applyLutToJpeg(original.getAbsolutePath(), outFile.getAbsolutePath(), scale, p.opacity, p.grain * 20, p.grainSize, p.vignette * 20, p.rollOff * 20)) {
+                if (success) {
                     mContext.sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(outFile)));
                     return "SAVED";
                 }
