@@ -81,7 +81,16 @@ public class ImageProcessor {
                 // 0=Proxy (4), 1=High (2), 2=Ultra (1)
                 int scale = (qualityIdx == 0) ? 4 : (qualityIdx == 2 ? 1 : 2);
 
-                if (mEngine.applyLutToJpeg(original.getAbsolutePath(), outFile.getAbsolutePath(), scale, p.opacity, p.grain * 20, p.grainSize, p.vignette * 20, p.rollOff * 20, globalJpegQuality)) {
+                // Dynamically set JPEG encode quality to save processing/write time!
+                int jpegQuality = 95; // Ultra gets max quality
+                if (scale == 4) {
+                    jpegQuality = 85; // Proxy gets 85 quality (Faster write, visually identical)
+                } else if (scale == 2) {
+                    jpegQuality = 90; // High gets 90 quality
+                }
+
+                // Pass the new dynamic jpegQuality variable to the C++ engine
+                if (mEngine.applyLutToJpeg(original.getAbsolutePath(), outFile.getAbsolutePath(), scale, p.opacity, p.grain * 20, p.grainSize, p.vignette * 20, p.rollOff * 20, jpegQuality)) {
                     return "SAVED";
                 }
             } catch (Exception e) { Log.e("COOKBOOK", "Java error: " + e.getMessage()); }
