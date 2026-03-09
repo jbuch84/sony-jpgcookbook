@@ -56,7 +56,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     const char *in_file = env->GetStringUTFChars(inPath, NULL); 
     const char *out_file = env->GetStringUTFChars(outPath, NULL);
     FILE *infile = fopen(in_file, "rb"); 
-    FILE *outfile = fopen(out_file, "rb+"); // Open pre-created file
+    FILE *outfile = fopen(out_file, "rb+");
     
     if (!infile || !outfile) {
         if (infile) fclose(infile); if (outfile) fclose(outfile);
@@ -64,8 +64,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
         return JNI_FALSE;
     }
 
-    // --- SPEED FIX: GHOST RIP (PROXY MODE) ---
-    // If qualityIdx is 0, scan the header for the high-res Preview Image (1616x1080)
+    // THE SPEED FIX: If qualityIdx is 0 (Proxy), jump to the 1.6MP preview
     if (qualityIdx == 0) {
         unsigned char header[65536];
         fread(header, 1, 65536, infile);
@@ -114,7 +113,6 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     jpeg_set_quality(&cinfo_c, 90, TRUE); 
     jpeg_start_compress(&cinfo_c, TRUE);
 
-    // PRESERVED MATH LOGIC
     int map[256]; 
     int lutMax = nativeLutSize > 0 ? nativeLutSize - 1 : 0; 
     int lutSize2 = nativeLutSize * nativeLutSize;
@@ -136,12 +134,12 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
         row_pointer[0] = row_buf;
         jpeg_read_scanlines(&cinfo_d, row_pointer, 1);
         uint32_t seed = master_seed + (abs_y * 1337); 
+        int prev_noise = 0; 
 
         for (int x = 0; x < row_stride; x += 3) {
             int r = row_buf[x], g = row_buf[x+1], b = row_buf[x+2];
             int outR = r, outG = g, outB = b;
 
-            // TETRAHEDRAL INTERPOLATION (Your Hard Work)
             if (nativeLutSize > 0) {
                 int fX = map[r], fY = map[g], fZ = map[b];
                 int x0 = fX >> 7, y0 = fY >> 7, z0 = fZ >> 7;
