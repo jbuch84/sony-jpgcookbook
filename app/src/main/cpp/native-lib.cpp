@@ -8,7 +8,7 @@
 #include "jpeglib.h"
 #include <android/log.h>
 
-#define LOG_TAG "filmOS_Native"
+#define LOG_TAG "COOKBOOK_NATIVE"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
 
 std::vector<uint8_t> nativeLut; 
@@ -25,7 +25,7 @@ inline uint32_t fast_rand(uint32_t* state) {
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_github_ma1co_pmcademo_app_LutEngine_loadLutNative(JNIEnv* env, jobject obj, jstring path) {
+Java_com_github_ma1co_pmcademo_app_LutEngine_loadLutNative(JNIEnv* env, jobject, jstring path) {
     const char *file_path = env->GetStringUTFChars(path, NULL);
     FILE *file = fopen(file_path, "r");
     if (!file) { env->ReleaseStringUTFChars(path, file_path); return JNI_FALSE; }
@@ -49,8 +49,8 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_loadLutNative(JNIEnv* env, jobject 
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
-    JNIEnv* env, jobject obj, jstring inPath, jstring outPath, 
-    jint qualityIdx, jint opacity, jint grain, jint grainSize, 
+    JNIEnv* env, jobject, jstring inPath, jstring outPath, 
+    jint scaleDenom, jint opacity, jint grain, jint grainSize, 
     jint vignette, jint rolloff) {
     
     const char *in_file = env->GetStringUTFChars(inPath, NULL); 
@@ -64,8 +64,8 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
         return JNI_FALSE;
     }
 
-    // --- NATIVE THUMBNAIL RIP (PROXY MODE) ---
-    if (qualityIdx == 0) {
+    // --- PROXY MODE (Ghost Rip) ---
+    if (scaleDenom == 4) {
         unsigned char buf[65536];
         fread(buf, 1, 65536, infile);
         int soiCount = 0;
@@ -91,8 +91,8 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     jpeg_stdio_src(&cinfo_d, infile);
     jpeg_read_header(&cinfo_d, TRUE); 
     cinfo_d.scale_num = 1;
-    // Proxy:1, High:2, Ultra:1 (on 24mp)
-    cinfo_d.scale_denom = (qualityIdx == 0) ? 1 : (qualityIdx == 1) ? 2 : 1;
+    // If we ripped the thumb (scaleDenom 4), it's already small, so scale_denom 1
+    cinfo_d.scale_denom = (scaleDenom == 4) ? 1 : scaleDenom;
     cinfo_d.out_color_space = JCS_RGB; 
     jpeg_start_decompress(&cinfo_d);
 
@@ -113,6 +113,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     jpeg_set_quality(&cinfo_c, 90, TRUE); 
     jpeg_start_compress(&cinfo_c, TRUE);
 
+    // PRESERVED: YOUR LUT MATH
     int map[256]; int rollMap[256];
     int lutMax = nativeLutSize > 0 ? nativeLutSize - 1 : 0; 
     int lutSize2 = nativeLutSize * nativeLutSize;
@@ -144,6 +145,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
             int r = img_buffer[x], g = img_buffer[x+1], b = img_buffer[x+2];
             int outR = r, outG = g, outB = b;
 
+            // PRESERVED: YOUR TETRAHEDRAL INTERPOLATION
             if (nativeLutSize > 0) {
                 int fX = map[r], fY = map[g], fZ = map[b];
                 int x0 = fX >> 7, y0 = fY >> 7, z0 = fZ >> 7;

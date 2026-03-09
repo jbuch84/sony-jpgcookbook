@@ -9,73 +9,86 @@ import java.io.File;
 import java.io.FileOutputStream;
 
 public class ImageProcessor {
-    public interface ProcessorCallback {
-        void onPreloadStarted(); void onPreloadFinished(boolean success);
-        void onProcessStarted(); void onProcessFinished(String resultPath);
-    }
-
+    private LutEngine mEngine;
     private Context mContext;
     private ProcessorCallback mCallback;
+
+    public interface ProcessorCallback {
+        void onPreloadStarted();
+        void onPreloadFinished(boolean success);
+        void onProcessStarted();
+        void onProcessFinished(String result);
+    }
 
     public ImageProcessor(Context context, ProcessorCallback callback) {
         this.mContext = context;
         this.mCallback = callback;
+        mEngine = new LutEngine();
     }
 
-    public void triggerLutPreload(String lutPath, String name) {
-        new PreloadLutTask().execute(lutPath);
+    public void triggerLutPreload(String lutPath, String lutName) {
+        new PreloadLutTask().execute(lutPath, lutName);
     }
 
-    public void processJpeg(String inPath, String outDir, int qualityIndex, RTLProfile profile) {
-        new ProcessTask(inPath, outDir, qualityIndex, profile).execute();
+    public void processJpeg(String originalPath, String outDirPath, int qualityIndex, RTLProfile p) {
+        new ProcessTask(qualityIndex, p, outDirPath).execute(originalPath);
     }
 
     private class PreloadLutTask extends AsyncTask<String, Void, Boolean> {
-        @Override protected Boolean doInBackground(String... params) { return LutEngine.loadLut(params[0]); }
+        @Override protected void onPreExecute() { mCallback.onPreloadStarted(); }
+        @Override protected Boolean doInBackground(String... params) {
+            return mEngine.loadLut(new File(params[0]), params[1]);
+        }
+        @Override protected void onPostExecute(Boolean success) { mCallback.onPreloadFinished(success); }
     }
 
-    private class ProcessTask extends AsyncTask<Void, Void, String> {
-        private String inPath, outDir;
+    private class ProcessTask extends AsyncTask<String, Void, String> {
         private int qualityIndex;
-        private RTLProfile profile;
+        private RTLProfile p;
+        private String outDirPath;
 
-        public ProcessTask(String in, String out, int q, RTLProfile p) {
-            this.inPath = in; this.outDir = out; this.qualityIndex = q; this.profile = p;
-        }
+        public ProcessTask(int q, RTLProfile p, String out) { this.qualityIndex = q; this.p = p; this.outDirPath = out; }
 
-        @Override protected void onPreExecute() { if (mCallback != null) mCallback.onProcessStarted(); }
+        @Override protected void onPreExecute() { mCallback.onProcessStarted(); }
 
-        @Override protected String doInBackground(Void... voids) {
+        @Override protected String doInBackground(String... params) {
             try {
-                File dir = new File(outDir);
-                if (!dir.exists()) dir.mkdirs();
+                File original = new File(params[0]);
+                if (!original.exists()) return "ERR";
 
-                // 8.3 naming
-                String timeTag = Long.toHexString(System.currentTimeMillis() / 1000).toUpperCase();
-                String finalOutPath = new File(dir, "FL" + timeTag.substring(timeTag.length()-6) + ".JPG").getAbsolutePath();
-
-                // Java creates the "Shell" file so Sony's OS doesn't block C++
-                FileOutputStream touch = new FileOutputStream(finalOutPath);
-                touch.write(1);
-                touch.close();
-
-                Log.d("filmOS", "Passing to Native. QualityIdx: " + qualityIndex);
-                
-                // We pass qualityIndex (0 for Proxy, 1 for High, 2 for Ultra)
-                boolean success = LutEngine.processImageNative(
-                        inPath, finalOutPath, qualityIndex,
-                        profile.opacity, profile.grain, profile.grainSize,
-                        profile.vignette, profile.rollOff
-                );
-
-                if (success) {
-                    mContext.sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(new File(finalOutPath))));
-                    return finalOutPath;
+                // --- RESTORED STABILIZATION LOOP (The "Ah-hah" fix) ---
+                long lastSize = -1; 
+                int timeout = 0;
+                while (timeout < 100) {
+                    long currentSize = original.length();
+                    if (currentSize > 0 && currentSize == lastSize) break;
+                    lastSize = currentSize; 
+                    Thread.sleep(100); // 100ms wait between checks
+                    timeout++;
                 }
-            } catch (Exception e) { Log.e("filmOS", "Java Error: " + e.getMessage()); }
-            return null;
+
+                // Create unique output name
+                File outDir = new File(outDirPath);
+                if (!outDir.exists()) outDir.mkdirs();
+                String outName = "FLM_" + (System.currentTimeMillis() / 1000 % 10000) + ".JPG";
+                File outFile = new File(outDir, outName);
+
+                // Sony FUSE Pre-create Workaround
+                new FileOutputStream(outFile).write(1);
+
+                // 0=Proxy(Thumb), 1=High(6MP), 2=Ultra(24MP)
+                // We send qualityIndex to C++ as scaleDenom
+                int scale = (qualityIndex == 0) ? 4 : (qualityIndex == 1 ? 2 : 1);
+
+                Log.d("COOKBOOK", "Handoff to Native: " + original.getName());
+                if (mEngine.applyLutToJpeg(original.getAbsolutePath(), outFile.getAbsolutePath(), scale, p.opacity, p.grain * 20, p.grainSize, p.vignette * 20, p.rollOff * 20)) {
+                    mContext.sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(outFile)));
+                    return "SAVED";
+                }
+            } catch (Exception e) { Log.e("COOKBOOK", "Java side error: " + e.getMessage()); }
+            return "FAILED";
         }
 
-        @Override protected void onPostExecute(String res) { if (mCallback != null) mCallback.onProcessFinished(res); }
+        @Override protected void onPostExecute(String result) { mCallback.onProcessFinished(result); }
     }
 }
