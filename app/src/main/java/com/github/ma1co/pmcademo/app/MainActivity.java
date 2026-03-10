@@ -175,8 +175,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                             afOverlay.stopFocus(cameraManager.getCamera());
                             updateMainHUD(); 
                         }
+                        
+                        // --- FLICKER FIX: Do not force HUD on if calibrating! ---
                         if (tvTopStatus != null && tvTopStatus.getVisibility() != View.VISIBLE) {
-                            setHUDVisibility(View.VISIBLE);
+                            if (!isCalibrating && !waitingForProfileChoice && !isAutoLoading) {
+                                setHUDVisibility(View.VISIBLE);
+                            }
                         }
                     }
                 }
@@ -666,19 +670,19 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     public void onDownPressed() { 
         if (isProcessing) return;
         
-        // --- NEW MAP CHOICE ---
+        // --- NEW MAP CHOICE / SMART BYPASS ---
         if (waitingForProfileChoice) {
             waitingForProfileChoice = false;
             isCalibrating = true;
             
-            // Smart Bypass: If Auto-Load failed, we ALREADY have the EXIF name. Skip Step 0!
+            // Smart Bypass: If Auto-Load failed, we ALREADY have the EXIF name. Skip the photo step!
             if (detectedLensName != null && !detectedLensName.startsWith("Manual Lens")) {
                 calibStep = 1;
                 minDistanceInput = 0.3f;
                 tempCalPoints.clear();
                 updateCalibrationUI();
             } else {
-                // Fresh start: prompt for throwaway photo
+                // Fresh start from the main router: prompt for a throwaway photo
                 calibStep = 0; 
                 if (tvCalibrationPrompt != null) {
                     tvCalibrationPrompt.setText("MAP NEW LENS\nSnap a photo to read Lens ID...");
@@ -687,9 +691,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             return;
         }
         
+        // --- NORMAL MENU NAVIGATION ---
         if (isMenuOpen) {
-            if (isMenuEditing) handleMenuChange(-1);
-            else {
+            if (isMenuEditing) {
+                handleMenuChange(-1);
+            } else {
                 menuSelection++;
                 if (menuSelection >= currentItemCount) {
                     if (currentMainTab == 0 && currentPage == 1) {
@@ -970,6 +976,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     }
 
     private void handleHardwareInput(int d) {
+        // --- DIAL TRAP FOR CALIBRATION VALUES (Moved to top for instant response!) ---
+        if (isCalibrating && calibStep >= 1) {
+            minDistanceInput = Math.max(0.1f, minDistanceInput + (d * 0.1f));
+            updateCalibrationUI();
+            return;
+        }
+
         if (cameraManager == null) {
             return;
         }
@@ -983,13 +996,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         
         Camera.Parameters p = c.getParameters(); 
         CameraEx.ParametersModifier pm = cx.createParametersModifier(p);
-
-        // --- DIAL TRAP FOR CALIBRATION VALUES ---
-        if (isCalibrating && calibStep >= 1) {
-            minDistanceInput = Math.max(0.1f, minDistanceInput + (d * 0.1f));
-            updateCalibrationUI();
-            return;
-        }
         
         if (mDialMode == DIAL_MODE_RTL) { 
             recipeManager.setCurrentSlot(recipeManager.getCurrentSlot() + d); 
@@ -1640,7 +1646,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         int in = (int) (totalInches % 12);
         String distStr = String.format("%.2fm / %d'%d\"", minDistanceInput, ft, in);
         
-        String text = "[ MAPPING LENS SLOT " + currentLensSlot + " ]\n";
+        // --- VISUAL PROOF OF EXIF CARRY-OVER ---
+        String text = "[ MAPPING: " + detectedLensName + " (SLOT " + currentLensSlot + ") ]\n";
         
         if (calibStep == 1) {
             text += "STEP 1: Turn ring to hard stop (MIN FOCUS)\nTurn rear scroll wheel to dial distance: < " + distStr + " >\nPress [ENTER] to lock min."; 
@@ -1648,7 +1655,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             text += "STEP 2: Focus on ANY object.\nTurn rear scroll wheel to dial distance: < " + distStr + " >\nPress [ENTER] to log point. [UP] to Save & Finish.";
         }
         
-        tvCalibrationPrompt.setText(text);
+        if (tvCalibrationPrompt != null) {
+            tvCalibrationPrompt.setText(text);
+        }
     }
     
     private void updateMainHUD() {
