@@ -584,34 +584,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 calibStep = 1; 
                 minDistanceInput = 0.3f; // Default starting dial value
                 
-                // --- AGGRESSIVE FOCAL LENGTH HUNT ---
-                try {
-                    Camera c = cameraManager.getCamera();
-                    Camera.Parameters p = c.getParameters();
-                    
-                    // 1. Try the standard Android method
-                    float fl = p.getFocalLength();
-                    
-                    // 2. If Sony returned 0, hunt through the raw string dictionary
-                    if (fl <= 0.0f) {
-                        String flStr = p.get("focal-length");
-                        if (flStr != null) {
-                            fl = Float.parseFloat(flStr);
-                        }
-                    }
-                    
-                    // 3. Set the name based on what we found
-                    if (fl > 0) {
-                        detectedLensName = Math.round(fl) + "mm Lens";
-                    } else {
-                        detectedLensName = "Manual Lens " + currentLensSlot;
-                    }
-                } catch (Exception e) {
-                    detectedLensName = "Manual Lens " + currentLensSlot;
+                // Hide all main UI, but explicitly keep the focus meter and prompt alive!
+                setHUDVisibility(View.GONE); 
+                if (focusMeter != null) {
+                    focusMeter.setVisibility(View.VISIBLE); 
+                }
+                if (tvCalibrationPrompt != null) {
+                    tvCalibrationPrompt.setVisibility(View.VISIBLE);
                 }
                 
-                setHUDVisibility(View.VISIBLE); // Keep HUD for peaking
-                tvCalibrationPrompt.setVisibility(View.VISIBLE);
                 updateCalibrationUI();
             } else {
                 // Toggle HUD visibility
@@ -637,12 +618,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         
         // --- FINISH CALIBRATION TRAP ---
         if (isCalibrating && calibStep == 2) {
-            // Auto-cap Infinity at 100% (1.0f) and save directly to the current slot!
             tempCalPoints.add(new LensProfileManager.CalPoint(1.0f, 999.0f));
             lensManager.saveProfile("Lens " + currentLensSlot, tempCalPoints);
             isCalibrating = false;
             tvCalibrationPrompt.setVisibility(View.GONE);
-            setHUDVisibility(View.VISIBLE);
+            setHUDVisibility(View.VISIBLE); // RESTORE HUD!
+            updateMainHUD(); // Force a clean repaint so it doesn't bleed!
             return;
         }
 
@@ -673,10 +654,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         
         // --- CANCEL CALIBRATION TRAP ---
         if (isCalibrating) {
-            isCalibrating = false; // Abort!
+            isCalibrating = false;
             tvCalibrationPrompt.setVisibility(View.GONE);
-            setHUDVisibility(View.VISIBLE);
-            return; // Do not save, do not pass go
+            setHUDVisibility(View.VISIBLE); // RESTORE HUD!
+            updateMainHUD(); // Force a clean repaint so it doesn't bleed!
+            return;
         }
         
         // --- NORMAL MENU NAVIGATION ---
@@ -1341,9 +1323,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         leftParams.setMargins(20, 20, 0, 0); 
         mainUIContainer.addView(leftBar, leftParams);
         
+        // --- FOCUS METER HEIGHT FIX ---
         focusMeter = new AdvancedFocusMeterView(this); 
-        FrameLayout.LayoutParams fmParams = new FrameLayout.LayoutParams(-1, 80, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL); 
-        fmParams.setMargins(0, 0, 0, 100); 
+        // Increased height from 80 to 140 so text doesn't clip!
+        FrameLayout.LayoutParams fmParams = new FrameLayout.LayoutParams(-1, 140, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL); 
+        fmParams.setMargins(0, 0, 0, 70); 
         mainUIContainer.addView(focusMeter, fmParams);
         
         llBottomBar = new LinearLayout(this); 
@@ -1367,19 +1351,19 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         afOverlay = new ProReticleView(this); 
         mainUIContainer.addView(afOverlay, new FrameLayout.LayoutParams(-1, -1));
         
-        // --- NEW FOCUS ASSIST OVERLAY ---
+        // --- NEW CALIBRATION OVERLAY (WIDE & CENTERED) ---
         tvCalibrationPrompt = new TextView(this); 
         tvCalibrationPrompt.setTextColor(Color.WHITE); 
-        tvCalibrationPrompt.setTextSize(16); 
-        tvCalibrationPrompt.setTypeface(Typeface.MONOSPACE); 
-        tvCalibrationPrompt.setGravity(Gravity.LEFT | Gravity.TOP); 
-        tvCalibrationPrompt.setBackgroundColor(Color.argb(150, 0, 0, 0)); // Semi-transparency
-        tvCalibrationPrompt.setPadding(20, 20, 20, 20);
+        tvCalibrationPrompt.setTextSize(18); 
+        tvCalibrationPrompt.setTypeface(Typeface.MONOSPACE, Typeface.BOLD); 
+        tvCalibrationPrompt.setGravity(Gravity.CENTER); // Centered text
+        tvCalibrationPrompt.setBackgroundColor(Color.argb(200, 0, 0, 0)); // Darker for readability
+        tvCalibrationPrompt.setPadding(10, 15, 10, 15);
         tvCalibrationPrompt.setVisibility(View.GONE);
         
-        // Place it in the top-left corner so the center of the frame is clear for focusing
-        FrameLayout.LayoutParams cpParams = new FrameLayout.LayoutParams(400, -2, Gravity.TOP | Gravity.LEFT); 
-        cpParams.setMargins(20, 150, 0, 0); 
+        // Spans the entire top horizontally like a banner
+        FrameLayout.LayoutParams cpParams = new FrameLayout.LayoutParams(-1, -2, Gravity.TOP); 
+        cpParams.setMargins(0, 20, 0, 0); 
         mainUIContainer.addView(tvCalibrationPrompt, cpParams);
 
         menuContainer = new LinearLayout(this); 
@@ -1582,18 +1566,18 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     private void updateCalibrationUI() {
         if (!isCalibrating) return;
-        String text = "LENS MAP: " + detectedLensName + "\n\n";
         
-        // Convert Meters to Feet and Inches dynamically
         float totalInches = minDistanceInput * 39.3701f;
         int ft = (int) (totalInches / 12);
         int in = (int) (totalInches % 12);
         String distStr = String.format("%.2fm / %d'%d\"", minDistanceInput, ft, in);
         
+        String text = "[ MAPPING LENS SLOT " + currentLensSlot + " ]   DIALED: < " + distStr + " >\n";
+        
         if (calibStep == 1) {
-            text += "STEP 1: ANCHOR BOTTOM\n1. Turn focus ring to min.\n2. Use scroll wheel to input actual dist:\n   < " + distStr + " >\n3. Press [ENTER] to lock min.\n\nPress [DOWN] to cancel."; 
+            text += "STEP 1: Turn ring to hard stop (MIN FOCUS) -> Press [ENTER]"; 
         } else if (calibStep == 2) {
-            text += "STEP 2: ADD MARKS (" + (tempCalPoints.size() - 1) + " logged)\n1. Focus on ANY object.\n2. Use scroll wheel to input actual dist:\n   < " + distStr + " >\n3. Press [ENTER] to log point.\n\nPress [UP] to save. [DOWN] to cancel.";
+            text += "STEP 2: Focus on ANY object -> Press [ENTER] to log point.\n(Log as many as you want, then press [UP] to Save & Finish)";
         }
         
         tvCalibrationPrompt.setText(text);
@@ -1770,8 +1754,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (focusMeter != null && cachedIsManualFocus) { 
             runOnUiThread(new Runnable() { 
                 public void run() {
-                    cachedFocusRatio = ratio; // <-- UPDATE THE CACHE
-                    updateMainHUD(); // Calls the new 4-parameter update safely!
+                    cachedFocusRatio = ratio; 
+                    
+                    // ONLY update the gauge, do not rebuild the whole UI!
+                    if (isCalibrating) {
+                        focusMeter.update(cachedFocusRatio, cachedAperture, -1.0f, tempCalPoints);
+                    } else if (lensManager != null) {
+                        float currentDist = lensManager.getDistanceForRatio(cachedFocusRatio);
+                        focusMeter.update(cachedFocusRatio, cachedAperture, currentDist, lensManager.getCurrentPoints());
+                    }
                 }
             });
         }
