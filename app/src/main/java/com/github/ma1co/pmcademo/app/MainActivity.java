@@ -671,6 +671,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             return;
         }
         
+        // --- CANCEL CALIBRATION TRAP ---
+        if (isCalibrating) {
+            isCalibrating = false; // Abort!
+            tvCalibrationPrompt.setVisibility(View.GONE);
+            setHUDVisibility(View.VISIBLE);
+            return; // Do not save, do not pass go
+        }
+        
+        // --- NORMAL MENU NAVIGATION ---
         if (isMenuOpen) {
             if (isMenuEditing) {
                 handleMenuChange(-1);
@@ -1582,9 +1591,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         String distStr = String.format("%.2fm / %d'%d\"", minDistanceInput, ft, in);
         
         if (calibStep == 1) {
-            text += "STEP 1: ANCHOR BOTTOM\n1. Turn focus ring to min.\n2. Use scroll wheel to input actual dist:\n   < " + distStr + " >\n3. Press [ENTER] to lock min."; 
+            text += "STEP 1: ANCHOR BOTTOM\n1. Turn focus ring to min.\n2. Use scroll wheel to input actual dist:\n   < " + distStr + " >\n3. Press [ENTER] to lock min.\n\nPress [DOWN] to cancel."; 
         } else if (calibStep == 2) {
-            text += "STEP 2: ADD MARKS (" + (tempCalPoints.size() - 1) + " logged)\n1. Focus on ANY object.\n2. Use scroll wheel to input actual dist:\n   < " + distStr + " >\n3. Press [ENTER] to log point.\n\nPress [UP] when finished.";
+            text += "STEP 2: ADD MARKS (" + (tempCalPoints.size() - 1) + " logged)\n1. Focus on ANY object.\n2. Use scroll wheel to input actual dist:\n   < " + distStr + " >\n3. Press [ENTER] to log point.\n\nPress [UP] to save. [DOWN] to cancel.";
         }
         
         tvCalibrationPrompt.setText(text);
@@ -1682,8 +1691,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             boolean shouldShow = prefShowFocusMeter && cachedIsManualFocus;
             focusMeter.setVisibility(shouldShow ? View.VISIBLE : View.GONE);
             
-            // Change focusMeter.update(0.5f, cachedAperture); to this:
             if (shouldShow) {
+                // If we are calibrating, show the live Temp array. 
+                // If not calibrating, pull the saved profile from the LensManager!
+                if (isCalibrating) {
+                    focusMeter.setCalibrationPoints(tempCalPoints);
+                } else if (lensManager != null) {
+                    // Assuming your LensProfileManager has a way to get the active points...
+                    // Update "getProfile" to whatever your getter method is named!
+                    focusMeter.setCalibrationPoints(lensManager.getProfile("Lens " + currentLensSlot));
+                }
+                
                 focusMeter.update(cachedFocusRatio, cachedAperture);
             }
         }
