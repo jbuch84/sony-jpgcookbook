@@ -557,27 +557,18 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (isPlaybackMode) { exitPlayback(); return; }
         if (isProcessing) return;
         
-        // --- LINEAR WIZARD PROGRESSION ---
+        // --- DYNAMIC PLOTTER WIZARD PROGRESSION ---
         if (isCalibrating) {
-            switch(calibStep) {
-                case 1: // Pin Min Focus (Physical Stop at 0% ring ratio)
-                    tempCalPoints.add(new LensProfileManager.CalPoint(0.0f, minDistanceInput));
-                    minDistanceInput = 1.0f; // Reset dial to 1m for convenience 
-                    calibStep = 2; break;
-                case 2: // Pin Mid Focus (Current ring position)
-                    tempCalPoints.add(new LensProfileManager.CalPoint(cachedFocusRatio, minDistanceInput));
-                    minDistanceInput = 3.0f; // Reset dial to 3m for convenience
-                    calibStep = 3; break;
-                case 3: // Pin Far Focus (Current ring position) + Auto Infinity at 100%
-                    tempCalPoints.add(new LensProfileManager.CalPoint(cachedFocusRatio, minDistanceInput));
-                    tempCalPoints.add(new LensProfileManager.CalPoint(1.0f, 999.0f));
-                    lensManager.saveProfile(detectedLensName, tempCalPoints);
-                    isCalibrating = false;
-                    tvCalibrationPrompt.setVisibility(View.GONE);
-                    setHUDVisibility(View.VISIBLE);
-                    return;
+            if (calibStep == 1) {
+                // Anchor Bottom: Pin Min Focus (Strictly locks at 0.0f)
+                tempCalPoints.add(new LensProfileManager.CalPoint(0.0f, minDistanceInput));
+                calibStep = 2; // Move to the open loop
+                updateCalibrationUI();
+            } else if (calibStep == 2) {
+                // The Open Loop: Pin Any Focus Point at current physical ring position
+                tempCalPoints.add(new LensProfileManager.CalPoint(cachedFocusRatio, minDistanceInput));
+                updateCalibrationUI(); // Stay on step 2 so they can add more!
             }
-            updateCalibrationUI();
             return;
         }
 
@@ -585,11 +576,22 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             if (mDialMode == DIAL_MODE_REVIEW) {
                 enterPlayback();
             } else if (mDialMode == DIAL_MODE_FOCUS && cachedIsManualFocus) {
+                // INSTANT WIZARD TRIGGER
                 isCalibrating = true;
                 tempCalPoints.clear();
-                calibStep = 0; 
-                detectedLensName = "Manual Lens";
-                setHUDVisibility(View.VISIBLE); // Keep HUD visible for focus peaking
+                calibStep = 1; 
+                minDistanceInput = 0.3f; // Default starting dial value
+                
+                // Read Focal Length directly from hardware memory (No photo needed!)
+                try {
+                    Camera c = cameraManager.getCamera();
+                    float fl = c.getParameters().getFocalLength();
+                    detectedLensName = (fl > 0) ? Math.round(fl) + "mm Lens" : "Manual Lens " + currentLensSlot;
+                } catch (Exception e) {
+                    detectedLensName = "Manual Lens " + currentLensSlot;
+                }
+                
+                setHUDVisibility(View.VISIBLE); // Keep HUD for peaking
                 tvCalibrationPrompt.setVisibility(View.VISIBLE);
                 updateCalibrationUI();
             } else {
@@ -608,6 +610,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             return;
         }
         
+        // --- FINISH CALIBRATION TRAP ---
+        if (isCalibrating && calibStep == 2) {
+            // Auto-cap Infinity at 100% (1.0f) and save directly to the current slot!
+            tempCalPoints.add(new LensProfileManager.CalPoint(1.0f, 999.0f));
+            lensManager.saveProfile("Lens " + currentLensSlot, tempCalPoints);
+            isCalibrating = false;
+            tvCalibrationPrompt.setVisibility(View.GONE);
+            setHUDVisibility(View.VISIBLE);
+            return;
+        }
+
         if (isMenuOpen) {
             if (isMenuEditing) {
                 handleMenuChange(1);
@@ -889,7 +902,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
         // --- DIAL TRAP FOR CALIBRATION VALUES ---
         if (isCalibrating && calibStep >= 1) {
-            // Allows user to dial the distance for Steps 1, 2, and 3
             minDistanceInput = Math.max(0.1f, minDistanceInput + (d * 0.1f));
             updateCalibrationUI();
             return;
@@ -1537,12 +1549,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private void updateCalibrationUI() {
         if (!isCalibrating) return;
         String text = "LENS MAP: " + detectedLensName + "\n\n";
-        switch(calibStep) {
-            case 0: text += "STEP 1: IDENTIFY\nTake a photo to\nread Lens ID."; break;
-            case 1: text += "STEP 2: MIN FOCUS\nTurn ring to close stop.\nDial measured dist:\n< " + String.format("%.2fm", minDistanceInput) + " >\n[ENTER] to mark."; break;
-            case 2: text += "STEP 3: MID FOCUS\nFocus on ANY object.\nDial measured dist:\n< " + String.format("%.2fm", minDistanceInput) + " >\n[ENTER] to mark."; break;
-            case 3: text += "STEP 4: FAR FOCUS\nFocus on a far object.\nDial measured dist:\n< " + String.format("%.2fm", minDistanceInput) + " >\n[ENTER] to save."; break;
+        
+        if (calibStep == 1) {
+            text += "STEP 1: ANCHOR BOTTOM\n1. Turn ring to close stop.\n2. Scroll dial to measured dist:\n   < " + String.format("%.2fm", minDistanceInput) + " >\n3. Press [ENTER] to lock min."; 
+        } else if (calibStep == 2) {
+            text += "STEP 2: ADD MARKS (" + (tempCalPoints.size() - 1) + " logged)\n1. Focus on ANY object.\n2. Scroll dial to measured dist:\n   < " + String.format("%.2fm", minDistanceInput) + " >\n3. Press [ENTER] to log point.\n\nPress [UP] when finished.";
         }
+        
         tvCalibrationPrompt.setText(text);
     }
     
