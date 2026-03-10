@@ -1659,17 +1659,28 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         int in = (int) (totalInches % 12);
         String distStr = String.format("%.2fm / %d'%d\"", minDistanceInput, ft, in);
         
-        // --- VISUAL PROOF OF EXIF CARRY-OVER ---
-        String text = "[ MAPPING: " + detectedLensName + " (SLOT " + currentLensSlot + ") ]\n";
+        // 1. The Header
+        String header = "<font color='#FFFFFF'><b>[ MAPPING: " + detectedLensName + " (SLOT " + currentLensSlot + ") ]</b></font><br><br>";
         
+        // 2. The "Interactive Slider" UI Element (Orange, Bold, Double-Large, with Arrows)
+        String sliderHtml = "<br><br><font color='#E6320F'><big><big><b>◄ &nbsp;&nbsp;" + distStr + "&nbsp;&nbsp; ►</b></big></big></font><br><br>";
+        
+        String instructions = "";
+        
+        // 3. The Prompts
         if (calibStep == 1) {
-            text += "STEP 1: Turn ring to hard stop (MIN FOCUS)\nTurn rear scroll wheel to dial distance: < " + distStr + " >\nPress [ENTER] to lock min."; 
+            instructions = "<font color='#FFFFFF'>STEP 1: Turn ring to hard stop (MIN FOCUS)<br>Use rear scroll wheel to dial distance:</font>";
+            instructions += sliderHtml;
+            instructions += "<font color='#FFFFFF'>Press <b>[ENTER]</b> to lock min.</font>";
         } else if (calibStep == 2) {
-            text += "STEP 2: Focus on ANY object.\nTurn rear scroll wheel to dial distance: < " + distStr + " >\nPress [ENTER] to log point. [UP] to Save & Finish.";
+            instructions = "<font color='#FFFFFF'>STEP 2: Focus on ANY object.<br>Use rear scroll wheel to dial distance:</font>";
+            instructions += sliderHtml;
+            instructions += "<font color='#FFFFFF'>Press <b>[ENTER]</b> to log point.<br>Press <b>[UP]</b> to Save & Finish.</font>";
         }
         
         if (tvCalibrationPrompt != null) {
-            tvCalibrationPrompt.setText(text);
+            // Render the HTML string into visual styling
+            tvCalibrationPrompt.setText(android.text.Html.fromHtml(header + instructions));
         }
     }
     
