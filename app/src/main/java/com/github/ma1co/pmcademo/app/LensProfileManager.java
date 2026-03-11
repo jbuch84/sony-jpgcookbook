@@ -112,32 +112,35 @@ public class LensProfileManager {
 
     // --- 4. THE WRITER ---
     public void saveProfile(String lensName, float focalLength, List<CalPoint> points) {
-        this.currentFocalLength = focalLength;
-        this.currentPoints = new ArrayList<CalPoint>(points);
-        this.currentLensName = lensName;
-        sortPoints();
+    this.currentFocalLength = focalLength;
+    this.currentPoints = new ArrayList<CalPoint>(points);
+    sortPoints();
+    
+    File dir = getLensDir();
+    File file = new File(dir, generateSafeFilename(lensName));
+    
+    try {
+        // FORCE the file and directories into existence
+        if (!dir.exists()) dir.mkdirs();
+        if (file.exists()) file.delete();
+        file.createNewFile();
+
+        FileOutputStream fos = new FileOutputStream(file);
+        OutputStreamWriter osw = new OutputStreamWriter(fos);
         
-        File file = new File(getLensDir(), generateSafeFilename(lensName));
-        
-        try {
-            FileOutputStream fos = new FileOutputStream(file);
-            OutputStreamWriter osw = new OutputStreamWriter(fos);
-            
-            // Write the focal length as the header
-            osw.write("FOCAL:" + focalLength + "\n");
-            
-            // Writes out clean text lines: "0.15,1.5"
-            for (CalPoint pt : points) {
-                osw.write(pt.ratio + "," + pt.distance + "\n");
-            }
-            
-            osw.flush();
-            osw.close();
-            fos.close();
-        } catch (Exception e) {
-            e.printStackTrace();
+        osw.write("FOCAL:" + focalLength + "\n");
+        for (CalPoint pt : points) {
+            osw.write(pt.ratio + "," + pt.distance + "\n");
         }
+        
+        osw.flush();
+        osw.close();
+        fos.close();
+    } catch (Exception e) {
+        // This will now print to your logcat so we can see if it's still blocked
+        android.util.Log.e("FILMOS", "Save failed: " + e.toString());
     }
+}
 
     private void sortPoints() {
         Collections.sort(currentPoints, new Comparator<CalPoint>() {

@@ -148,43 +148,49 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     // --- THE ZERO-CLICK HARDWARE DETECTOR ---
     private void checkLensHardwareState() {
-        if (cameraManager == null) return;
+    if (cameraManager == null) return;
+    Camera c = cameraManager.getCamera();
+    if (c == null) return;
+
+    try {
+        Camera.Parameters params = c.getParameters();
         
-        Camera c = cameraManager.getCamera();
-        if (c == null) return;
+        // 1. Detect Sensor Size
+        String model = android.os.Build.MODEL; 
+        currentCocMm = (model != null && (model.contains("ILCE-7") || model.contains("ILCE-9") || model.contains("ILCE-1"))) ? 0.030 : 0.020;
 
-        try {
-            // 1. Detect Sensor Size (APS-C vs Full Frame)
-            String model = android.os.Build.MODEL; 
-            currentCocMm = (model != null && (model.contains("ILCE-7") || model.contains("ILCE-9") || model.contains("ILCE-1"))) ? 0.030 : 0.020;
+        // 2. THE ULTIMATE SONY HACK: Search the raw flattened string
+        String flat = params.flatten();
+        float liveFocal = 0.0f;
 
-            // 2. Poll the LIVE Focal Length from the active hardware
-            Camera.Parameters params = c.getParameters();
-            if (params != null) {
-                float liveFocal = params.getFocalLength();
-                if (liveFocal > 0.0f) {
-                    detectedFocalLength = liveFocal;
-                    detectedLensName = (int)liveFocal + "mm Lens";
-                } else {
-                    // DEBUG: If it fails, print the raw float value onto the UI!
-                    detectedLensName = "Raw: " + liveFocal;
-                    detectedFocalLength = 50.0f; 
-                }
-            }
-            
-            // 3. Auto-load the profile in the background!
-            if (lensManager != null) {
-                boolean found = lensManager.loadProfile(detectedLensName);
-                if (!found && focusMeter != null) {
-                    focusMeter.update(0.5f, 2.8f, detectedFocalLength, currentCocMm, false, null);
-                }
-            }
-        } catch (Exception e) {
-            // DEBUG: If the API crashes, print the Exception to the UI!
-            detectedLensName = "Err: " + e.getMessage();
+        // Sony hides focal length under different names depending on the firmware
+        // We search for the value regardless of the key name
+        if (flat.contains("focal-length=")) {
+            String sub = flat.split("focal-length=")[1].split(";")[0];
+            liveFocal = Float.parseFloat(sub);
+        } else if (flat.contains("sony-focal-length=")) {
+            String sub = flat.split("sony-focal-length=")[1].split(";")[0];
+            liveFocal = Float.parseFloat(sub);
+        }
+
+        if (liveFocal > 0.0f) {
+            detectedFocalLength = liveFocal;
+            detectedLensName = (int)liveFocal + "MM";
+        } else {
+            detectedLensName = "MANUAL";
             detectedFocalLength = 50.0f;
         }
+
+        // 3. Load the profile
+        if (lensManager != null) {
+            boolean found = lensManager.loadProfile(detectedLensName);
+            // If it's a known lens, the UI will automatically update on the next frame
+        }
+    } catch (Exception e) {
+        detectedLensName = "MANUAL"; // Keep it simple so the filename is safe
+        detectedFocalLength = 50.0f;
     }
+}
 
     // --- SONY HARDWARE SIGNAL RECEIVER ---
     private BroadcastReceiver sonyCameraReceiver = new BroadcastReceiver() {
