@@ -139,20 +139,19 @@ public class SonyCameraManager {
             Camera.Parameters p = camera.getParameters();
             CameraEx.ParametersModifier pm = cameraEx.createParametersModifier(p);
             
-            // First, ask the hardware if it even supports LensInfo right now
+            // 1. isSupportedLensInfo() belongs to ParametersModifier
             Boolean supported = (Boolean) pm.getClass().getMethod("isSupportedLensInfo").invoke(pm);
+            
             if (supported != null && supported) {
-                Object lensInfo = pm.getClass().getMethod("getLensInfo").invoke(pm);
+                // 2. getLensInfo() belongs to CameraEx!
+                Object lensInfo = cameraEx.getClass().getMethod("getLensInfo").invoke(cameraEx);
                 if (lensInfo != null) {
                     String name = (String) lensInfo.getClass().getField("LensName").get(lensInfo);
                     String type = (String) lensInfo.getClass().getField("LensType").get(lensInfo);
                     String phase = (String) lensInfo.getClass().getField("PhaseShiftSensor").get(lensInfo);
                     
-                    Object focalObj = lensInfo.getClass().getField("FocalLength").get(lensInfo);
-                    int currentFocal = 0;
-                    if (focalObj != null) {
-                        currentFocal = focalObj.getClass().getField("current").getInt(focalObj);
-                    }
+                    // 3. We can just use standard Android API for the current Focal Length!
+                    float currentFocal = p.getFocalLength();
                     
                     Log.d("filmOS_Lens", "LENS DATA -> Name: [" + name + "] Type: [" + type + "] Sensor: [" + phase + "] Focal: [" + currentFocal + "mm]");
                 } else {
@@ -162,6 +161,7 @@ public class SonyCameraManager {
                 Log.d("filmOS_Lens", "LENS DATA -> LensInfo NOT supported currently (No contacts?)");
             }
         } catch (Exception e) {
+            // We expect some fields to potentially be missing on older firmwares, so we catch the error quietly.
             Log.e("filmOS_Lens", "LENS DATA ERROR: " + e.getMessage());
         }
     }
