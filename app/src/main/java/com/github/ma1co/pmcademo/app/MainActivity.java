@@ -627,24 +627,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 enterPlayback();
             } else if (mDialMode == DIAL_MODE_FOCUS && cachedIsManualFocus) {
                 
-                // --- THE ZERO-CLICK HARDWARE DETECTOR ---
+                // --- THE ZERO-CLICK HARDWARE DETECTOR (TEST MODE) ---
                 try {
                     // 1. Ask Android what physical camera this is
                     String model = android.os.Build.MODEL; 
                     currentCocMm = (model.contains("ILCE-7") || model.contains("ILCE-9") || model.contains("ILCE-1")) ? 0.030 : 0.020;
 
-                    // 2. Ask the hardware for the live focal length!
-                    Camera.Parameters params = getCameraParameters(); 
-                    if (params != null) {
-                        float liveFocal = params.getFocalLength();
-                        if (liveFocal > 0) {
-                            detectedFocalLength = liveFocal;
-                            detectedLensName = (int)liveFocal + "mm Lens";
-                        } else {
-                            detectedLensName = "Manual Lens " + currentLensSlot;
-                            detectedFocalLength = 50.0f; // Fallback for dumb vintage glass
-                        }
-                    }
+                    // 2. Temporarily hardcode a lens just to test the Sensor UI
+                    detectedFocalLength = 25.0f;
+                    detectedLensName = "25mm Lens";
+
                 } catch (Exception e) {
                     detectedLensName = "Manual Lens " + currentLensSlot;
                     detectedFocalLength = 50.0f;
@@ -1851,7 +1843,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 float focalToUse = isCalibrating ? detectedFocalLength : (lensManager != null ? lensManager.getCurrentFocalLength() : 50.0f);
                 List<LensProfileManager.CalPoint> ptsToUse = isCalibrating ? tempCalPoints : (lensManager != null ? lensManager.getCurrentPoints() : null);
                 
-                focusMeter.update(cachedFocusRatio, cachedAperture, detectedFocalLength, currentCocMm, isCalibrating, pointsToDraw);
+                focusMeter.update(cachedFocusRatio, cachedAperture, detectedFocalLength, currentCocMm, isCalibrating, ptsToUse);
             }
         }
         
@@ -1935,7 +1927,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     float focalToUse = isCalibrating ? detectedFocalLength : (lensManager != null ? lensManager.getCurrentFocalLength() : 50.0f);
                     List<LensProfileManager.CalPoint> ptsToUse = isCalibrating ? tempCalPoints : (lensManager != null ? lensManager.getCurrentPoints() : null);
                     
-                    focusMeter.update(cachedFocusRatio, cachedAperture, focalToUse, isCalibrating, ptsToUse);
+                    focusMeter.update(cachedFocusRatio, cachedAperture, focalToUse, currentCocMm, isCalibrating, ptsToUse);
                 }
             });
         }
