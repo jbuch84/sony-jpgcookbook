@@ -42,12 +42,12 @@ public class LensProfileManager {
     // --- 1. THE SD CARD ROUTER ---
     private File getLensDir() {
         File sdCard = Environment.getExternalStorageDirectory();
-        // Creates the SDCARD/FILMOS/LENSES folder if it doesn't exist
-        File filmosDir = new File(sdCard, "FILMOS/LENSES");
-        if (!filmosDir.exists()) {
-            filmosDir.mkdirs();
+        // Creates the SDCARD/LENSES folder directly on the root
+        File lensDir = new File(sdCard, "LENSES");
+        if (!lensDir.exists()) {
+            lensDir.mkdirs();
         }
-        return filmosDir;
+        return lensDir;
     }
 
     // --- 2. THE 8-CHARACTER FILENAME ENFORCER ---

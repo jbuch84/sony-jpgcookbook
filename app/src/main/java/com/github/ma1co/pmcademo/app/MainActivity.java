@@ -667,7 +667,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             if (mDialMode == DIAL_MODE_REVIEW) {
                 enterPlayback();
             } else if (mDialMode == DIAL_MODE_FOCUS && cachedIsManualFocus) {
-                // The background detector already knows what lens is attached!
+                
+                // FORCE A FRESH HARDWARE READ in case the user just hot-swapped the lens!
+                checkLensHardwareState();
                 
                 if (lensManager.loadProfile(detectedLensName)) {
                     // STATE B: LENS IS KNOWN
@@ -714,95 +716,81 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     @Override 
     public void onUpPressed() { 
         if (isProcessing) return;
-        
-        if (waitingForProfileChoice) {
-            waitingForProfileChoice = false;
-            isAutoLoading = true;
-            if (tvCalibrationPrompt != null) {
-                tvCalibrationPrompt.setText("AUTO-LOAD LENS\nSnap a photo to read Lens ID...");
-            }
+
+        // 1. CALIBRATION LOGIC: Adjust distance number UP
+        if (isCalibrating && calibStep >= 1) {
+            minDistanceInput = Math.max(0.1f, minDistanceInput + 0.1f);
+            updateCalibrationUI();
             return;
         }
-
-        // --- FINISH CALIBRATION TRAP ---
-        if (isCalibrating && calibStep == 2) {
+        
+        // 2. THE SAVE TRIGGER: Finished logging points? Save to SD Card!
+        if (isCalibrating && tempCalPoints.size() >= 2) {
+            // Add the infinity cap to cap the math
             tempCalPoints.add(new LensProfileManager.CalPoint(1.0f, 999.0f));
             
-            // Save under BOTH the EXIF name (for Auto-Load) and the Slot (for fast swapping)
-            lensManager.saveProfile(detectedLensName, detectedFocalLength, tempCalPoints);
-            lensManager.saveProfile("Lens " + currentLensSlot, detectedFocalLength, tempCalPoints);
-            
-            // --- CRITICAL FIX: FORCE LOAD NEW DATA INTO RAM ---
-            lensManager.loadProfile("Lens " + currentLensSlot);
+            // Save the physical .lens file!
+            if (lensManager != null) {
+                lensManager.saveProfile(detectedLensName, detectedFocalLength, tempCalPoints);
+            }
             
             isCalibrating = false;
+            calibStep = 0;
+            
+            // Force the hardware detector to run so it instantly catches the new file!
+            checkLensHardwareState();
+            
             if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.GONE);
             setHUDVisibility(View.VISIBLE);
             updateMainHUD();
             return;
         }
-        
-        // --- NORMAL MENU NAVIGATION ---
-        if (isMenuOpen) {
-            if (isMenuEditing) handleMenuChange(1);
-            else {
-                menuSelection--;
-                if (menuSelection < 0) {
-                    if (currentMainTab == 0 && currentPage == 2) {
-                        currentPage = 1; menuSelection = currentItemCount - 1;
-                    } else {
-                        menuSelection = currentItemCount - 1;
-                    }
-                }
-                renderMenu();
-            }
+
+        // 3. NORMAL NAVIGATION
+        if (isPlaybackMode) {
+            // (Your normal playback up logic here)
+        } else if (isMenuOpen) {
+            if (isMenuEditing) handleMenuChange(-1); 
+            else navigateMenu(-1);
         } else {
             navigateHomeSpatial(ScalarInput.ISV_KEY_UP);
+            if (mDialMode == DIAL_MODE_FOCUS) checkLensHardwareState();
+            updateMainHUD();
         }
     }
 
     @Override 
     public void onDownPressed() { 
         if (isProcessing) return;
-        
-        // --- NEW MAP CHOICE / SMART BYPASS ---
+
+        // 1. CATCH THE PROMPT: User pressed DOWN to start mapping!
         if (waitingForProfileChoice) {
             waitingForProfileChoice = false;
             isCalibrating = true;
-            
-            // Smart Bypass: If Auto-Load failed, we ALREADY have the EXIF name. Skip the photo step!
-            if (detectedLensName != null && !detectedLensName.startsWith("Manual Lens")) {
-                calibStep = 1;
-                minDistanceInput = 0.3f;
-                tempCalPoints.clear();
-                updateCalibrationUI();
-            } else {
-                // Fresh start from the main router: prompt for a throwaway photo
-                calibStep = 0; 
-                if (tvCalibrationPrompt != null) {
-                    tvCalibrationPrompt.setText("MAP NEW LENS\nSnap a photo to read Lens ID...");
-                }
-            }
+            tempCalPoints.clear();
+            calibStep = 1;
+            minDistanceInput = 0.3f;
+            updateCalibrationUI();
             return;
         }
-        
-        // --- NORMAL MENU NAVIGATION ---
-        if (isMenuOpen) {
-            if (isMenuEditing) {
-                handleMenuChange(-1);
-            } else {
-                menuSelection++;
-                if (menuSelection >= currentItemCount) {
-                    if (currentMainTab == 0 && currentPage == 1) {
-                        currentPage = 2; menuSelection = 0;
-                    } else {
-                        menuSelection = 0;
-                    }
-                }
-                renderMenu();
-            }
+
+        // 2. CALIBRATION LOGIC: User pressed DOWN to adjust the distance number
+        if (isCalibrating && calibStep >= 1) {
+            minDistanceInput = Math.max(0.1f, minDistanceInput - 0.1f);
+            updateCalibrationUI();
+            return;
+        }
+
+        // 3. NORMAL NAVIGATION
+        if (isPlaybackMode) {
+            // (Your normal playback down logic here)
+        } else if (isMenuOpen) {
+            if (isMenuEditing) handleMenuChange(1); 
+            else navigateMenu(1);
         } else {
             navigateHomeSpatial(ScalarInput.ISV_KEY_DOWN);
+            if (mDialMode == DIAL_MODE_FOCUS) checkLensHardwareState();
+            updateMainHUD();
         }
     }
     
