@@ -15,12 +15,13 @@ import java.util.List;
  * Renders a cinematic distance scale with dynamic DOF calculation and live plot points.
  */
 public class AdvancedFocusMeterView extends View {
-    private Paint trackPaint, needlePaint, dofPaint, markPaint, liveTextPaint, rulerTextPaint, bgPaint;
+    private Paint trackPaint, needlePaint, dofPaint, markPaint, liveTextPaint, rulerTextPaint, bgPaint, infoTextPaint;
     
     private LensMath.GaugeState currentState = null;
     private float currentRatio = 0.5f;
     private float currentAperture = 2.8f;
     private float currentFocalLength = 50.0f;
+    private double currentCocMm = 0.020; // Stores the active sensor size
     private boolean isCalibrating = false;
     
     // Holds the dynamic calibration points to draw the dots
@@ -65,21 +66,28 @@ public class AdvancedFocusMeterView extends View {
         bgPaint = new Paint();
         bgPaint.setColor(Color.DKGRAY);
         bgPaint.setStrokeWidth(4);
+        
+        // Setup for the Telemetry readout (Top Left)
+        infoTextPaint = new Paint();
+        infoTextPaint.setColor(Color.LTGRAY);
+        infoTextPaint.setTextSize(20);
+        infoTextPaint.setAntiAlias(true);
+        infoTextPaint.setTextAlign(Paint.Align.LEFT);
     }
 
     // Feeds the view the UI dots AND the math result
-    public void update(float ratio, float aperture, float focalLength, boolean isCalibrating, List<LensProfileManager.CalPoint> points) {
+    public void update(float ratio, float aperture, float focalLength, double cocMm, boolean isCalibrating, List<LensProfileManager.CalPoint> points) {
         this.currentRatio = ratio;
         this.currentAperture = aperture;
         this.currentFocalLength = focalLength;
+        this.currentCocMm = cocMm; // Cache the sensor size for the UI
         this.isCalibrating = isCalibrating;
         this.calPoints = points;
         
         // --- CRITICAL FIX: DO NOT RUN MATH WHILE CALIBRATING ---
-        // If we are mapping, the 2-point regression will hallucinate the H-mark. 
         // We only build the Gauge State if calibration is completely finished!
         if (!isCalibrating && points != null && points.size() >= 2) {
-            currentState = LensMath.buildGaugeState(ratio, aperture, focalLength, points);
+            currentState = LensMath.buildGaugeState(ratio, aperture, focalLength, points, currentCocMm);
         } else {
             currentState = null; // Forces the UI to hide the H-mark and orange bar
         }
@@ -148,7 +156,6 @@ public class AdvancedFocusMeterView extends View {
         if (currentState != null) {
             String distStr;
             
-            // If the math says we passed Hyperfocal, stop showing wildly high meters!
             if (currentState.focusDist >= currentState.hyperfocalDist) {
                 distStr = String.format("INF (H: %.1fm)", currentState.hyperfocalDist);
             } else if (currentState.focusDist >= 999.0) {
@@ -166,5 +173,11 @@ public class AdvancedFocusMeterView extends View {
         } else {
             canvas.drawText("UNMAPPED LENS", w / 2, y - 70, liveTextPaint);
         }
+        
+        // --- 6. THE TELEMETRY OVERLAY (Diagnostics) ---
+        // Will output something like: "25mm | APS-C"
+        String sensorType = (currentCocMm >= 0.029) ? "FULL FRAME" : "APS-C";
+        String telemetryStr = String.format("%.0fmm | %s", currentFocalLength, sensorType);
+        canvas.drawText(telemetryStr, pad, y - 70, infoTextPaint);
     }
 }

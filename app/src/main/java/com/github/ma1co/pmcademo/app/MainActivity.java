@@ -107,6 +107,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private float minDistanceInput = 0.3f;
     private String detectedLensName = "Manual Lens";
     private float detectedFocalLength = 50.0f;
+    private double currentCocMm = 0.020; // Default to APS-C
     private long lastExifGrabTime = 0;
     private TextView tvCalibrationPrompt;
     
@@ -625,14 +626,52 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             if (mDialMode == DIAL_MODE_REVIEW) {
                 enterPlayback();
             } else if (mDialMode == DIAL_MODE_FOCUS && cachedIsManualFocus) {
-                waitingForProfileChoice = true;
-                detectedLensName = "Manual Lens " + currentLensSlot;
                 
+                // --- THE ZERO-CLICK HARDWARE DETECTOR ---
+                try {
+                    // 1. Ask Android what physical camera this is
+                    String model = android.os.Build.MODEL; 
+                    currentCocMm = (model.contains("ILCE-7") || model.contains("ILCE-9") || model.contains("ILCE-1")) ? 0.030 : 0.020;
+
+                    // 2. Ask the hardware for the live focal length!
+                    Camera.Parameters params = getCameraParameters(); 
+                    if (params != null) {
+                        float liveFocal = params.getFocalLength();
+                        if (liveFocal > 0) {
+                            detectedFocalLength = liveFocal;
+                            detectedLensName = (int)liveFocal + "mm Lens";
+                        } else {
+                            detectedLensName = "Manual Lens " + currentLensSlot;
+                            detectedFocalLength = 50.0f; // Fallback for dumb vintage glass
+                        }
+                    }
+                } catch (Exception e) {
+                    detectedLensName = "Manual Lens " + currentLensSlot;
+                    detectedFocalLength = 50.0f;
+                }
+
+                // --- INSTANT AUTO-LOAD CHECK ---
+                if (lensManager.loadProfile(detectedLensName)) {
+                    // It found the profile! Instantly show the gauge!
+                    if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.GONE);
+                    setHUDVisibility(View.VISIBLE);
+                    updateMainHUD();
+                    return; 
+                }
+
+                // Profile not found: Prompt to map it!
+                waitingForProfileChoice = true; 
                 setHUDVisibility(View.GONE); 
                 if (focusMeter != null) focusMeter.setVisibility(View.VISIBLE); 
+                
                 if (tvCalibrationPrompt != null) {
                     tvCalibrationPrompt.setVisibility(View.VISIBLE);
-                    tvCalibrationPrompt.setText("LENS MAPPING\n\n[UP] Auto-Load Saved Lens\n[DOWN] Map New Lens\n[LEFT] Append to Current Map\n[RIGHT] Cancel");
+                    tvCalibrationPrompt.setBackgroundColor(Color.argb(210, 15, 15, 15));
+                    tvCalibrationPrompt.setPadding(25, 15, 25, 15);
+                    tvCalibrationPrompt.setText(android.text.Html.fromHtml(
+                        "<font color='#FFFFFF'><b>[ UNMAPPED LENS: " + detectedLensName + " ]</b></font><br>" +
+                        "<small>Press <font color='#00FF00'><b>[DOWN]</b></font> to Map Lens Now</small>"
+                    ));
                 }
             } else {
                 displayState = (displayState == 0) ? 1 : 0; 
@@ -1812,7 +1851,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 float focalToUse = isCalibrating ? detectedFocalLength : (lensManager != null ? lensManager.getCurrentFocalLength() : 50.0f);
                 List<LensProfileManager.CalPoint> ptsToUse = isCalibrating ? tempCalPoints : (lensManager != null ? lensManager.getCurrentPoints() : null);
                 
-                focusMeter.update(cachedFocusRatio, cachedAperture, focalToUse, isCalibrating, ptsToUse);
+                focusMeter.update(cachedFocusRatio, cachedAperture, detectedFocalLength, currentCocMm, isCalibrating, pointsToDraw);
             }
         }
         

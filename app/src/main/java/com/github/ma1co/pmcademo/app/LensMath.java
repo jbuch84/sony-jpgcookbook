@@ -88,14 +88,16 @@ public class LensMath {
         }
     }
 
-    public static GaugeState buildGaugeState(double motorRatio, double aperture, double focalLengthMm, List<LensProfileManager.CalPoint> points) {
+    public static GaugeState buildGaugeState(double motorRatio, double aperture, double focalLengthMm, List<LensProfileManager.CalPoint> points, double cocMm) {
         DiopterModel model = computeDiopterModel(points);
         if (model == null) return null;
 
         Double focusDist = motorToDistanceMeters(motorRatio, model);
         if (focusDist == null) focusDist = 999.0;
 
-        double cocMm = 0.020; // Sony APS-C standard
+        // We deleted the hardcoded APS-C line! 
+        // Now it uses the live 'cocMm' passed from the hardware auto-detector.
+        
         double H = hyperfocalMeters(focalLengthMm, aperture, cocMm);
         Double hyperMotor = distanceToMotorRatio(H, model);
 
