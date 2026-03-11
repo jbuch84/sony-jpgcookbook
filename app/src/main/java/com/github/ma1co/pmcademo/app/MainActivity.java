@@ -714,6 +714,47 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     }
 
     @Override 
+    public void onDownPressed() { 
+        if (isProcessing) return;
+
+        // 1. CATCH THE PROMPT: User pressed DOWN to start mapping!
+        if (waitingForProfileChoice) {
+            waitingForProfileChoice = false;
+            isCalibrating = true;
+            tempCalPoints.clear();
+            calibStep = 1;
+            minDistanceInput = 0.3f;
+            updateCalibrationUI();
+            return;
+        }
+
+        // 2. CALIBRATION LOGIC: User pressed DOWN to adjust the distance number
+        if (isCalibrating && calibStep >= 1) {
+            minDistanceInput = Math.max(0.1f, minDistanceInput - 0.1f);
+            updateCalibrationUI();
+            return;
+        }
+
+        // 3. NORMAL NAVIGATION
+        if (isPlaybackMode) {
+            // (Your normal playback down logic here)
+        } else if (isMenuOpen) {
+            if (isMenuEditing) {
+                handleMenuChange(1); 
+            } else {
+                // Standard Menu Scrolling (Down)
+                int maxLines = (currentPage == 1) ? 2 : ((currentPage == 3) ? 2 : 1);
+                menuSelection = (menuSelection + 1) % maxLines;
+                renderMenu();
+            }
+        } else {
+            navigateHomeSpatial(ScalarInput.ISV_KEY_DOWN);
+            if (mDialMode == DIAL_MODE_FOCUS) checkLensHardwareState();
+            updateMainHUD();
+        }
+    }
+
+    @Override 
     public void onUpPressed() { 
         if (isProcessing) return;
 
@@ -750,45 +791,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (isPlaybackMode) {
             // (Your normal playback up logic here)
         } else if (isMenuOpen) {
-            if (isMenuEditing) handleMenuChange(-1); 
-            else navigateMenu(-1);
+            if (isMenuEditing) {
+                handleMenuChange(-1); 
+            } else {
+                // Standard Menu Scrolling (Up)
+                int maxLines = (currentPage == 1) ? 2 : ((currentPage == 3) ? 2 : 1);
+                menuSelection = (menuSelection - 1 + maxLines) % maxLines;
+                renderMenu();
+            }
         } else {
             navigateHomeSpatial(ScalarInput.ISV_KEY_UP);
-            if (mDialMode == DIAL_MODE_FOCUS) checkLensHardwareState();
-            updateMainHUD();
-        }
-    }
-
-    @Override 
-    public void onDownPressed() { 
-        if (isProcessing) return;
-
-        // 1. CATCH THE PROMPT: User pressed DOWN to start mapping!
-        if (waitingForProfileChoice) {
-            waitingForProfileChoice = false;
-            isCalibrating = true;
-            tempCalPoints.clear();
-            calibStep = 1;
-            minDistanceInput = 0.3f;
-            updateCalibrationUI();
-            return;
-        }
-
-        // 2. CALIBRATION LOGIC: User pressed DOWN to adjust the distance number
-        if (isCalibrating && calibStep >= 1) {
-            minDistanceInput = Math.max(0.1f, minDistanceInput - 0.1f);
-            updateCalibrationUI();
-            return;
-        }
-
-        // 3. NORMAL NAVIGATION
-        if (isPlaybackMode) {
-            // (Your normal playback down logic here)
-        } else if (isMenuOpen) {
-            if (isMenuEditing) handleMenuChange(1); 
-            else navigateMenu(1);
-        } else {
-            navigateHomeSpatial(ScalarInput.ISV_KEY_DOWN);
             if (mDialMode == DIAL_MODE_FOCUS) checkLensHardwareState();
             updateMainHUD();
         }
