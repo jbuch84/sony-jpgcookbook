@@ -145,6 +145,47 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     
     private int mDialMode = DIAL_MODE_RTL;
 
+
+    // --- THE ZERO-CLICK HARDWARE DETECTOR ---
+    private void checkLensHardwareState() {
+        if (cameraManager == null) return;
+        
+        Camera c = cameraManager.getCamera();
+        if (c == null) return;
+
+        try {
+            // 1. Detect Sensor Size (APS-C vs Full Frame)
+            String model = android.os.Build.MODEL; 
+            currentCocMm = (model != null && (model.contains("ILCE-7") || model.contains("ILCE-9") || model.contains("ILCE-1"))) ? 0.030 : 0.020;
+
+            // 2. Poll the LIVE Focal Length from the active hardware
+            Camera.Parameters params = c.getParameters();
+            if (params != null) {
+                float liveFocal = params.getFocalLength();
+                if (liveFocal > 0) {
+                    detectedFocalLength = liveFocal;
+                    detectedLensName = (int)liveFocal + "mm Lens";
+                } else {
+                    // Fallback for completely dummy vintage glass
+                    detectedLensName = "Manual Lens";
+                    detectedFocalLength = 50.0f; 
+                }
+            }
+            
+            // 3. Auto-load the profile in the background!
+            if (lensManager != null) {
+                boolean found = lensManager.loadProfile(detectedLensName);
+                if (!found && focusMeter != null) {
+                    // It's a new lens! Clear out the gauge so it doesn't show old math
+                    focusMeter.update(0.5f, 2.8f, detectedFocalLength, currentCocMm, false, null);
+                }
+            }
+        } catch (Exception e) {
+            detectedLensName = "Manual Lens";
+            detectedFocalLength = 50.0f;
+        }
+    }
+
     // --- SONY HARDWARE SIGNAL RECEIVER ---
     private BroadcastReceiver sonyCameraReceiver = new BroadcastReceiver() {
         @Override
@@ -626,44 +667,39 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             if (mDialMode == DIAL_MODE_REVIEW) {
                 enterPlayback();
             } else if (mDialMode == DIAL_MODE_FOCUS && cachedIsManualFocus) {
+                // The background detector already knows what lens is attached!
                 
-                // --- THE ZERO-CLICK HARDWARE DETECTOR (TEST MODE) ---
-                try {
-                    // 1. Ask Android what physical camera this is
-                    String model = android.os.Build.MODEL; 
-                    currentCocMm = (model.contains("ILCE-7") || model.contains("ILCE-9") || model.contains("ILCE-1")) ? 0.030 : 0.020;
-
-                    // 2. Temporarily hardcode a lens just to test the Sensor UI
-                    detectedFocalLength = 25.0f;
-                    detectedLensName = "25mm Lens";
-
-                } catch (Exception e) {
-                    detectedLensName = "Manual Lens " + currentLensSlot;
-                    detectedFocalLength = 50.0f;
-                }
-
-                // --- INSTANT AUTO-LOAD CHECK ---
                 if (lensManager.loadProfile(detectedLensName)) {
-                    // It found the profile! Instantly show the gauge!
-                    if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.GONE);
-                    setHUDVisibility(View.VISIBLE);
-                    updateMainHUD();
-                    return; 
-                }
-
-                // Profile not found: Prompt to map it!
-                waitingForProfileChoice = true; 
-                setHUDVisibility(View.GONE); 
-                if (focusMeter != null) focusMeter.setVisibility(View.VISIBLE); 
-                
-                if (tvCalibrationPrompt != null) {
-                    tvCalibrationPrompt.setVisibility(View.VISIBLE);
-                    tvCalibrationPrompt.setBackgroundColor(Color.argb(210, 15, 15, 15));
-                    tvCalibrationPrompt.setPadding(25, 15, 25, 15);
-                    tvCalibrationPrompt.setText(android.text.Html.fromHtml(
-                        "<font color='#FFFFFF'><b>[ UNMAPPED LENS: " + detectedLensName + " ]</b></font><br>" +
-                        "<small>Press <font color='#00FF00'><b>[DOWN]</b></font> to Map Lens Now</small>"
-                    ));
+                    // STATE B: LENS IS KNOWN
+                    waitingForProfileChoice = true; 
+                    setHUDVisibility(View.GONE); 
+                    if (focusMeter != null) focusMeter.setVisibility(View.VISIBLE); 
+                    
+                    if (tvCalibrationPrompt != null) {
+                        tvCalibrationPrompt.setVisibility(View.VISIBLE);
+                        tvCalibrationPrompt.setBackgroundColor(Color.argb(210, 15, 15, 15));
+                        tvCalibrationPrompt.setPadding(25, 15, 25, 15);
+                        tvCalibrationPrompt.setText(android.text.Html.fromHtml(
+                            "<font color='#FFFFFF'><b>[ KNOWN LENS: " + detectedLensName + " ]</b></font><br>" +
+                            "<small>Press <font color='#00FF00'><b>[DOWN]</b></font> to Add Point<br>" +
+                            "Press <font color='#FFA500'><b>[RIGHT]</b></font> to Overwrite Profile</small>"
+                        ));
+                    }
+                } else {
+                    // STATE A: UNMAPPED LENS
+                    waitingForProfileChoice = true; 
+                    setHUDVisibility(View.GONE); 
+                    if (focusMeter != null) focusMeter.setVisibility(View.VISIBLE); 
+                    
+                    if (tvCalibrationPrompt != null) {
+                        tvCalibrationPrompt.setVisibility(View.VISIBLE);
+                        tvCalibrationPrompt.setBackgroundColor(Color.argb(210, 15, 15, 15));
+                        tvCalibrationPrompt.setPadding(25, 15, 25, 15);
+                        tvCalibrationPrompt.setText(android.text.Html.fromHtml(
+                            "<font color='#FFFFFF'><b>[ UNMAPPED LENS: " + detectedLensName + " ]</b></font><br>" +
+                            "<small>Press <font color='#00FF00'><b>[DOWN]</b></font> to Map Lens Now</small>"
+                        ));
+                    }
                 }
             } else {
                 displayState = (displayState == 0) ? 1 : 0; 
@@ -783,7 +819,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 // Clone active points, strip infinity cap, and skip to Step 2
                 tempCalPoints = new ArrayList<LensProfileManager.CalPoint>(lensManager.getCurrentPoints());
                 detectedLensName = lensManager.getCurrentLensName();
-                detectedFocalLength = lensManager.getCurrentFocalLength(); // Add this line
+                detectedFocalLength = lensManager.getCurrentFocalLength(); 
                 
                 if (!tempCalPoints.isEmpty() && tempCalPoints.get(tempCalPoints.size() - 1).ratio >= 0.99f) {
                     tempCalPoints.remove(tempCalPoints.size() - 1);
@@ -819,12 +855,29 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             }
         } else {
             navigateHomeSpatial(ScalarInput.ISV_KEY_LEFT);
+            // Re-read the lens data immediately upon switching home tabs!
+            if (mDialMode == DIAL_MODE_FOCUS) {
+                checkLensHardwareState();
+            }
+            updateMainHUD();
         }
     }
     
     @Override 
     public void onRightPressed() { 
         if (isProcessing) return;
+
+        // --- OVERWRITE PROFILE CAPTURE ---
+        if (waitingForProfileChoice && lensManager.hasActiveProfile()) {
+            // User pressed right to clear and start fresh
+            waitingForProfileChoice = false;
+            isCalibrating = true;
+            tempCalPoints.clear();
+            calibStep = 1;
+            minDistanceInput = 0.3f;
+            updateCalibrationUI();
+            return;
+        }
 
         // --- UNIVERSAL CANCEL FOR LENS MAPPING ---
         if (waitingForProfileChoice || isAutoLoading || isCalibrating) {
@@ -853,6 +906,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             }
         } else {
             navigateHomeSpatial(ScalarInput.ISV_KEY_RIGHT);
+            // Re-read the lens data immediately upon switching home tabs!
+            if (mDialMode == DIAL_MODE_FOCUS) {
+                checkLensHardwareState();
+            }
+            updateMainHUD();
         }
     }
     
@@ -1122,45 +1180,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         }
         else if (mDialMode == DIAL_MODE_FOCUS) {
             List<String> hwModes = p.getSupportedFocusModes();
-            List<String> virtualModes = new ArrayList<String>();
-            
-            // Build a virtual list injecting our 3 memory slots
-            if (hwModes != null) {
-                for (String m : hwModes) {
-                    if (m.equals("manual")) {
-                        virtualModes.add("manual_1");
-                        virtualModes.add("manual_2");
-                        virtualModes.add("manual_3");
-                    } else {
-                        virtualModes.add(m);
-                    }
-                }
+            if (hwModes != null && !hwModes.isEmpty()) {
+                int idx = hwModes.indexOf(p.getFocusMode());
+                if (idx == -1) idx = 0;
+                
+                String nextMode = hwModes.get((idx + d + hwModes.size()) % hwModes.size());
+                p.setFocusMode(nextMode);
+                try { 
+                    c.setParameters(p); 
+                } catch (Exception e) {}
             }
-            
-            // Find where we currently are
-            String currentVirtual = p.getFocusMode();
-            if ("manual".equals(currentVirtual)) {
-                currentVirtual = "manual_" + currentLensSlot;
-            }
-            
-            int idx = virtualModes.indexOf(currentVirtual);
-            if (idx == -1) idx = 0;
-            
-            // Advance the dial
-            String nextVirtual = virtualModes.get((idx + d + virtualModes.size()) % virtualModes.size());
-            
-            // Apply it to the hardware
-            if (nextVirtual.startsWith("manual_")) {
-                currentLensSlot = Integer.parseInt(nextVirtual.replace("manual_", ""));
-                p.setFocusMode("manual");
-                if (lensManager != null) lensManager.loadProfile("Lens " + currentLensSlot);
-            } else {
-                p.setFocusMode(nextVirtual);
-            }
-            
-            try { 
-                c.setParameters(p); 
-            } catch (Exception e) {}
         }
         
         updateMainHUD();
@@ -1648,6 +1677,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     @Override 
     protected void onResume() { 
         super.onResume(); 
+        // Read the lens once when the app boots up or wakes from sleep
+        checkLensHardwareState();
         if (hasSurface && cameraManager != null) {
             cameraManager.open(mSurfaceView.getHolder()); 
         }

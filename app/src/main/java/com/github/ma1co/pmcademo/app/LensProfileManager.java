@@ -1,20 +1,24 @@
 package com.github.ma1co.pmcademo.app;
 
 import android.content.Context;
-import android.content.SharedPreferences;
+import android.os.Environment;
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.FileReader;
+import java.io.OutputStreamWriter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
 
 /**
  * filmOS UI: Lens Profile Manager
  * Handles piecewise linear interpolation for cinema focus mapping.
+ * Saves profiles as physical .lens files on the SD card.
  */
 public class LensProfileManager {
-    private static final String PREF_NAME = "filmOS_LensProfiles";
-    private SharedPreferences prefs;
+    
     public float currentFocalLength = 50.0f;
     public float getCurrentFocalLength() { return currentFocalLength; }
     
@@ -32,50 +36,107 @@ public class LensProfileManager {
     private List<CalPoint> currentPoints = new ArrayList<CalPoint>();
 
     public LensProfileManager(Context context) {
-        prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+        // Context is kept for compatibility, but we no longer use SharedPreferences
     }
 
-    public List<String> getSavedLensNames() {
-        List<String> names = new ArrayList<String>();
-        Map<String, ?> allEntries = prefs.getAll();
-        for (Map.Entry<String, ?> entry : allEntries.entrySet()) {
-            names.add(entry.getKey());
+    // --- 1. THE SD CARD ROUTER ---
+    private File getLensDir() {
+        File sdCard = Environment.getExternalStorageDirectory();
+        // Creates the SDCARD/FILMOS/LENSES folder if it doesn't exist
+        File filmosDir = new File(sdCard, "FILMOS/LENSES");
+        if (!filmosDir.exists()) {
+            filmosDir.mkdirs();
         }
-        return names;
+        return filmosDir;
     }
 
+    // --- 2. THE 8-CHARACTER FILENAME ENFORCER ---
+    private String generateSafeFilename(String lensName) {
+        if (lensName == null) return "DEFAULT.lens";
+        
+        // Strip out the word " Lens" so "25mm Lens" just becomes "25mm"
+        String safe = lensName.replace(" Lens", "");
+        
+        // Strip everything except letters, numbers, and hyphens, then make uppercase
+        safe = safe.replaceAll("[^a-zA-Z0-9\\-]", "").toUpperCase();
+        
+        // Strictly enforce the 8-character base name limit
+        if (safe.length() > 8) {
+            safe = safe.substring(0, 8);
+        }
+        
+        if (safe.isEmpty()) safe = "LENS";
+        
+        return safe + ".lens"; 
+    }
+
+    // --- 3. THE LOADER ---
     public boolean loadProfile(String lensName) {
         currentPoints.clear();
         currentLensName = lensName;
+        File file = new File(getLensDir(), generateSafeFilename(lensName));
         
-        String data = prefs.getString(lensName, null);
-        if (data == null) return false;
-        
-        // Read the focal length back into memory
-        currentFocalLength = prefs.getFloat(lensName + "_focal", 50.0f);
+        if (!file.exists()) return false;
 
-        String[] points = data.split(";");
-        for (String p : points) {
-            String[] parts = p.split(",");
-            if (parts.length == 2) {
+        try {
+            BufferedReader br = new BufferedReader(new FileReader(file));
+            
+            // Read the first line which stores the focal length
+            String focalLine = br.readLine();
+            if (focalLine != null && focalLine.startsWith("FOCAL:")) {
                 try {
-                    currentPoints.add(new CalPoint(Float.parseFloat(parts[0]), Float.parseFloat(parts[1])));
+                    currentFocalLength = Float.parseFloat(focalLine.replace("FOCAL:", "").trim());
                 } catch (Exception e) {}
             }
+            
+            String line;
+            while ((line = br.readLine()) != null) {
+                line = line.trim();
+                if (line.isEmpty() || line.startsWith("FOCAL:")) continue;
+                
+                // Parse standard CSV format: ratio,distance
+                String[] parts = line.split(",");
+                if (parts.length == 2) {
+                    currentPoints.add(new CalPoint(Float.parseFloat(parts[0]), Float.parseFloat(parts[1])));
+                }
+            }
+            br.close();
+            sortPoints();
+            // A valid profile requires at least 2 points
+            return currentPoints.size() >= 2; 
+        } catch (Exception e) {
+            e.printStackTrace();
+            return false;
         }
-        sortPoints();
-        return !currentPoints.isEmpty();
     }
 
+    // --- 4. THE WRITER ---
     public void saveProfile(String lensName, float focalLength, List<CalPoint> points) {
-        currentFocalLength = focalLength;
-        StringBuilder sb = new StringBuilder();
-        for (CalPoint p : points) {
-            sb.append(p.ratio).append(",").append(p.distance).append(";");
+        this.currentFocalLength = focalLength;
+        this.currentPoints = new ArrayList<CalPoint>(points);
+        this.currentLensName = lensName;
+        sortPoints();
+        
+        File file = new File(getLensDir(), generateSafeFilename(lensName));
+        
+        try {
+            FileOutputStream fos = new FileOutputStream(file);
+            OutputStreamWriter osw = new OutputStreamWriter(fos);
+            
+            // Write the focal length as the header
+            osw.write("FOCAL:" + focalLength + "\n");
+            
+            // Writes out clean text lines: "0.15,1.5"
+            for (CalPoint pt : points) {
+                osw.write(pt.ratio + "," + pt.distance + "\n");
+            }
+            
+            osw.flush();
+            osw.close();
+            fos.close();
+        } catch (Exception e) {
+            e.printStackTrace();
         }
-        prefs.edit().putString(lensName, sb.toString()).apply();
-        // Save the focal length right next to the array data!
-        prefs.edit().putFloat(lensName + "_focal", focalLength).apply();
     }
 
     private void sortPoints() {
@@ -97,6 +158,10 @@ public class LensProfileManager {
 
     public boolean hasActiveProfile() {
         return !currentPoints.isEmpty();
+    }
+    
+    public void clearCurrent() {
+        currentPoints.clear();
     }
 
     /**
