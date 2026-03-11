@@ -162,12 +162,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             Camera.Parameters params = c.getParameters();
             if (params != null) {
                 float liveFocal = params.getFocalLength();
-                if (liveFocal > 0) {
+                if (liveFocal > 0.0f) {
                     detectedFocalLength = liveFocal;
                     detectedLensName = (int)liveFocal + "mm Lens";
                 } else {
-                    // Fallback for completely dummy vintage glass
-                    detectedLensName = "Manual Lens";
+                    // DEBUG: If it fails, print the raw float value onto the UI!
+                    detectedLensName = "Raw: " + liveFocal;
                     detectedFocalLength = 50.0f; 
                 }
             }
@@ -176,12 +176,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             if (lensManager != null) {
                 boolean found = lensManager.loadProfile(detectedLensName);
                 if (!found && focusMeter != null) {
-                    // It's a new lens! Clear out the gauge so it doesn't show old math
                     focusMeter.update(0.5f, 2.8f, detectedFocalLength, currentCocMm, false, null);
                 }
             }
         } catch (Exception e) {
-            detectedLensName = "Manual Lens";
+            // DEBUG: If the API crashes, print the Exception to the UI!
+            detectedLensName = "Err: " + e.getMessage();
             detectedFocalLength = 50.0f;
         }
     }
@@ -728,21 +728,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             return;
         }
 
-        // 2. CALIBRATION LOGIC: User pressed DOWN to adjust the distance number
-        if (isCalibrating && calibStep >= 1) {
-            minDistanceInput = Math.max(0.1f, minDistanceInput - 0.1f);
-            updateCalibrationUI();
-            return;
-        }
-
-        // 3. NORMAL NAVIGATION
+        // 2. NORMAL NAVIGATION
         if (isPlaybackMode) {
             // (Your normal playback down logic here)
         } else if (isMenuOpen) {
             if (isMenuEditing) {
                 handleMenuChange(1); 
             } else {
-                // Standard Menu Scrolling (Down)
                 int maxLines = (currentPage == 1) ? 2 : ((currentPage == 3) ? 2 : 1);
                 menuSelection = (menuSelection + 1) % maxLines;
                 renderMenu();
@@ -757,15 +749,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     @Override 
     public void onUpPressed() { 
         if (isProcessing) return;
-
-        // 1. CALIBRATION LOGIC: Adjust distance number UP
-        if (isCalibrating && calibStep >= 1) {
-            minDistanceInput = Math.max(0.1f, minDistanceInput + 0.1f);
-            updateCalibrationUI();
-            return;
-        }
         
-        // 2. THE SAVE TRIGGER: Finished logging points? Save to SD Card!
+        // 1. THE SAVE TRIGGER: Finished logging points? Save to SD Card!
         if (isCalibrating && tempCalPoints.size() >= 2) {
             // Add the infinity cap to cap the math
             tempCalPoints.add(new LensProfileManager.CalPoint(1.0f, 999.0f));
@@ -787,14 +772,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             return;
         }
 
-        // 3. NORMAL NAVIGATION
+        // 2. NORMAL NAVIGATION
         if (isPlaybackMode) {
             // (Your normal playback up logic here)
         } else if (isMenuOpen) {
             if (isMenuEditing) {
                 handleMenuChange(-1); 
             } else {
-                // Standard Menu Scrolling (Up)
                 int maxLines = (currentPage == 1) ? 2 : ((currentPage == 3) ? 2 : 1);
                 menuSelection = (menuSelection - 1 + maxLines) % maxLines;
                 renderMenu();
