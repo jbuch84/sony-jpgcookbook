@@ -31,6 +31,7 @@ public class SonyCameraManager {
         void onApertureChanged();
         void onIsoChanged();
         void onFocusPositionChanged(float ratio);
+        void onFocalLengthChanged(float focalLengthMm);
     }
 
     private CameraEventListener listener;
