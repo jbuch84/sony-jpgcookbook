@@ -105,9 +105,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private int calibStep = 0; 
     private float minDistanceInput = 0.3f;
     private String detectedLensName = "Manual Lens";
+    
     private float detectedFocalLength = 50.0f;
     private float detectedMaxAperture = 2.8f;
+    
+    // --- NEW: Strict physical hardware tracking ---
+    private float hardwareFocalLength = 0.0f;
     private boolean isNativeLensAttached = false;
+    
     private TextView tvCalibrationPrompt;
     
     private boolean cachedIsManualFocus = false;
@@ -219,10 +224,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
         lensManager = new LensProfileManager(this);
         availableLenses = lensManager.getAvailableLenses();
-        if (!availableLenses.isEmpty()) {
-            lensManager.loadProfileFromFile(availableLenses.get(0));
-            currentLensIndex = 0;
-        }
         
         recipeManager.loadPreferences();
         
@@ -459,7 +460,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             if (!isNativeLensAttached) {
                 // MANUAL LENS: Auto-generate ghost profile and equip immediately!
                 tempCalPoints = lensManager.generateManualDummyProfile();
-                lensManager.saveProfileToFile(detectedFocalLength, detectedMaxAperture, tempCalPoints, true); // true = Manual
+                lensManager.saveProfileToFile(detectedFocalLength, detectedMaxAperture, tempCalPoints, true); 
                 
                 availableLenses = lensManager.getAvailableLenses();
                 String newFilename = LensProfileManager.generateFilename(detectedFocalLength, detectedMaxAperture, true);
@@ -502,8 +503,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 if (focusMeter != null) focusMeter.setVisibility(View.VISIBLE); 
                 if (tvCalibrationPrompt != null) {
                     tvCalibrationPrompt.setVisibility(View.VISIBLE);
+                    
                     // --- DYNAMIC LENS MAPPING PROMPT ---
-                    if (isNativeLensAttached) {
+                    boolean canAppend = isNativeLensAttached && lensManager.hasActiveProfile() && !lensManager.isCurrentProfileManual();
+                    
+                    if (canAppend) {
                         tvCalibrationPrompt.setText("LENS MAPPING\n\n[DOWN] Map Attached Lens\n[LEFT] Append Points\n[RIGHT] Cancel");
                     } else {
                         tvCalibrationPrompt.setText("LENS MAPPING\n\n[DOWN] Map Attached Lens\n[RIGHT] Cancel");
@@ -530,7 +534,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             if (calibStep == 2) {
                 tempCalPoints.add(new LensProfileManager.CalPoint(1.0f, 999.0f));
                 
-                lensManager.saveProfileToFile(detectedFocalLength, detectedMaxAperture, tempCalPoints, false); // false = Electronic
+                lensManager.saveProfileToFile(detectedFocalLength, detectedMaxAperture, tempCalPoints, false); 
                 
                 availableLenses = lensManager.getAvailableLenses();
                 String newFilename = LensProfileManager.generateFilename(detectedFocalLength, detectedMaxAperture, false);
@@ -572,7 +576,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             
             if (isNativeLensAttached) {
                 detectedLensName = "Electronic Lens";
-                detectedFocalLength = (lensManager != null && lensManager.currentFocalLength > 0.0f) ? lensManager.currentFocalLength : 50.0f;
+                detectedFocalLength = hardwareFocalLength > 0.0f ? hardwareFocalLength : 50.0f;
                 detectedMaxAperture = 2.8f; 
                 calibStep = 10; // Skip 0A, go straight to Aperture confirm
                 tempCalPoints.clear();
@@ -619,32 +623,24 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
         // --- APPEND TO EXISTING PROFILE (ELECTRONIC ONLY) ---
         if (waitingForProfileChoice) {
-            if (isNativeLensAttached) {
+            boolean canAppend = isNativeLensAttached && lensManager.hasActiveProfile() && !lensManager.isCurrentProfileManual();
+            
+            if (canAppend) {
                 waitingForProfileChoice = false;
                 isCalibrating = true;
                 
-                if (lensManager != null && lensManager.hasActiveProfile()) {
-                    tempCalPoints = new ArrayList<LensProfileManager.CalPoint>(lensManager.getCurrentPoints());
-                    detectedLensName = lensManager.getCurrentLensName();
-                    detectedFocalLength = lensManager.getCurrentFocalLength(); 
-                    detectedMaxAperture = lensManager.currentMaxAperture;
-                    
-                    // Strip the dummy infinity point off the end so we can continue mapping
-                    if (!tempCalPoints.isEmpty() && tempCalPoints.get(tempCalPoints.size() - 1).ratio >= 0.99f) {
-                        tempCalPoints.remove(tempCalPoints.size() - 1);
-                    }
-                    
-                    calibStep = 2; // Jump straight to plotting next point
-                    minDistanceInput = lensManager.getDistanceForRatio(cachedFocusRatio);
-                    if (minDistanceInput < 0) minDistanceInput = 1.0f; 
-                } else {
-                    // Fallback just in case they hit Append on an empty profile
-                    detectedLensName = "Electronic Lens";
-                    detectedFocalLength = (lensManager != null && lensManager.currentFocalLength > 0.0f) ? lensManager.currentFocalLength : 50.0f;
-                    detectedMaxAperture = 2.8f; 
-                    tempCalPoints.clear();
-                    calibStep = 10; 
+                tempCalPoints = new ArrayList<LensProfileManager.CalPoint>(lensManager.getCurrentPoints());
+                detectedLensName = lensManager.getCurrentLensName();
+                detectedFocalLength = lensManager.getCurrentFocalLength(); 
+                detectedMaxAperture = lensManager.currentMaxAperture;
+                
+                if (!tempCalPoints.isEmpty() && tempCalPoints.get(tempCalPoints.size() - 1).ratio >= 0.99f) {
+                    tempCalPoints.remove(tempCalPoints.size() - 1);
                 }
+                
+                calibStep = 2; 
+                minDistanceInput = lensManager.getDistanceForRatio(cachedFocusRatio);
+                if (minDistanceInput < 0) minDistanceInput = 1.0f; 
                 updateCalibrationUI();
             }
             return; // Consume the keypress either way
@@ -830,6 +826,25 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         uiHandler.postDelayed(applySettingsRunnable, 400);
     }
 
+    private void autoEquipMatchingLens(float hwFocal) {
+        availableLenses = lensManager.getAvailableLenses();
+        String matchedLens = null;
+        for (String lens : availableLenses) {
+            if (lens.startsWith("e") || lens.startsWith("E")) {
+                if (lens.contains((int)hwFocal + "mm")) {
+                    matchedLens = lens;
+                    break;
+                }
+            }
+        }
+        if (matchedLens != null) {
+            currentLensIndex = availableLenses.indexOf(matchedLens);
+            lensManager.loadProfileFromFile(matchedLens);
+        } else {
+            lensManager.clearCurrentProfile(); 
+        }
+    }
+
     private void handleHardwareInput(int d) {
         if (isCalibrating && calibStep >= 1 && calibStep != 10) {
             minDistanceInput = Math.max(0.1f, minDistanceInput + (d * 0.1f));
@@ -892,12 +907,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 for (String m : hwModes) {
                     if (m.equals("manual")) {
                         availableLenses = lensManager.getAvailableLenses();
-                        if (availableLenses.isEmpty()) {
-                            virtualModes.add("manual_unmapped");
-                        } else {
-                            for (String l : availableLenses) {
-                                virtualModes.add("manual_" + l);
-                            }
+                        virtualModes.add("manual_unmapped"); // ALWAYS ADD UNMAPPED
+                        for (String l : availableLenses) {
+                            virtualModes.add("manual_" + l);
                         }
                     } else {
                         virtualModes.add(m);
@@ -907,10 +919,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             
             String currentVirtual = p.getFocusMode();
             if ("manual".equals(currentVirtual)) {
-                 if (availableLenses.isEmpty()) currentVirtual = "manual_unmapped";
-                 else {
-                     if (currentLensIndex >= availableLenses.size()) currentLensIndex = 0;
-                     currentVirtual = "manual_" + availableLenses.get(currentLensIndex);
+                 String loaded = lensManager.getCurrentLensName();
+                 if (loaded == null || loaded.equals("Unmapped Lens") || !availableLenses.contains(loaded)) {
+                     currentVirtual = "manual_unmapped";
+                 } else {
+                     currentVirtual = "manual_" + loaded;
                  }
             }
             
@@ -1478,13 +1491,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         syncHardwareState();
         
         if (cameraManager != null) {
-            float initFocal = cameraManager.getInitialFocalLength();
-            if (initFocal > 0.0f) {
+            hardwareFocalLength = cameraManager.getInitialFocalLength();
+            if (hardwareFocalLength > 0.0f) {
                 isNativeLensAttached = true;
-                if (lensManager != null) {
-                    lensManager.currentFocalLength = initFocal;
-                }
-                Log.d("filmOS_Lens", "Boot: Native Lens Detected: " + initFocal + "mm");
+                Log.d("filmOS_Lens", "Boot: Native Lens Detected: " + hardwareFocalLength + "mm");
+                
+                autoEquipMatchingLens(hardwareFocalLength);
                 
                 if (cameraManager.getCamera() != null) {
                     try {
@@ -1531,13 +1543,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     public void onFocalLengthChanged(final float focalLengthMm) {
         runOnUiThread(new Runnable() {
             public void run() {
+                hardwareFocalLength = focalLengthMm;
                 if (focalLengthMm > 0.0f) {
                     boolean wasManual = !isNativeLensAttached;
                     isNativeLensAttached = true; 
-                    if (lensManager != null) {
-                        lensManager.currentFocalLength = focalLengthMm;
-                    }
                     Log.d("filmOS_Lens", "Native Lens Zoomed: " + focalLengthMm + "mm");
+                    
+                    autoEquipMatchingLens(focalLengthMm);
                     
                     if (wasManual && cameraManager != null && cameraManager.getCamera() != null) {
                         try {
