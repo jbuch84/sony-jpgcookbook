@@ -34,30 +34,11 @@ public class LensProfileManager {
     private boolean hasActiveProfile = false;
 
     public LensProfileManager(Context context) {
-        lensesDir = findBestLensesDirectory();
-    }
-
-    // --- NEW: Aggressive SD Card Locator ---
-    private File findBestLensesDirectory() {
-        String[] possibleRoots = { 
-            Environment.getExternalStorageDirectory().getAbsolutePath(), 
-            "/mnt/sdcard", 
-            "/storage/sdcard0", 
-            "/sdcard" 
-        };
-        
-        for (String r : possibleRoots) {
-            File testDir = new File(r, "LENSES");
-            if (!testDir.exists()) {
-                if (testDir.mkdirs()) {
-                    Log.d("filmOS_Lens", "Created LENSES directory at: " + testDir.getAbsolutePath());
-                    return testDir;
-                }
-            } else if (testDir.isDirectory()) {
-                return testDir;
-            }
+        // Reverted to EXACTLY match your working GRADED folder logic
+        lensesDir = new File(Environment.getExternalStorageDirectory(), "LENSES");
+        if (!lensesDir.exists()) {
+            lensesDir.mkdirs();
         }
-        return new File(Environment.getExternalStorageDirectory(), "LENSES");
     }
 
     // --- NEW: Generates a dummy math profile for manual lenses ---

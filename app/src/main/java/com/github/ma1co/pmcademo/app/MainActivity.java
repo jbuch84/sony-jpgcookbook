@@ -457,7 +457,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         // Step 0B (Aperture) -> Split based on lens type!
         if (isCalibrating && calibStep == 10) {
             if (!isNativeLensAttached) {
-                // IT IS A MANUAL LENS: Auto-save ghost profile and equip!
+                // MANUAL LENS: Auto-generate ghost profile and equip immediately!
                 tempCalPoints = lensManager.generateManualDummyProfile();
                 lensManager.saveProfileToFile(detectedFocalLength, detectedMaxAperture, tempCalPoints);
                 
@@ -472,10 +472,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 setHUDVisibility(View.VISIBLE);
                 updateMainHUD();
             } else {
-                // IT IS ELECTRONIC: Proceed to distance mapping (Step 1)
+                // ELECTRONIC LENS: Proceed to Distance Mapping (Step 1)
                 calibStep = 1; 
                 minDistanceInput = 0.3f;
-                tempCalPoints.clear();
                 updateCalibrationUI();
             }
             return;
@@ -503,8 +502,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 if (focusMeter != null) focusMeter.setVisibility(View.VISIBLE); 
                 if (tvCalibrationPrompt != null) {
                     tvCalibrationPrompt.setVisibility(View.VISIBLE);
-                    // --- THE NEW EXPLICIT PROMPT ---
-                    tvCalibrationPrompt.setText("LENS MAPPING\n\n[DOWN] Map Electronic Lens\n[LEFT] Map Manual (Vintage) Lens\n[RIGHT] Cancel");
+                    // --- DYNAMIC LENS MAPPING PROMPT ---
+                    if (isNativeLensAttached) {
+                        tvCalibrationPrompt.setText("LENS MAPPING\n\n[DOWN] Map Attached Lens\n[LEFT] Append Points\n[RIGHT] Cancel");
+                    } else {
+                        tvCalibrationPrompt.setText("LENS MAPPING\n\n[DOWN] Map Attached Lens\n[RIGHT] Cancel");
+                    }
                 }
             } else {
                 displayState = (displayState == 0) ? 1 : 0; 
@@ -523,6 +526,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
         // --- TIGHTENED CALIBRATION TRAP ---
         if (isCalibrating) {
+            // Only allow saving if on the final Electronic step
             if (calibStep == 2) {
                 tempCalPoints.add(new LensProfileManager.CalPoint(1.0f, 999.0f));
                 
@@ -539,7 +543,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 setHUDVisibility(View.VISIBLE);
                 updateMainHUD();
             }
-            return; 
+            return; // We MUST return here so we don't trigger the menu or UI changes!
         }
         
         if (isMenuOpen) {
@@ -561,17 +565,24 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     public void onDownPressed() { 
         if (isProcessing) return;
         
-        // --- START ELECTRONIC FLOW ---
+        // --- MAP ATTACHED LENS ---
         if (waitingForProfileChoice) {
             waitingForProfileChoice = false;
             isCalibrating = true;
-            isNativeLensAttached = true; // FLAG AS ELECTRONIC
             
-            detectedLensName = "Electronic Lens";
-            detectedFocalLength = (lensManager != null && lensManager.currentFocalLength > 0.0f) ? lensManager.currentFocalLength : 50.0f;
-            detectedMaxAperture = 2.8f; 
-            calibStep = 0; 
-            tempCalPoints.clear();
+            if (isNativeLensAttached) {
+                detectedLensName = "Electronic Lens";
+                detectedFocalLength = (lensManager != null && lensManager.currentFocalLength > 0.0f) ? lensManager.currentFocalLength : 50.0f;
+                detectedMaxAperture = 2.8f; 
+                calibStep = 10; // Skip 0A, go straight to Aperture confirm
+                tempCalPoints.clear();
+            } else {
+                detectedLensName = "Manual Lens";
+                detectedFocalLength = 50.0f; 
+                detectedMaxAperture = 2.8f;
+                calibStep = 0; // Go to Focal Length step
+                tempCalPoints.clear();
+            }
             updateCalibrationUI();
             return;
         }
@@ -606,19 +617,37 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             return;
         }
 
-        // --- START MANUAL FLOW ---
+        // --- APPEND TO EXISTING PROFILE ---
         if (waitingForProfileChoice) {
-            waitingForProfileChoice = false;
-            isCalibrating = true;
-            isNativeLensAttached = false; // FLAG AS MANUAL
-            
-            detectedLensName = "Manual Lens";
-            detectedFocalLength = 50.0f; 
-            detectedMaxAperture = 2.8f;
-            calibStep = 0; 
-            tempCalPoints.clear();
-            updateCalibrationUI();
-            return;
+            if (isNativeLensAttached) {
+                waitingForProfileChoice = false;
+                isCalibrating = true;
+                
+                if (lensManager != null && lensManager.hasActiveProfile()) {
+                    tempCalPoints = new ArrayList<LensProfileManager.CalPoint>(lensManager.getCurrentPoints());
+                    detectedLensName = lensManager.getCurrentLensName();
+                    detectedFocalLength = lensManager.getCurrentFocalLength(); 
+                    detectedMaxAperture = lensManager.currentMaxAperture;
+                    
+                    // Strip the dummy infinity point off the end so we can continue mapping
+                    if (!tempCalPoints.isEmpty() && tempCalPoints.get(tempCalPoints.size() - 1).ratio >= 0.99f) {
+                        tempCalPoints.remove(tempCalPoints.size() - 1);
+                    }
+                    
+                    calibStep = 2; // Jump straight to plotting next point
+                    minDistanceInput = lensManager.getDistanceForRatio(cachedFocusRatio);
+                    if (minDistanceInput < 0) minDistanceInput = 1.0f; 
+                } else {
+                    // Fallback just in case they hit Append on an empty profile
+                    detectedLensName = "Electronic Lens";
+                    detectedFocalLength = (lensManager != null && lensManager.currentFocalLength > 0.0f) ? lensManager.currentFocalLength : 50.0f;
+                    detectedMaxAperture = 2.8f; 
+                    tempCalPoints.clear();
+                    calibStep = 10; 
+                }
+                updateCalibrationUI();
+            }
+            return; // Consume the keypress!
         }
 
         if (isPlaybackMode) { showPlaybackImage(playbackIndex - 1); } 
@@ -652,6 +681,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             return;
         }
         
+        // --- UNIVERSAL CANCEL ---
         if (waitingForProfileChoice || isCalibrating) {
             waitingForProfileChoice = false;
             isCalibrating = false;
