@@ -139,7 +139,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     
     private Handler uiHandler = new Handler();
     
-    // --- NEW: UI DEBOUNCER VARIABLES ---
+    // --- UI DEBOUNCER VARIABLES ---
     private boolean isHudUpdatePending = false;
 
     public static final int DIAL_MODE_SHUTTER = 0;
@@ -168,7 +168,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         public void run() { applyHardwareRecipe(); }
     };
     
-    // --- NEW: DEBOUNCED HUD RUNNABLE ---
+    // --- DEBOUNCED HUD RUNNABLE (For background light meter updates only) ---
     private Runnable hudUpdateRunnable = new Runnable() {
         @Override
         public void run() {
@@ -255,10 +255,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     private void setupEngines() {
         mProcessor = new ImageProcessor(this, new ImageProcessor.ProcessorCallback() {
-            @Override public void onPreloadStarted() { isReady = false; runOnUiThread(new Runnable() { public void run() { requestHudUpdate(); } }); }
-            @Override public void onPreloadFinished(boolean success) { isReady = true; runOnUiThread(new Runnable() { public void run() { requestHudUpdate(); } }); }
+            @Override public void onPreloadStarted() { isReady = false; runOnUiThread(new Runnable() { public void run() { updateMainHUD(); } }); }
+            @Override public void onPreloadFinished(boolean success) { isReady = true; runOnUiThread(new Runnable() { public void run() { updateMainHUD(); } }); }
             @Override public void onProcessStarted() { runOnUiThread(new Runnable() { public void run() { if (tvTopStatus != null) { tvTopStatus.setText("PROCESSING..."); tvTopStatus.setTextColor(Color.YELLOW); } } }); }
-            @Override public void onProcessFinished(String res) { isProcessing = false; runOnUiThread(new Runnable() { public void run() { if (tvTopStatus != null) { tvTopStatus.setTextColor(Color.WHITE); } requestHudUpdate(); } }); }
+            @Override public void onProcessFinished(String res) { isProcessing = false; runOnUiThread(new Runnable() { public void run() { if (tvTopStatus != null) { tvTopStatus.setTextColor(Color.WHITE); } updateMainHUD(); } }); }
         });
         
         String baseDcim = Environment.getExternalStorageDirectory().getAbsolutePath() + "/DCIM";
@@ -311,7 +311,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     tvTopStatus.setText("SAVING TO SD..."); 
                     tvTopStatus.setTextColor(Color.YELLOW); 
                 }
-                requestHudUpdate(); 
+                updateMainHUD(); 
             } 
         });
         
@@ -323,7 +323,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             public void run() {
                 if (!f.exists()) {
                     isProcessing = false;
-                    requestHudUpdate();
+                    updateMainHUD();
                     return;
                 }
                 
@@ -337,7 +337,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     uiHandler.postDelayed(this, 300);
                 } else {
                     isProcessing = false;
-                    requestHudUpdate();
+                    updateMainHUD();
                 }
             }
         };
@@ -393,7 +393,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     @Override 
     public void onDeletePressed() { 
-        // Completely removed PoC, back to normal exit functionality.
         finish(); 
     }
 
@@ -458,7 +457,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         }
         
         syncHardwareState();
-        requestHudUpdate();
+        updateMainHUD(); // Instant visual snap
     }
 
     private float getCircleOfConfusion() {
@@ -469,12 +468,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         return 0.020f; 
     }
     
-    // --- NEW: UI REQUEST THROTTLER ---
-    // Groups rapid-fire parameter updates so we don't choke the CPU
+    // Groups rapid-fire background light meter updates so we don't choke the CPU
     private void requestHudUpdate() {
         if (!isHudUpdatePending) {
             isHudUpdatePending = true;
-            uiHandler.postDelayed(hudUpdateRunnable, 100); // Max 10 updates per second
+            uiHandler.postDelayed(hudUpdateRunnable, 100); 
         }
     }
 
@@ -507,7 +505,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 isCalibrating = false;
                 if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.GONE);
                 setHUDVisibility(View.VISIBLE);
-                requestHudUpdate();
+                updateMainHUD(); // Instant update
             } else {
                 calibStep = 1; 
                 minDistanceInput = 0.3f;
@@ -548,6 +546,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             } else {
                 displayState = (displayState == 0) ? 1 : 0; 
                 mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE);
+                updateMainHUD(); // Instant update
             }
         } else {
             if (currentPage == 4) handleConnectionAction(); 
@@ -575,7 +574,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 isCalibrating = false;
                 if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.GONE);
                 setHUDVisibility(View.VISIBLE);
-                requestHudUpdate();
+                updateMainHUD();
             }
             return; 
         }
@@ -676,7 +675,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         
         if (!isMenuOpen && !isPlaybackMode && mDialMode == DIAL_MODE_FOCUS && lensManager != null && lensManager.isCurrentProfileManual()) {
             virtualFocusRatio = Math.max(0.0f, virtualFocusRatio - 0.02f);
-            // Specifically bypass full HUD fetch for manual slider performance
             if (focusMeter != null) {
                 float focalToUse = lensManager.getCurrentFocalLength();
                 focusMeter.update(virtualFocusRatio, virtualAperture, focalToUse, false, lensManager.getCurrentPoints());
@@ -720,13 +718,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             isCalibrating = false;
             if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.GONE);
             setHUDVisibility(View.VISIBLE);
-            requestHudUpdate(); 
+            updateMainHUD(); 
             return;
         }
         
         if (!isMenuOpen && !isPlaybackMode && mDialMode == DIAL_MODE_FOCUS && lensManager != null && lensManager.isCurrentProfileManual()) {
             virtualFocusRatio = Math.min(1.0f, virtualFocusRatio + 0.02f);
-            // Specifically bypass full HUD fetch for manual slider performance
             if (focusMeter != null) {
                 float focalToUse = lensManager.getCurrentFocalLength();
                 focusMeter.update(virtualFocusRatio, virtualAperture, focalToUse, false, lensManager.getCurrentPoints());
@@ -807,7 +804,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 else if (keyCode == ScalarInput.ISV_KEY_LEFT) mDialMode = DIAL_MODE_SHUTTER; 
                 break;
         }
-        requestHudUpdate();
+        updateMainHUD(); // Instant visual snap
     }
 
     private void handleMenuChange(int dir) {
@@ -939,7 +936,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             if (d > 0) cx.incrementShutterSpeed(); else cx.decrementShutterSpeed(); 
         }
         else if (mDialMode == DIAL_MODE_APERTURE) { 
-            if (lensManager != null && lensManager.isCurrentProfileManual()) {
+            // --- STRICT FIX: Only virtualize aperture if we are specifically in Manual Focus Mode with an "M" lens ---
+            if (cachedIsManualFocus && lensManager != null && lensManager.isCurrentProfileManual()) {
                 adjustVirtualAperture(d);
             } else {
                 if (d > 0) cx.incrementAperture(); else cx.decrementAperture(); 
@@ -1025,7 +1023,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             }
             try { c.setParameters(p); } catch (Exception e) {}
         }
-        requestHudUpdate(); // Debounced update instead of direct
+        updateMainHUD(); // Physical dials bypass debouncer for instant feeling
     }
     
     private void applyHardwareRecipe() {
@@ -1505,7 +1503,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         Pair<Integer, Integer> ss = pm.getShutterSpeed(); 
         
         if (tvValAperture != null) {
-            if (lensManager != null && lensManager.isCurrentProfileManual()) {
+            if (cachedIsManualFocus && lensManager != null && lensManager.isCurrentProfileManual()) {
                 tvValAperture.setText(String.format("f%.1f", virtualAperture)); 
             } else {
                 tvValAperture.setText(String.format("f%.1f", cachedAperture)); 
@@ -1603,7 +1601,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             }
         }
         
-        requestHudUpdate(); 
+        updateMainHUD(); // INSTANT CALL: Fixes the 'Tiny View' boot bug
     }
     
     @Override 
@@ -1621,7 +1619,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             runOnUiThread(new Runnable() { 
                 public void run() {
                     cachedFocusRatio = ratio; 
-                    // --- LIGHTWEIGHT FOCUS UPDATE: NO HARDWARE POLLS ---
                     float focalToUse = isCalibrating ? detectedFocalLength : (lensManager != null ? lensManager.getCurrentFocalLength() : 50.0f);
                     List<LensProfileManager.CalPoint> ptsToUse = isCalibrating ? tempCalPoints : (lensManager != null ? lensManager.getCurrentPoints() : null);
                     float ratioToFeed = (lensManager != null && lensManager.isCurrentProfileManual() && !isCalibrating) ? virtualFocusRatio : cachedFocusRatio;
@@ -1657,7 +1654,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     isNativeLensAttached = false; 
                     Log.d("filmOS_Lens", "Manual Lens Detected.");
                 }
-                requestHudUpdate();
+                updateMainHUD(); // Instant update to clear any layout resizing
             }
         });
     }
