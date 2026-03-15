@@ -73,9 +73,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private TextView tvTabNetwork;
     private TextView tvMenuSubtitle;
     
-    private LinearLayout[] menuRows = new LinearLayout[7];
-    private TextView[] menuLabels = new TextView[7];
-    private TextView[] menuValues = new TextView[7];
+    // Increased to 8 to accommodate Profile Name row
+    private LinearLayout[] menuRows = new LinearLayout[8];
+    private TextView[] menuLabels = new TextView[8];
+    private TextView[] menuValues = new TextView[8];
     
     private BatteryView batteryIcon;
     private ImageView playbackImageView;
@@ -128,6 +129,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private int menuSelection = 0;
     private int currentItemCount = 0;
     private String savedFocusMode = null;
+
+    // --- ARCADE NAMING VARS ---
+    private boolean isNamingMode = false;
+    private int nameCursorPos = 0;
+    private final String CHARSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_";
 
     private String hotspotStatus = "Press ENTER";
     private String wifiStatus = "Press ENTER";
@@ -422,6 +428,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             currentPage = 1; 
             menuSelection = 0; 
             isMenuEditing = false;
+            isNamingMode = false;
             
             menuContainer.setVisibility(View.VISIBLE); 
             mainUIContainer.setVisibility(View.GONE); 
@@ -433,6 +440,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     private void exitMenu() {
         isMenuOpen = false;
+        isNamingMode = false;
         menuContainer.setVisibility(View.GONE); 
         mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE); 
         
@@ -457,7 +465,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         }
         
         syncHardwareState();
-        updateMainHUD(); // Instant visual snap
+        updateMainHUD(); 
     }
 
     private float getCircleOfConfusion() {
@@ -505,7 +513,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 isCalibrating = false;
                 if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.GONE);
                 setHUDVisibility(View.VISIBLE);
-                updateMainHUD(); // Instant update
+                updateMainHUD(); 
             } else {
                 calibStep = 1; 
                 minDistanceInput = 0.3f;
@@ -546,10 +554,22 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             } else {
                 displayState = (displayState == 0) ? 1 : 0; 
                 mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE);
-                updateMainHUD(); // Instant update
+                updateMainHUD(); 
             }
         } else {
             if (currentPage == 4) handleConnectionAction(); 
+            else if (currentMainTab == 0 && currentPage == 1 && menuSelection == 1) {
+                // ARCADE NAMING TOGGLE
+                isNamingMode = !isNamingMode;
+                if (isNamingMode) {
+                    isMenuEditing = true;
+                    nameCursorPos = 0;
+                } else {
+                    isMenuEditing = false;
+                    recipeManager.savePreferences();
+                }
+                renderMenu();
+            }
             else { isMenuEditing = !isMenuEditing; renderMenu(); }
         }
     }
@@ -580,8 +600,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         }
         
         if (isMenuOpen) {
-            if (isMenuEditing) handleMenuChange(1);
-            else {
+            if (isNamingMode) {
+                handleNamingChange(1);
+            } else if (isMenuEditing) {
+                handleMenuChange(1);
+            } else {
                 menuSelection--;
                 if (menuSelection < 0) {
                     if (currentMainTab == 0 && currentPage == 2) { currentPage = 1; menuSelection = currentItemCount - 1; } 
@@ -620,8 +643,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         }
         
         if (isMenuOpen) {
-            if (isMenuEditing) { handleMenuChange(-1); } 
-            else {
+            if (isNamingMode) {
+                handleNamingChange(-1);
+            } else if (isMenuEditing) { 
+                handleMenuChange(-1); 
+            } else {
                 menuSelection++;
                 if (menuSelection >= currentItemCount) {
                     if (currentMainTab == 0 && currentPage == 1) { currentPage = 2; menuSelection = 0; } 
@@ -684,8 +710,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
         if (isPlaybackMode) { showPlaybackImage(playbackIndex - 1); } 
         else if (isMenuOpen) {
-            if (isMenuEditing) { handleMenuChange(-1); } 
-            else {
+            if (isNamingMode) {
+                nameCursorPos = Math.max(0, nameCursorPos - 1);
+                renderMenu();
+            } else if (isMenuEditing) { 
+                handleMenuChange(-1); 
+            } else {
                 currentMainTab = Math.max(0, currentMainTab - 1);
                 if (currentMainTab == 0) currentPage = 1;
                 if (currentMainTab == 1) currentPage = 3;
@@ -733,8 +763,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
         if (isPlaybackMode) { showPlaybackImage(playbackIndex + 1); } 
         else if (isMenuOpen) {
-            if (isMenuEditing) { handleMenuChange(1); } 
-            else {
+            if (isNamingMode) {
+                nameCursorPos = Math.min(7, nameCursorPos + 1);
+                renderMenu();
+            } else if (isMenuEditing) { 
+                handleMenuChange(1); 
+            } else {
                 currentMainTab = Math.min(2, currentMainTab + 1);
                 if (currentMainTab == 0) currentPage = 1;
                 if (currentMainTab == 1) currentPage = 3;
@@ -751,8 +785,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     public void onDialRotated(int direction) { 
         if (isPlaybackMode) { showPlaybackImage(playbackIndex + direction); } 
         else if (isMenuOpen) {
-            if (isMenuEditing) { handleMenuChange(direction); } 
-            else { if (direction > 0) onDownPressed(); else onUpPressed(); }
+            if (isNamingMode) { 
+                handleNamingChange(direction); 
+            } else if (isMenuEditing) { 
+                handleMenuChange(direction); 
+            } else { 
+                if (direction > 0) onDownPressed(); else onUpPressed(); 
+            }
         } else if (!isProcessing) {
             handleHardwareInput(direction); 
         }
@@ -804,7 +843,31 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 else if (keyCode == ScalarInput.ISV_KEY_LEFT) mDialMode = DIAL_MODE_SHUTTER; 
                 break;
         }
-        updateMainHUD(); // Instant visual snap
+        updateMainHUD(); 
+    }
+    
+    // --- ARCADE NAMING HANDLER ---
+    private void handleNamingChange(int dir) {
+        RTLProfile p = recipeManager.getCurrentProfile();
+        String name = p.profileName;
+        if (name == null) name = "";
+        
+        // Pad out to exactly 8 chars to prevent bounds errors
+        while(name.length() < 8) name += " ";
+        if (name.length() > 8) name = name.substring(0, 8);
+        
+        char c = name.charAt(nameCursorPos);
+        int idx = CHARSET.indexOf(c);
+        if (idx == -1) idx = 0; // Default to 'A' if unknown char
+        
+        idx += dir;
+        if (idx < 0) idx = CHARSET.length() - 1;
+        if (idx >= CHARSET.length()) idx = 0;
+        
+        char newC = CHARSET.charAt(idx);
+        p.profileName = name.substring(0, nameCursorPos) + newC + name.substring(nameCursorPos + 1);
+        
+        renderMenu();
     }
 
     private void handleMenuChange(int dir) {
@@ -814,12 +877,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (currentPage == 1) {
             switch(sel) {
                 case 0: recipeManager.setCurrentSlot(recipeManager.getCurrentSlot() + dir); break;
-                case 1: p.lutIndex = (p.lutIndex + dir + recipeManager.getRecipePaths().size()) % recipeManager.getRecipePaths().size(); break;
-                case 2: p.opacity = Math.max(0, Math.min(100, p.opacity + (dir * 10))); break;
-                case 3: p.grain = Math.max(0, Math.min(5, p.grain + dir)); break;
-                case 4: p.grainSize = Math.max(0, Math.min(2, p.grainSize + dir)); break;
-                case 5: p.rollOff = Math.max(0, Math.min(5, p.rollOff + dir)); break;
-                case 6: p.vignette = Math.max(0, Math.min(5, p.vignette + dir)); break;
+                case 1: /* Handled by NamingMode intercept */ break;
+                case 2: p.lutIndex = (p.lutIndex + dir + recipeManager.getRecipePaths().size()) % recipeManager.getRecipePaths().size(); break;
+                case 3: p.opacity = Math.max(0, Math.min(100, p.opacity + (dir * 10))); break;
+                case 4: p.grain = Math.max(0, Math.min(5, p.grain + dir)); break;
+                case 5: p.grainSize = Math.max(0, Math.min(2, p.grainSize + dir)); break;
+                case 6: p.rollOff = Math.max(0, Math.min(5, p.rollOff + dir)); break;
+                case 7: p.vignette = Math.max(0, Math.min(5, p.vignette + dir)); break;
             }
         } else if (currentPage == 2) {
             String[] wbLabels = {"AUTO", "DAY", "SHD", "CLD", "INC", "FLR"};
@@ -936,7 +1000,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             if (d > 0) cx.incrementShutterSpeed(); else cx.decrementShutterSpeed(); 
         }
         else if (mDialMode == DIAL_MODE_APERTURE) { 
-            // --- STRICT FIX: Only virtualize aperture if we are specifically in Manual Focus Mode with an "M" lens ---
             if (cachedIsManualFocus && lensManager != null && lensManager.isCurrentProfileManual()) {
                 adjustVirtualAperture(d);
             } else {
@@ -1023,7 +1086,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             }
             try { c.setParameters(p); } catch (Exception e) {}
         }
-        updateMainHUD(); // Physical dials bypass debouncer for instant feeling
+        updateMainHUD(); 
     }
     
     private void applyHardwareRecipe() {
@@ -1101,7 +1164,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         else if (currentPage == 3) tvMenuSubtitle.setText("Global Settings");
         else tvMenuSubtitle.setText("Web Dashboard Server");
 
-        for (int i = 0; i < 7; i++) menuRows[i].setVisibility(View.GONE);
+        // Hide all rows initially
+        for (int i = 0; i < 8; i++) menuRows[i].setVisibility(View.GONE);
 
         RTLProfile p = recipeManager.getCurrentProfile();
         int itemCount = 0;
@@ -1111,10 +1175,52 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         String[] stepLabels = {"-3", "-2", "-1", "0", "+1", "+2", "+3"};
 
         if (currentPage == 1) { 
-            itemCount = 7;
-            String[] rLabels = {"RTL Slot", "LUT", "Opacity", "Grain Amount", "Grain Size", "Highlight Roll", "Vignette"};
-            String[] rValues = { String.valueOf(recipeManager.getCurrentSlot() + 1), recipeManager.getRecipeNames().get(p.lutIndex), p.opacity + "%", amtLabels[Math.max(0, Math.min(5, p.grain))], sizeLabels[Math.max(0, Math.min(2, p.grainSize))], amtLabels[Math.max(0, Math.min(5, p.rollOff))], amtLabels[Math.max(0, Math.min(5, p.vignette))] };
-            for (int i = 0; i < 7; i++) { menuLabels[i].setText(rLabels[i]); menuValues[i].setText(rValues[i]); menuRows[i].setVisibility(View.VISIBLE); }
+            itemCount = 8; // Now 8 items!
+            String[] rLabels = {"Recipe Slot", "Profile Name", "LUT", "Opacity", "Grain Amount", "Grain Size", "Highlight Roll", "Vignette"};
+            
+            // --- ARCADE NAMING RENDER LOGIC ---
+            String rawName = p.profileName;
+            if (rawName == null) rawName = "";
+            while (rawName.length() < 8) rawName += " ";
+            if (rawName.length() > 8) rawName = rawName.substring(0, 8);
+            
+            String displayHtmlName = rawName;
+            
+            if (isNamingMode && menuSelection == 1) {
+                StringBuilder sb = new StringBuilder();
+                for (int i = 0; i < 8; i++) {
+                    char c = rawName.charAt(i);
+                    String cStr = (c == ' ') ? "&nbsp;" : String.valueOf(c);
+                    if (i == nameCursorPos) {
+                        sb.append("<font color='#00FFFF'><u>").append(cStr).append("</u></font>");
+                    } else {
+                        sb.append(cStr);
+                    }
+                }
+                displayHtmlName = sb.toString();
+            }
+
+            String[] rValues = { 
+                String.valueOf(recipeManager.getCurrentSlot() + 1), 
+                displayHtmlName, 
+                recipeManager.getRecipeNames().get(p.lutIndex), 
+                p.opacity + "%", 
+                amtLabels[Math.max(0, Math.min(5, p.grain))], 
+                sizeLabels[Math.max(0, Math.min(2, p.grainSize))], 
+                amtLabels[Math.max(0, Math.min(5, p.rollOff))], 
+                amtLabels[Math.max(0, Math.min(5, p.vignette))] 
+            };
+            
+            for (int i = 0; i < 8; i++) { 
+                menuLabels[i].setText(rLabels[i]); 
+                if (i == 1 && (isNamingMode || displayHtmlName.contains("&nbsp;"))) {
+                    // Render the HTML for the Arcade UI spacing/coloring
+                    menuValues[i].setText(android.text.Html.fromHtml(rValues[i]));
+                } else {
+                    menuValues[i].setText(rValues[i].trim()); 
+                }
+                menuRows[i].setVisibility(View.VISIBLE); 
+            }
         } else if (currentPage == 2) {
             itemCount = 7;
             String[] cLabels = {"White Balance", "WB Shift (A-B)", "WB Shift (G-M)", "DRO", "Contrast", "Saturation", "Sharpness"};
@@ -1137,7 +1243,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
         for (int i = 0; i < itemCount; i++) {
             if (i == menuSelection) {
-                if (isMenuEditing) {
+                // If editing or naming, hold the highlight state!
+                if (isMenuEditing || isNamingMode) {
                     menuRows[i].setBackgroundColor(Color.TRANSPARENT);
                     menuLabels[i].setTextColor(Color.WHITE);
                     menuValues[i].setTextColor(Color.rgb(230, 50, 15)); 
@@ -1287,7 +1394,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         divParams.setMargins(0, 0, 0, 15); 
         menuContainer.addView(headerDivider, divParams);
         
-        for (int i = 0; i < 7; i++) { 
+        for (int i = 0; i < 8; i++) { 
             menuRows[i] = new LinearLayout(this); 
             menuRows[i].setOrientation(LinearLayout.HORIZONTAL); 
             menuRows[i].setGravity(Gravity.CENTER_VERTICAL); 
@@ -1305,7 +1412,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             menuRows[i].addView(menuLabels[i], new LinearLayout.LayoutParams(0, -2, 1.0f)); 
             menuRows[i].addView(menuValues[i], new LinearLayout.LayoutParams(-2, -2));
             
-            if (i < 6) { 
+            if (i < 7) { 
                 View divider = new View(this); 
                 divider.setBackgroundColor(Color.DKGRAY); 
                 menuContainer.addView(divider, new LinearLayout.LayoutParams(-1, 1)); 
@@ -1485,8 +1592,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         String name = recipeManager.getRecipeNames().get(prof.lutIndex);
         String displayName = name.length() > 15 ? name.substring(0, 12) + "..." : name;
         
+        // --- CUSTOM RECIPE NAME INJECTION ---
+        String customName = prof.profileName != null ? prof.profileName.trim() : ("RECIPE " + (recipeManager.getCurrentSlot() + 1));
+        if (customName.isEmpty()) customName = "RECIPE " + (recipeManager.getCurrentSlot() + 1);
+        
         if (!isProcessing && tvTopStatus != null) {
-            tvTopStatus.setText("RTL " + (recipeManager.getCurrentSlot() + 1) + " [" + displayName + "]\n" + (isReady ? "READY" : "LOADING.."));
+            tvTopStatus.setText(customName + " [" + displayName + "]\n" + (isReady ? "READY" : "LOADING.."));
             tvTopStatus.setTextColor(mDialMode == DIAL_MODE_RTL ? Color.rgb(230, 50, 15) : Color.WHITE);
         }
         
@@ -1601,7 +1712,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             }
         }
         
-        updateMainHUD(); // INSTANT CALL: Fixes the 'Tiny View' boot bug
+        updateMainHUD();
     }
     
     @Override 
@@ -1654,7 +1765,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     isNativeLensAttached = false; 
                     Log.d("filmOS_Lens", "Manual Lens Detected.");
                 }
-                updateMainHUD(); // Instant update to clear any layout resizing
+                updateMainHUD(); 
             }
         });
     }

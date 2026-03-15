@@ -19,7 +19,7 @@ public class RecipeManager {
 
     public RecipeManager() {
         for (int i = 0; i < 10; i++) {
-            profiles[i] = new RTLProfile();
+            profiles[i] = new RTLProfile(i); // Passes index to set default "RECIPE X"
         }
         scanRecipes();
     }
@@ -120,7 +120,8 @@ public class RecipeManager {
                   .append(p.wbShiftGM).append(",")
                   .append(p.contrast).append(",")
                   .append(p.saturation).append(",")
-                  .append(p.sharpness).append("\n"); 
+                  .append(p.sharpness).append(",")
+                  .append(p.profileName).append("\n"); // --- NEW: Appending Custom Name
             }
             fos.write(sb.toString().getBytes()); 
             fos.flush(); 
@@ -167,6 +168,10 @@ public class RecipeManager {
                                 p.contrast = Integer.parseInt(parts[11]);
                                 p.saturation = Integer.parseInt(parts[12]);
                                 p.sharpness = Integer.parseInt(parts[13]);
+                            }
+                            // --- NEW: Loading Custom Name ---
+                            if (parts.length >= 15) {
+                                p.profileName = parts[14];
                             }
                         }
                     }
