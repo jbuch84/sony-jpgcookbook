@@ -1632,40 +1632,31 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     }
 
     private void showPlaybackImage(int idx) {
-        if (playbackFiles.isEmpty()) {
-            return;
-        }
-        
-        if (idx < 0) {
-            idx = playbackFiles.size() - 1; 
-        }
-        if (idx >= playbackFiles.size()) {
-            idx = 0; 
-        }
+        if (playbackFiles.isEmpty()) return;
+        if (idx < 0) idx = playbackFiles.size() - 1; 
+        if (idx >= playbackFiles.size()) idx = 0; 
         
         playbackIndex = idx; 
         File file = playbackFiles.get(idx);
         
         try {
-            if (playbackImageView != null) {
-                playbackImageView.setImageBitmap(null);
-            }
-            if (currentPlaybackBitmap != null) { 
+            // Aggressive cleanup of the previous image before we load the new one
+            if (playbackImageView != null) playbackImageView.setImageBitmap(null);
+            if (currentPlaybackBitmap != null && !currentPlaybackBitmap.isRecycled()) { 
                 currentPlaybackBitmap.recycle(); 
                 currentPlaybackBitmap = null; 
             }
+            
+            // Suggest GC to the Sony OS since we are managing tight heap limits
             System.gc();
 
             if (file.length() == 0) {
-                if (tvPlaybackInfo != null) {
-                    tvPlaybackInfo.setText((idx + 1) + "/" + playbackFiles.size() + "\n[ERROR: 0-BYTE FILE]");
-                }
+                if (tvPlaybackInfo != null) tvPlaybackInfo.setText((idx + 1) + "/" + playbackFiles.size() + "\n[ERROR: 0-BYTE FILE]");
                 return;
             }
             
             String path = file.getAbsolutePath();
             ExifInterface exif = new ExifInterface(path);
-            
             String fnum = exif.getAttribute("FNumber");
             String speed = exif.getAttribute("ExposureTime");
             String iso = exif.getAttribute("ISOSpeedRatings");
@@ -1674,69 +1665,85 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             if (speed != null) {
                 try {
                     double s = Double.parseDouble(speed);
-                    if (s < 1.0) {
-                        speedStr = "1/" + Math.round(1.0 / s) + "s";
-                    } else {
-                        speedStr = Math.round(s) + "s";
-                    }
-                } catch (Exception e) {
-                }
+                    if (s < 1.0) speedStr = "1/" + Math.round(1.0 / s) + "s";
+                    else speedStr = Math.round(s) + "s";
+                } catch (Exception e) {}
             }
             
             String apStr = fnum != null ? "f/" + fnum : "f/--";
             String isoStr = iso != null ? "ISO " + iso : "ISO --";
 
             String metaText = (idx + 1) + " / " + playbackFiles.size() + "\n" + file.getName() + "\n" + apStr + " | " + speedStr + " | " + isoStr;
-            if (tvPlaybackInfo != null) {
-                tvPlaybackInfo.setText(metaText);
-            }
+            if (tvPlaybackInfo != null) tvPlaybackInfo.setText(metaText);
 
-            // 1. Force the bulletproof downsample (Guarantees < 2MB of RAM usage!)
+            // --- SMART MEMORY DECODING ---
             BitmapFactory.Options opts = new BitmapFactory.Options();
-            opts.inSampleSize = 8; 
-            Bitmap raw = BitmapFactory.decodeFile(path, opts);
             
-            if (raw == null) {
-                return;
+            // Step 1: Read dimensions only (zero memory cost)
+            opts.inJustDecodeBounds = true;
+            BitmapFactory.decodeFile(path, opts);
+            
+            // Step 2: Calculate dynamic sample size targeted to the Sony LCD screen
+            // The physical LCD is usually ~640x480 or 800x600. We target 1024 to ensure maximum sharpness.
+            final int reqWidth = 1024;
+            final int reqHeight = 768;
+            int inSampleSize = 1;
+
+            if (opts.outHeight > reqHeight || opts.outWidth > reqWidth) {
+                final int halfHeight = opts.outHeight / 2;
+                final int halfWidth = opts.outWidth / 2;
+                while ((halfHeight / inSampleSize) >= reqHeight && (halfWidth / inSampleSize) >= reqWidth) {
+                    inSampleSize *= 2;
+                }
             }
 
-            // 2. Calculate rotation
+            // Step 3: Decode actual image into memory using high-efficiency settings
+            opts.inJustDecodeBounds = false;
+            opts.inSampleSize = inSampleSize;
+            // CRITICAL: Force 16-bit RGB. JPEGs don't have transparency, so this drops RAM usage by 50%!
+            opts.inPreferredConfig = Bitmap.Config.RGB_565; 
+            opts.inPurgeable = true;
+            opts.inInputShareable = true;
+
+            Bitmap raw = BitmapFactory.decodeFile(path, opts);
+            if (raw == null) return;
+
             int orient = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL);
             int rot = 0; 
-            if (orient == ExifInterface.ORIENTATION_ROTATE_90) {
-                rot = 90; 
-            } else if (orient == ExifInterface.ORIENTATION_ROTATE_180) {
-                rot = 180; 
-            } else if (orient == ExifInterface.ORIENTATION_ROTATE_270) {
-                rot = 270;
-            }
+            if (orient == ExifInterface.ORIENTATION_ROTATE_90) rot = 90; 
+            else if (orient == ExifInterface.ORIENTATION_ROTATE_180) rot = 180; 
+            else if (orient == ExifInterface.ORIENTATION_ROTATE_270) rot = 270;
             
-            // 3. CPU Squish & Rotate (Safe now because we smoothly downsampled first!)
             Matrix m = new Matrix(); 
-            if (rot != 0) {
-                m.postRotate(rot); 
-            }
-            // Put the fat-pixel fix back here!
-            m.postScale(0.8888f, 1.0f); 
+            if (rot != 0) m.postRotate(rot); 
+            m.postScale(0.8888f, 1.0f); // Maintain your anamorphic scale math
             
-            // The 'true' at the end enables hardware bilinear filtering to keep it crisp
+            // Create final rotated/scaled bitmap
             Bitmap bmp = Bitmap.createBitmap(raw, 0, 0, raw.getWidth(), raw.getHeight(), m, true);
             
-            // --- CRITICAL MEMORY LEAK FIX ---
+            // Free the un-rotated raw memory immediately to keep the heap clean
             if (raw != bmp) {
-                raw.recycle(); // Destroy the unrotated duplicate to free up RAM!
+                raw.recycle();
+                raw = null;
             }
             
             if (playbackImageView != null) {
                 playbackImageView.setImageBitmap(bmp);
-                
-                // REMOVED the setScaleX() command that was crashing the Gingerbread OS!
                 playbackImageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
             }
             currentPlaybackBitmap = bmp;
             
+        } catch (OutOfMemoryError oom) {
+            // If the camera hits its RAM limit, catch it so the app doesn't crash!
+            android.util.Log.e("filmOS", "OOM Memory limit hit during playback. Recovering...");
+            if (tvPlaybackInfo != null) tvPlaybackInfo.setText((idx + 1) + " / " + playbackFiles.size() + "\n[MEMORY ERROR - SKIPPED]");
+            if (currentPlaybackBitmap != null) { 
+                currentPlaybackBitmap.recycle(); 
+                currentPlaybackBitmap = null; 
+            }
+            System.gc(); // Force OS garbage collection
         } catch (Exception e) {
-            Log.e("filmOS", "Playback error: " + e.getMessage());
+            android.util.Log.e("filmOS", "Playback error: " + e.getMessage());
         }
     }
 
