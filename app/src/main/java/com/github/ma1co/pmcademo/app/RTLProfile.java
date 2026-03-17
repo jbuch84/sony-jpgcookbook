@@ -37,8 +37,9 @@ public class RTLProfile {
     // PHASE 5: EFFECTS & HACKS
     public String proColorMode = "off";
     public String pictureEffect = "off";
-    public int vignetteHardware = 0;
-    public int softFocusLevel = 1;
+    public String peToyCameraTone = "normal"; // Restored for Toy Cam warm/cool/magenta tints
+    public int vignetteHardware = 0;          // Restored for Toy Cam vignette dialing
+    public int softFocusLevel = 1;            // Restored for Soft Focus intensity
     public int shadingRed = 0;
     public int shadingBlue = 0;
     public int sharpnessGain = 0;
