@@ -569,31 +569,26 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         }
     }
 
-    @Override 
-    public void onUpPressed() { 
-        if (isProcessing) return;
-        if (waitingForProfileChoice) return;
-
+    @Override
+    public void onUpPressed() {
+        if (isProcessing || waitingForProfileChoice) return;
         if (isCalibrating) {
             if (calibStep == 2) {
                 tempCalPoints.add(new LensProfileManager.CalPoint(1.0f, 999.0f));
-                
-                lensManager.saveProfileToFile(detectedFocalLength, detectedMaxAperture, tempCalPoints, false); 
-                
+                lensManager.saveProfileToFile(detectedFocalLength, detectedMaxAperture, tempCalPoints, false);
                 availableLenses = lensManager.getAvailableLenses();
                 String newFilename = LensProfileManager.generateFilename(detectedFocalLength, detectedMaxAperture, false);
                 currentLensIndex = availableLenses.indexOf(newFilename);
                 if (currentLensIndex == -1) currentLensIndex = 0;
                 lensManager.loadProfileFromFile(newFilename);
-                
                 isCalibrating = false;
                 if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.GONE);
                 setHUDVisibility(View.VISIBLE);
                 updateMainHUD();
             }
-            return; 
+            return;
         }
-        
+
         if (isMenuOpen) {
             if (isNamingMode) {
                 handleNamingChange(1);
@@ -601,17 +596,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 handleMenuChange(1);
             } else {
                 menuSelection--;
-                if (menuSelection < 0) {
-                    if (currentMainTab == 0 && currentPage > 1) { 
-                        currentPage--; 
-                        if (currentPage == 1) menuSelection = 7;
-                        else if (currentPage == 2) menuSelection = 6;
-                        else if (currentPage == 3) menuSelection = 5;
-                        else if (currentPage == 4) menuSelection = 4;
-                        else if (currentPage == 5) menuSelection = 4; 
-                    } else { 
-                        menuSelection = currentItemCount - 1; 
-                    }
+                // If we go above row 0, we hit Subtitle (-1). 
+                // If we go above Subtitle, we hit Tabs (-2).
+                // If we go above Tabs, we wrap to the bottom of the current list.
+                if (menuSelection < -2) {
+                    menuSelection = currentItemCount - 1;
                 }
                 renderMenu();
             }
@@ -620,45 +609,39 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         }
     }
 
-    @Override 
-    public void onDownPressed() { 
+    @Override
+    public void onDownPressed() {
         if (isProcessing) return;
-        
         if (waitingForProfileChoice) {
             waitingForProfileChoice = false;
             isCalibrating = true;
-            
             if (isNativeLensAttached) {
                 detectedLensName = "Electronic Lens";
                 detectedFocalLength = hardwareFocalLength > 0.0f ? hardwareFocalLength : 50.0f;
-                detectedMaxAperture = 2.8f; 
-                calibStep = 10; 
+                detectedMaxAperture = 2.8f;
+                calibStep = 10;
                 tempCalPoints.clear();
             } else {
                 detectedLensName = "Manual Lens";
-                detectedFocalLength = 50.0f; 
+                detectedFocalLength = 50.0f;
                 detectedMaxAperture = 2.8f;
-                calibStep = 0; 
+                calibStep = 0;
                 tempCalPoints.clear();
             }
             updateCalibrationUI();
             return;
         }
-        
+
         if (isMenuOpen) {
             if (isNamingMode) {
                 handleNamingChange(-1);
-            } else if (isMenuEditing) { 
-                handleMenuChange(-1); 
+            } else if (isMenuEditing) {
+                handleMenuChange(-1);
             } else {
                 menuSelection++;
+                // If we go past the last item, we wrap back to the Tabs (-2)
                 if (menuSelection >= currentItemCount) {
-                    if (currentMainTab == 0 && currentPage < 5) { 
-                        currentPage++; 
-                        menuSelection = 0; 
-                    } else { 
-                        menuSelection = 0; 
-                    }
+                    menuSelection = -2;
                 }
                 renderMenu();
             }
@@ -666,11 +649,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             navigateHomeSpatial(ScalarInput.ISV_KEY_DOWN);
         }
     }
-    
-    @Override 
-    public void onLeftPressed() { 
-        if (isProcessing) return;
 
+    @Override
+    public void onLeftPressed() {
+        if (isProcessing) return;
         if (isCalibrating && calibStep == 0) {
             detectedFocalLength = Math.max(10.0f, detectedFocalLength - 1.0f);
             updateCalibrationUI();
@@ -681,65 +663,58 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             updateCalibrationUI();
             return;
         }
-
         if (waitingForProfileChoice) {
             boolean canAppend = isNativeLensAttached && lensManager.hasActiveProfile() && !lensManager.isCurrentProfileManual();
-            
             if (canAppend) {
                 waitingForProfileChoice = false;
                 isCalibrating = true;
-                
                 tempCalPoints = new ArrayList<LensProfileManager.CalPoint>(lensManager.getCurrentPoints());
                 detectedLensName = lensManager.getCurrentLensName();
-                detectedFocalLength = lensManager.getCurrentFocalLength(); 
+                detectedFocalLength = lensManager.getCurrentFocalLength();
                 detectedMaxAperture = lensManager.currentMaxAperture;
-                
                 if (!tempCalPoints.isEmpty() && tempCalPoints.get(tempCalPoints.size() - 1).ratio >= 0.99f) {
                     tempCalPoints.remove(tempCalPoints.size() - 1);
                 }
-                
-                calibStep = 2; 
+                calibStep = 2;
                 minDistanceInput = lensManager.getDistanceForRatio(cachedFocusRatio);
-                if (minDistanceInput < 0) minDistanceInput = 1.0f; 
+                if (minDistanceInput < 0) minDistanceInput = 1.0f;
                 updateCalibrationUI();
             }
-            return; 
-        }
-        
-        if (!isMenuOpen && !isPlaybackMode && mDialMode == DIAL_MODE_FOCUS && lensManager != null && lensManager.isCurrentProfileManual()) {
-            virtualFocusRatio = Math.max(0.0f, virtualFocusRatio - 0.02f);
-            if (focusMeter != null) {
-                float focalToUse = lensManager.getCurrentFocalLength();
-                focusMeter.update(virtualFocusRatio, virtualAperture, focalToUse, false, lensManager.getCurrentPoints());
-            }
-            return; 
+            return;
         }
 
-        if (isPlaybackMode) { showPlaybackImage(playbackIndex - 1); } 
-        else if (isMenuOpen) {
-            if (isNamingMode) {
+        if (isMenuOpen) {
+            if (menuSelection == -2) { // TABS ARE HIGHLIGHTED
+                currentMainTab = (currentMainTab - 1 + 4) % 4;
+                if (currentMainTab == 0) currentPage = 1;
+                else if (currentMainTab == 1) currentPage = 6;
+                else if (currentMainTab == 2) currentPage = 7;
+                else if (currentMainTab == 3) currentPage = 8;
+                renderMenu();
+            } else if (menuSelection == -1) { // SUBTITLE IS HIGHLIGHTED
+                if (currentMainTab == 0) { // Only flip pages if in the multi-page Recipes tab
+                    currentPage = (currentPage - 2 + 5) % 5 + 1;
+                    renderMenu();
+                }
+            } else if (isNamingMode) {
                 nameCursorPos = Math.max(0, nameCursorPos - 1);
                 renderMenu();
-            } else if (isMenuEditing) { 
-                handleMenuChange(-1); 
-            } else {
-                currentMainTab = Math.max(0, currentMainTab - 1);
-                if (currentMainTab == 0) currentPage = 1;
-                if (currentMainTab == 1) currentPage = 6;
-                if (currentMainTab == 2) currentPage = 7;
-                if (currentMainTab == 3) currentPage = 8;
-                menuSelection = 0; 
-                renderMenu();
+            } else if (isMenuEditing) {
+                handleMenuChange(-1);
             }
+        } else if (!isPlaybackMode && mDialMode == DIAL_MODE_FOCUS && lensManager != null && lensManager.isCurrentProfileManual()) {
+            virtualFocusRatio = Math.max(0.0f, virtualFocusRatio - 0.02f);
+            if (focusMeter != null) focusMeter.update(virtualFocusRatio, virtualAperture, lensManager.getCurrentFocalLength(), false, lensManager.getCurrentPoints());
+        } else if (isPlaybackMode) {
+            showPlaybackImage(playbackIndex - 1);
         } else {
             navigateHomeSpatial(ScalarInput.ISV_KEY_LEFT);
         }
     }
-    
-    @Override 
-    public void onRightPressed() { 
-        if (isProcessing) return;
 
+    @Override
+    public void onRightPressed() {
+        if (isProcessing) return;
         if (isCalibrating && calibStep == 0) {
             detectedFocalLength = Math.min(600.0f, detectedFocalLength + 1.0f);
             updateCalibrationUI();
@@ -750,41 +725,37 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             updateCalibrationUI();
             return;
         }
-        
         if (waitingForProfileChoice || isCalibrating) {
-            waitingForProfileChoice = false;
-            isCalibrating = false;
+            waitingForProfileChoice = false; isCalibrating = false;
             if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.GONE);
-            setHUDVisibility(View.VISIBLE);
-            updateMainHUD(); 
+            setHUDVisibility(View.VISIBLE); updateMainHUD();
             return;
         }
-        
-        if (!isMenuOpen && !isPlaybackMode && mDialMode == DIAL_MODE_FOCUS && lensManager != null && lensManager.isCurrentProfileManual()) {
-            virtualFocusRatio = Math.min(1.0f, virtualFocusRatio + 0.02f);
-            if (focusMeter != null) {
-                float focalToUse = lensManager.getCurrentFocalLength();
-                focusMeter.update(virtualFocusRatio, virtualAperture, focalToUse, false, lensManager.getCurrentPoints());
-            }
-            return; 
-        }
 
-        if (isPlaybackMode) { showPlaybackImage(playbackIndex + 1); } 
-        else if (isMenuOpen) {
-            if (isNamingMode) {
+        if (isMenuOpen) {
+            if (menuSelection == -2) { // TABS ARE HIGHLIGHTED
+                currentMainTab = (currentMainTab + 1) % 4;
+                if (currentMainTab == 0) currentPage = 1;
+                else if (currentMainTab == 1) currentPage = 6;
+                else if (currentMainTab == 2) currentPage = 7;
+                else if (currentMainTab == 3) currentPage = 8;
+                renderMenu();
+            } else if (menuSelection == -1) { // SUBTITLE IS HIGHLIGHTED
+                if (currentMainTab == 0) { // Only flip pages if in the multi-page Recipes tab
+                    currentPage = (currentPage % 5) + 1;
+                    renderMenu();
+                }
+            } else if (isNamingMode) {
                 nameCursorPos = Math.min(7, nameCursorPos + 1);
                 renderMenu();
-            } else if (isMenuEditing) { 
-                handleMenuChange(1); 
-            } else {
-                currentMainTab = Math.min(3, currentMainTab + 1);
-                if (currentMainTab == 0) currentPage = 1;
-                if (currentMainTab == 1) currentPage = 6;
-                if (currentMainTab == 2) currentPage = 7;
-                if (currentMainTab == 3) currentPage = 8;
-                menuSelection = 0; 
-                renderMenu();
+            } else if (isMenuEditing) {
+                handleMenuChange(1);
             }
+        } else if (!isPlaybackMode && mDialMode == DIAL_MODE_FOCUS && lensManager != null && lensManager.isCurrentProfileManual()) {
+            virtualFocusRatio = Math.min(1.0f, virtualFocusRatio + 0.02f);
+            if (focusMeter != null) focusMeter.update(virtualFocusRatio, virtualAperture, lensManager.getCurrentFocalLength(), false, lensManager.getCurrentPoints());
+        } else if (isPlaybackMode) {
+            showPlaybackImage(playbackIndex + 1);
         } else {
             navigateHomeSpatial(ScalarInput.ISV_KEY_RIGHT);
         }
@@ -1230,16 +1201,25 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     }
 
     private void renderMenu() {
-        String scn = "UNKNOWN"; 
+        String scn = "UNKNOWN";
         if (cameraManager != null && cameraManager.getCamera() != null) {
             try { scn = cameraManager.getCamera().getParameters().getSceneMode().toUpperCase(); } catch(Exception e) {}
         }
-        
-        tvTabRTL.setTextColor(currentMainTab == 0 ? Color.rgb(230, 50, 15) : Color.GRAY);
-        tvTabSettings.setTextColor(currentMainTab == 1 ? Color.rgb(230, 50, 15) : Color.GRAY);
-        tvTabNetwork.setTextColor(currentMainTab == 2 ? Color.rgb(230, 50, 15) : Color.GRAY);
-        tvTabSupport.setTextColor(currentMainTab == 3 ? Color.rgb(230, 50, 15) : Color.GRAY); 
-        
+
+        // --- TAB HIGHLIGHTING ---
+        tvTabRTL.setBackgroundColor(menuSelection == -2 && currentMainTab == 0 ? Color.rgb(230, 50, 15) : Color.TRANSPARENT);
+        tvTabSettings.setBackgroundColor(menuSelection == -2 && currentMainTab == 1 ? Color.rgb(230, 50, 15) : Color.TRANSPARENT);
+        tvTabNetwork.setBackgroundColor(menuSelection == -2 && currentMainTab == 2 ? Color.rgb(230, 50, 15) : Color.TRANSPARENT);
+        tvTabSupport.setBackgroundColor(menuSelection == -2 && currentMainTab == 3 ? Color.rgb(230, 50, 15) : Color.TRANSPARENT);
+
+        tvTabRTL.setTextColor(currentMainTab == 0 ? Color.WHITE : Color.GRAY);
+        tvTabSettings.setTextColor(currentMainTab == 1 ? Color.WHITE : Color.GRAY);
+        tvTabNetwork.setTextColor(currentMainTab == 2 ? Color.WHITE : Color.GRAY);
+        tvTabSupport.setTextColor(currentMainTab == 3 ? Color.WHITE : Color.GRAY);
+
+        // --- SUBTITLE HIGHLIGHTING ---
+        tvMenuSubtitle.setBackgroundColor(menuSelection == -1 ? Color.rgb(230, 50, 15) : Color.TRANSPARENT);
+
         if (currentPage == 1) tvMenuSubtitle.setText("Software Engine (Page 1/5)");
         else if (currentPage == 2) tvMenuSubtitle.setText("Standard Tone (Page 2/5)");
         else if (currentPage == 3) tvMenuSubtitle.setText("6-Axis Color Matrix (Page 3/5)");
@@ -1250,66 +1230,43 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         else if (currentPage == 8) tvMenuSubtitle.setText("Resources & Community");
 
         for (int i = 0; i < 8; i++) menuRows[i].setVisibility(View.GONE);
-        if (supportTabContainer != null) supportTabContainer.setVisibility(View.GONE); 
+        if (supportTabContainer != null) supportTabContainer.setVisibility(View.GONE);
 
         if (currentPage == 8) {
             supportTabContainer.setVisibility(View.VISIBLE);
             currentItemCount = 0;
-            return; 
+            return;
         }
 
         RTLProfile p = recipeManager.getCurrentProfile();
         int itemCount = 0;
-
         String[] amtLabels = {"OFF", "LOW", "MED", "HIGH", "V.HIGH", "MAX"};
         String[] sizeLabels = {"SMALL", "MED", "LARGE"};
-        String[] stepLabels = {"-3", "-2", "-1", "0", "+1", "+2", "+3"};
 
         if (currentMainTab == 0) {
-            if (currentPage == 1) { 
-                itemCount = 8; 
+            if (currentPage == 1) {
+                itemCount = 8;
                 String[] rLabels = {"Recipe Slot", "Profile Name", "LUT", "Opacity", "Grain Amount", "Grain Size", "Highlight Roll", "Vignette"};
-                
-                String rawName = p.profileName;
-                if (rawName == null) rawName = "";
+                String rawName = p.profileName != null ? p.profileName : "";
                 while (rawName.length() < 8) rawName += " ";
                 if (rawName.length() > 8) rawName = rawName.substring(0, 8);
-                
                 String displayHtmlName = rawName;
-                
                 if (isNamingMode && menuSelection == 1) {
                     StringBuilder sb = new StringBuilder();
                     for (int i = 0; i < 8; i++) {
                         char c = rawName.charAt(i);
                         String cStr = (c == ' ') ? "&nbsp;" : String.valueOf(c);
-                        if (i == nameCursorPos) {
-                            sb.append("<font color='#00FFFF'><u>").append(cStr).append("</u></font>");
-                        } else {
-                            sb.append(cStr);
-                        }
+                        if (i == nameCursorPos) sb.append("<font color='#00FFFF'><u>").append(cStr).append("</u></font>");
+                        else sb.append(cStr);
                     }
                     displayHtmlName = sb.toString();
                 }
-
-                String[] rValues = { 
-                    String.valueOf(recipeManager.getCurrentSlot() + 1), 
-                    displayHtmlName, 
-                    recipeManager.getRecipeNames().get(p.lutIndex), 
-                    p.opacity + "%", 
-                    amtLabels[Math.max(0, Math.min(5, p.grain))], 
-                    sizeLabels[Math.max(0, Math.min(2, p.grainSize))], 
-                    amtLabels[Math.max(0, Math.min(5, p.rollOff))], 
-                    amtLabels[Math.max(0, Math.min(5, p.vignette))] 
-                };
-                
-                for (int i = 0; i < 8; i++) { 
-                    menuLabels[i].setText(rLabels[i]); 
-                    if (i == 1 && (isNamingMode || displayHtmlName.contains("&nbsp;"))) {
-                        menuValues[i].setText(android.text.Html.fromHtml(rValues[i]));
-                    } else {
-                        menuValues[i].setText(rValues[i].trim()); 
-                    }
-                    menuRows[i].setVisibility(View.VISIBLE); 
+                String[] rValues = { String.valueOf(recipeManager.getCurrentSlot() + 1), displayHtmlName, recipeManager.getRecipeNames().get(p.lutIndex), p.opacity + "%", amtLabels[Math.max(0, Math.min(5, p.grain))], sizeLabels[Math.max(0, Math.min(2, p.grainSize))], amtLabels[Math.max(0, Math.min(5, p.rollOff))], amtLabels[Math.max(0, Math.min(5, p.vignette))] };
+                for (int i = 0; i < 8; i++) {
+                    menuLabels[i].setText(rLabels[i]);
+                    if (i == 1 && (isNamingMode || displayHtmlName.contains("&nbsp;"))) menuValues[i].setText(android.text.Html.fromHtml(rValues[i]));
+                    else menuValues[i].setText(rValues[i].trim());
+                    menuRows[i].setVisibility(View.VISIBLE);
                 }
             } else if (currentPage == 2) {
                 itemCount = 7;
@@ -1321,26 +1278,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             } else if (currentPage == 3) {
                 itemCount = 6;
                 String[] mLabels = {"Red Depth", "Green Depth", "Blue Depth", "Cyan Depth", "Magenta Depth", "Yellow Depth"};
-                String[] mValues = { 
-                    String.format("%+d", p.colorDepthRed), String.format("%+d", p.colorDepthGreen), 
-                    String.format("%+d", p.colorDepthBlue), String.format("%+d", p.colorDepthCyan), 
-                    String.format("%+d", p.colorDepthMagenta), String.format("%+d", p.colorDepthYellow) 
-                };
+                String[] mValues = { String.format("%+d", p.colorDepthRed), String.format("%+d", p.colorDepthGreen), String.format("%+d", p.colorDepthBlue), String.format("%+d", p.colorDepthCyan), String.format("%+d", p.colorDepthMagenta), String.format("%+d", p.colorDepthYellow) };
                 for (int i = 0; i < 6; i++) { menuLabels[i].setText(mLabels[i]); menuValues[i].setText(mValues[i]); menuRows[i].setVisibility(View.VISIBLE); }
             } else if (currentPage == 4) {
                 itemCount = 5;
                 String[] eLabels = {"Color Mode", "Picture Effect", "Toy Cam Tone", "HW Vignette", "Soft Focus Lvl"};
-                String colorModeStr = p.colorMode != null ? p.colorMode.toUpperCase() : "STANDARD";
-                String picEffStr = p.pictureEffect != null ? p.pictureEffect.toUpperCase() : "OFF";
-                String toneStr = p.peToyCameraTone != null ? p.peToyCameraTone.toUpperCase() : "NORMAL";
-                String[] eValues = { colorModeStr, picEffStr, toneStr, String.format("%+d", p.vignetteHardware), String.valueOf(p.softFocusLevel) };
+                String[] eValues = { (p.colorMode != null ? p.colorMode : "STANDARD").toUpperCase(), (p.pictureEffect != null ? p.pictureEffect : "OFF").toUpperCase(), (p.peToyCameraTone != null ? p.peToyCameraTone : "NORMAL").toUpperCase(), String.format("%+d", p.vignetteHardware), String.valueOf(p.softFocusLevel) };
                 for (int i = 0; i < 5; i++) { menuLabels[i].setText(eLabels[i]); menuValues[i].setText(eValues[i]); menuRows[i].setVisibility(View.VISIBLE); }
             } else if (currentPage == 5) {
                 itemCount = 5;
                 String[] dLabels = {"Edge Shading (Red)", "Edge Shading (Blue)", "Micro-Contrast Gain", "Pro Color Engine", "RGB Matrix Exploit"};
-                String proStr = p.proColorMode != null ? p.proColorMode.toUpperCase() : "OFF";
-                String matrixStr = p.rgbMatrixPreset != null ? p.rgbMatrixPreset.toUpperCase() : "OFF";
-                String[] dValues = { String.format("%+d", p.shadingRed), String.format("%+d", p.shadingBlue), String.format("%+d", p.sharpnessGain), proStr, matrixStr };
+                String[] dValues = { String.format("%+d", p.shadingRed), String.format("%+d", p.shadingBlue), String.format("%+d", p.sharpnessGain), (p.proColorMode != null ? p.proColorMode : "OFF").toUpperCase(), (p.rgbMatrixPreset != null ? p.rgbMatrixPreset : "OFF").toUpperCase() };
                 for (int i = 0; i < 5; i++) { menuLabels[i].setText(dLabels[i]); menuValues[i].setText(dValues[i]); menuRows[i].setVisibility(View.VISIBLE); }
             }
         } else if (currentPage == 6) {
@@ -1356,12 +1304,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             for (int i = 0; i < 3; i++) { menuLabels[i].setText(cLabels[i]); menuValues[i].setText(cValues[i]); menuRows[i].setVisibility(View.VISIBLE); }
         }
 
+        // --- ROW HIGHLIGHTING ---
         for (int i = 0; i < itemCount; i++) {
             if (i == menuSelection) {
                 if (isMenuEditing || isNamingMode) {
                     menuRows[i].setBackgroundColor(Color.TRANSPARENT);
                     menuLabels[i].setTextColor(Color.WHITE);
-                    menuValues[i].setTextColor(Color.rgb(230, 50, 15)); 
+                    menuValues[i].setTextColor(Color.rgb(230, 50, 15));
                 } else {
                     menuRows[i].setBackgroundColor(Color.rgb(230, 50, 15));
                     menuLabels[i].setTextColor(Color.WHITE);
