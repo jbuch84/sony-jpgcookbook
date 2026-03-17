@@ -1705,6 +1705,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 
                 c.setParameters(p);
                 Log.d("filmOS", "Successfully zeroed out hardware hacks.");
+                
+                // FIX: The BIONZ hardware daemon is slow. If we close the camera
+                // immediately after setting parameters, we sever the IPC channel
+                // while the daemon is still working, causing a kernel panic on next launch.
+                // A tiny 200ms sleep gives the daemon time to safely apply the reset.
+                Thread.sleep(200);
             } catch (Exception e) {
                 Log.e("filmOS", "Failed to reset hardware: " + e.getMessage());
             }
