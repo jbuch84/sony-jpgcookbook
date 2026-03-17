@@ -560,7 +560,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 updateMainHUD(); 
             }
         } else {
-            if (currentPage == 4) handleConnectionAction(); 
+            if (currentPage == 6) handleConnectionAction(); 
             else if (currentMainTab == 0 && currentPage == 1 && menuSelection == 1) {
                 // ARCADE NAMING TOGGLE
                 isNamingMode = !isNamingMode;
@@ -610,8 +610,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             } else {
                 menuSelection--;
                 if (menuSelection < 0) {
-                    if (currentMainTab == 0 && currentPage == 2) { currentPage = 1; menuSelection = currentItemCount - 1; } 
-                    else { menuSelection = currentItemCount - 1; }
+                    if (currentMainTab == 0 && currentPage > 1) { 
+                        currentPage--; 
+                        if (currentPage == 1) menuSelection = 7;
+                        else if (currentPage == 2) menuSelection = 6;
+                        else if (currentPage == 3) menuSelection = 5;
+                    } else { 
+                        menuSelection = currentItemCount - 1; 
+                    }
                 }
                 renderMenu();
             }
@@ -653,8 +659,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             } else {
                 menuSelection++;
                 if (menuSelection >= currentItemCount) {
-                    if (currentMainTab == 0 && currentPage == 1) { currentPage = 2; menuSelection = 0; } 
-                    else { menuSelection = 0; }
+                    if (currentMainTab == 0 && currentPage < 4) { 
+                        currentPage++; 
+                        menuSelection = 0; 
+                    } else { 
+                        menuSelection = 0; 
+                    }
                 }
                 renderMenu();
             }
@@ -721,9 +731,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             } else {
                 currentMainTab = Math.max(0, currentMainTab - 1);
                 if (currentMainTab == 0) currentPage = 1;
-                if (currentMainTab == 1) currentPage = 3;
-                if (currentMainTab == 2) currentPage = 4;
-                if (currentMainTab == 3) currentPage = 5;
+                if (currentMainTab == 1) currentPage = 5;
+                if (currentMainTab == 2) currentPage = 6;
+                if (currentMainTab == 3) currentPage = 7;
                 menuSelection = 0; 
                 renderMenu();
             }
@@ -775,9 +785,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             } else {
                 currentMainTab = Math.min(3, currentMainTab + 1);
                 if (currentMainTab == 0) currentPage = 1;
-                if (currentMainTab == 1) currentPage = 3;
-                if (currentMainTab == 2) currentPage = 4;
-                if (currentMainTab == 3) currentPage = 5;
+                if (currentMainTab == 1) currentPage = 5;
+                if (currentMainTab == 2) currentPage = 6;
+                if (currentMainTab == 3) currentPage = 7;
                 menuSelection = 0; 
                 renderMenu();
             }
@@ -879,39 +889,60 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         RTLProfile p = recipeManager.getCurrentProfile(); 
         int sel = menuSelection; 
         
-        if (currentPage == 1) {
-            switch(sel) {
-                case 0: recipeManager.setCurrentSlot(recipeManager.getCurrentSlot() + dir); break;
-                case 1: /* Handled by NamingMode intercept */ break;
-                case 2: p.lutIndex = (p.lutIndex + dir + recipeManager.getRecipePaths().size()) % recipeManager.getRecipePaths().size(); break;
-                case 3: p.opacity = Math.max(0, Math.min(100, p.opacity + (dir * 10))); break;
-                case 4: p.grain = Math.max(0, Math.min(5, p.grain + dir)); break;
-                case 5: p.grainSize = Math.max(0, Math.min(2, p.grainSize + dir)); break;
-                case 6: p.rollOff = Math.max(0, Math.min(5, p.rollOff + dir)); break;
-                case 7: p.vignette = Math.max(0, Math.min(5, p.vignette + dir)); break;
+        if (currentMainTab == 0) {
+            if (currentPage == 1) {
+                switch(sel) {
+                    case 0: recipeManager.setCurrentSlot(recipeManager.getCurrentSlot() + dir); break;
+                    case 1: /* Handled by NamingMode intercept */ break;
+                    case 2: p.lutIndex = (p.lutIndex + dir + recipeManager.getRecipePaths().size()) % recipeManager.getRecipePaths().size(); break;
+                    case 3: p.opacity = Math.max(0, Math.min(100, p.opacity + (dir * 10))); break;
+                    case 4: p.grain = Math.max(0, Math.min(5, p.grain + dir)); break;
+                    case 5: p.grainSize = Math.max(0, Math.min(2, p.grainSize + dir)); break;
+                    case 6: p.rollOff = Math.max(0, Math.min(5, p.rollOff + dir)); break;
+                    case 7: p.vignette = Math.max(0, Math.min(5, p.vignette + dir)); break;
+                }
+            } else if (currentPage == 2) {
+                String[] wbLabels = {"AUTO", "DAY", "SHD", "CLD", "INC", "FLR"};
+                String[] droLabels = {"OFF", "AUTO", "LV1", "LV2", "LV3", "LV4", "LV5"};
+                
+                switch(sel) {
+                    case 0: 
+                        int wbi = java.util.Arrays.asList(wbLabels).indexOf(p.whiteBalance); 
+                        if (wbi == -1) wbi = 0;
+                        p.whiteBalance = wbLabels[(wbi + dir + wbLabels.length) % wbLabels.length]; 
+                        break;
+                    case 1: p.wbShift = Math.max(-7, Math.min(7, p.wbShift + dir)); break;
+                    case 2: p.wbShiftGM = Math.max(-7, Math.min(7, p.wbShiftGM + dir)); break;
+                    case 3: 
+                        int droi = java.util.Arrays.asList(droLabels).indexOf(p.dro); 
+                        if (droi == -1) droi = 0;
+                        p.dro = droLabels[(droi + dir + droLabels.length) % droLabels.length]; 
+                        break;
+                    case 4: p.contrast = Math.max(-3, Math.min(3, p.contrast + dir)); break;
+                    case 5: p.saturation = Math.max(-16, Math.min(16, p.saturation + dir)); break;
+                    case 6: p.sharpness = Math.max(-3, Math.min(3, p.sharpness + dir)); break;
+                }
+            } else if (currentPage == 3) {
+                switch(sel) {
+                    case 0: p.colorDepthRed = Math.max(-7, Math.min(7, p.colorDepthRed + dir)); break;
+                    case 1: p.colorDepthGreen = Math.max(-7, Math.min(7, p.colorDepthGreen + dir)); break;
+                    case 2: p.colorDepthBlue = Math.max(-7, Math.min(7, p.colorDepthBlue + dir)); break;
+                    case 3: p.colorDepthCyan = Math.max(-7, Math.min(7, p.colorDepthCyan + dir)); break;
+                    case 4: p.colorDepthMagenta = Math.max(-7, Math.min(7, p.colorDepthMagenta + dir)); break;
+                    case 5: p.colorDepthYellow = Math.max(-7, Math.min(7, p.colorDepthYellow + dir)); break;
+                }
+            } else if (currentPage == 4) {
+                String[] cmLabels = {"standard", "vivid", "portrait", "landscape", "mono", "sunset", "sepia"};
+                String[] peLabels = {"off", "toy-camera", "pop-color", "posterization", "retro-photo", "soft-high-key", "part-color", "rough-mono", "soft-focus", "hdr-art", "richtone-mono", "miniature", "illust", "watercolor"};
+                String[] toneLabels = {"normal", "cool", "warm", "green", "magenta"};
+                switch(sel) {
+                    case 0: int cmi = java.util.Arrays.asList(cmLabels).indexOf(p.colorMode != null ? p.colorMode.toLowerCase() : "standard"); if (cmi == -1) cmi = 0; p.colorMode = cmLabels[(cmi + dir + cmLabels.length) % cmLabels.length]; break;
+                    case 1: int pei = java.util.Arrays.asList(peLabels).indexOf(p.pictureEffect != null ? p.pictureEffect.toLowerCase() : "off"); if (pei == -1) pei = 0; p.pictureEffect = peLabels[(pei + dir + peLabels.length) % peLabels.length]; break;
+                    case 2: int ti = java.util.Arrays.asList(toneLabels).indexOf(p.peToyCameraTone != null ? p.peToyCameraTone.toLowerCase() : "normal"); if (ti == -1) ti = 0; p.peToyCameraTone = toneLabels[(ti + dir + toneLabels.length) % toneLabels.length]; break;
+                    case 3: p.vignetteHardware = Math.max(-16, Math.min(16, p.vignetteHardware + dir)); break;
+                }
             }
-        } else if (currentPage == 2) {
-            String[] wbLabels = {"AUTO", "DAY", "SHD", "CLD", "INC", "FLR"};
-            String[] droLabels = {"OFF", "AUTO", "LV1", "LV2", "LV3", "LV4", "LV5"};
-            
-            switch(sel) {
-                case 0: 
-                    int wbi = java.util.Arrays.asList(wbLabels).indexOf(p.whiteBalance); 
-                    if (wbi == -1) wbi = 0;
-                    p.whiteBalance = wbLabels[(wbi + dir + wbLabels.length) % wbLabels.length]; 
-                    break;
-                case 1: p.wbShift = Math.max(-7, Math.min(7, p.wbShift + dir)); break;
-                case 2: p.wbShiftGM = Math.max(-7, Math.min(7, p.wbShiftGM + dir)); break;
-                case 3: 
-                    int droi = java.util.Arrays.asList(droLabels).indexOf(p.dro); 
-                    if (droi == -1) droi = 0;
-                    p.dro = droLabels[(droi + dir + droLabels.length) % droLabels.length]; 
-                    break;
-                case 4: p.contrast = Math.max(-3, Math.min(3, p.contrast + dir)); break;
-                case 5: p.saturation = Math.max(-3, Math.min(3, p.saturation + dir)); break;
-                case 6: p.sharpness = Math.max(-3, Math.min(3, p.sharpness + dir)); break;
-            }
-        } else if (currentPage == 3) {
+        } else if (currentPage == 5) {
             switch(sel) {
                 case 0: recipeManager.setQualityIndex(recipeManager.getQualityIndex() + dir); break;
                 case 1: 
@@ -936,7 +967,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         renderMenu(); 
         recipeManager.savePreferences(); 
         uiHandler.removeCallbacks(applySettingsRunnable); 
-        uiHandler.postDelayed(applySettingsRunnable, 400);
+        uiHandler.postDelayed(applySettingsRunnable, 100);
     }
 
     private void autoEquipMatchingLens(float hwFocal) {
@@ -1100,6 +1131,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         RTLProfile prof = recipeManager.getCurrentProfile(); 
         Camera.Parameters p = c.getParameters();
         
+        // 1. Color Mode & White Balance
+        if (p.get("color-mode") != null) p.set("color-mode", prof.colorMode != null ? prof.colorMode : "standard");
+        
         String wb = "auto";
         if ("DAY".equals(prof.whiteBalance)) wb = "daylight"; 
         else if ("SHD".equals(prof.whiteBalance)) wb = "shade"; 
@@ -1109,24 +1143,42 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         
         p.setWhiteBalance(wb);
         
+        if (p.get("white-balance-shift-mode") != null) p.set("white-balance-shift-mode", (prof.wbShift != 0 || prof.wbShiftGM != 0) ? "true" : "false");
+        if (p.get("white-balance-shift-lb") != null) p.set("white-balance-shift-lb", String.valueOf(prof.wbShift)); 
+        if (p.get("white-balance-shift-cc") != null) p.set("white-balance-shift-cc", String.valueOf(prof.wbShiftGM));
+
+        // 2. Dynamic Range & Base Tones
         if (p.get("dro-mode") != null) {
             if ("OFF".equals(prof.dro)) p.set("dro-mode", "off"); 
             else if ("AUTO".equals(prof.dro)) p.set("dro-mode", "auto"); 
-            else if (prof.dro.startsWith("LV")) { 
+            else if (prof.dro != null && prof.dro.startsWith("LV")) { 
                 p.set("dro-mode", "on"); 
                 try { p.set("dro-level", Integer.parseInt(prof.dro.replace("LV", ""))); } catch(Exception e) {}
             }
         } else if (p.get("sony-dro") != null) {
-            p.set("sony-dro", prof.dro.toLowerCase());
+            p.set("sony-dro", prof.dro != null ? prof.dro.toLowerCase() : "off");
         }
         
         if (p.get("contrast") != null) p.set("contrast", String.valueOf(prof.contrast)); 
         if (p.get("saturation") != null) p.set("saturation", String.valueOf(prof.saturation)); 
         if (p.get("sharpness") != null) p.set("sharpness", String.valueOf(prof.sharpness));
-        
-        if (p.get("white-balance-shift-mode") != null) p.set("white-balance-shift-mode", (prof.wbShift != 0 || prof.wbShiftGM != 0) ? "true" : "false");
-        if (p.get("white-balance-shift-lb") != null) p.set("white-balance-shift-lb", String.valueOf(prof.wbShift)); 
-        if (p.get("white-balance-shift-cc") != null) p.set("white-balance-shift-cc", String.valueOf(prof.wbShiftGM));
+
+        // 3. The 6-Axis Matrix
+        if (p.get("color-depth-red") != null) p.set("color-depth-red", String.valueOf(prof.colorDepthRed));
+        if (p.get("color-depth-green") != null) p.set("color-depth-green", String.valueOf(prof.colorDepthGreen));
+        if (p.get("color-depth-blue") != null) p.set("color-depth-blue", String.valueOf(prof.colorDepthBlue));
+        if (p.get("color-depth-cyan") != null) p.set("color-depth-cyan", String.valueOf(prof.colorDepthCyan));
+        if (p.get("color-depth-magenta") != null) p.set("color-depth-magenta", String.valueOf(prof.colorDepthMagenta));
+        if (p.get("color-depth-yellow") != null) p.set("color-depth-yellow", String.valueOf(prof.colorDepthYellow));
+
+        // 4. Experimental Optics (Effects & Vignette)
+        if (p.get("picture-effect") != null) {
+            p.set("picture-effect", prof.pictureEffect != null ? prof.pictureEffect : "off");
+            if ("toy-camera".equals(prof.pictureEffect)) {
+                p.set("pe-toy-camera-effect", prof.peToyCameraTone != null ? prof.peToyCameraTone : "normal");
+                p.set("pe-toy-camera-tuning", String.valueOf(prof.vignetteHardware)); 
+            }
+        }
         
         try { c.setParameters(p); } catch (Exception e) {}
     }
@@ -1165,11 +1217,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         tvTabNetwork.setTextColor(currentMainTab == 2 ? Color.rgb(230, 50, 15) : Color.GRAY);
         tvTabSupport.setTextColor(currentMainTab == 3 ? Color.rgb(230, 50, 15) : Color.GRAY); // <-- New highlight rule
         
-        if (currentPage == 1) tvMenuSubtitle.setText("Recipe Base (Page 1/2)");
-        else if (currentPage == 2) tvMenuSubtitle.setText("Color & Tone (Page 2/2)");
-        else if (currentPage == 3) tvMenuSubtitle.setText("Global Settings");
-        else if (currentPage == 4) tvMenuSubtitle.setText("Web Dashboard Server");
-        else if (currentPage == 5) tvMenuSubtitle.setText("Resources & Community"); // <-- New subtitle
+        if (currentPage == 1) tvMenuSubtitle.setText("Software Engine (Page 1/4)");
+        else if (currentPage == 2) tvMenuSubtitle.setText("Standard Tone (Page 2/4)");
+        else if (currentPage == 3) tvMenuSubtitle.setText("6-Axis Color Matrix (Page 3/4)");
+        else if (currentPage == 4) tvMenuSubtitle.setText("Experimental Optics (Page 4/4)");
+        else if (currentPage == 5) tvMenuSubtitle.setText("Global Settings");
+        else if (currentPage == 6) tvMenuSubtitle.setText("Web Dashboard Server");
+        else if (currentPage == 7) tvMenuSubtitle.setText("Resources & Community");
 
         // Hide all rows initially
         for (int i = 0; i < 8; i++) menuRows[i].setVisibility(View.GONE);
@@ -1177,7 +1231,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
         // --- NEW SUPPORT TAB LOGIC ---
         // If we are on the Support tab, show the QR screen and skip building the rows!
-        if (currentPage == 5) {
+        if (currentPage == 7) {
             supportTabContainer.setVisibility(View.VISIBLE);
             currentItemCount = 0;
             return; 
@@ -1190,67 +1244,86 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         String[] sizeLabels = {"SMALL", "MED", "LARGE"};
         String[] stepLabels = {"-3", "-2", "-1", "0", "+1", "+2", "+3"};
 
-        if (currentPage == 1) { 
-            itemCount = 8; // Now 8 items!
-            String[] rLabels = {"Recipe Slot", "Profile Name", "LUT", "Opacity", "Grain Amount", "Grain Size", "Highlight Roll", "Vignette"};
-            
-            // --- ARCADE NAMING RENDER LOGIC ---
-            String rawName = p.profileName;
-            if (rawName == null) rawName = "";
-            while (rawName.length() < 8) rawName += " ";
-            if (rawName.length() > 8) rawName = rawName.substring(0, 8);
-            
-            String displayHtmlName = rawName;
-            
-            if (isNamingMode && menuSelection == 1) {
-                StringBuilder sb = new StringBuilder();
-                for (int i = 0; i < 8; i++) {
-                    char c = rawName.charAt(i);
-                    String cStr = (c == ' ') ? "&nbsp;" : String.valueOf(c);
-                    if (i == nameCursorPos) {
-                        sb.append("<font color='#00FFFF'><u>").append(cStr).append("</u></font>");
-                    } else {
-                        sb.append(cStr);
+        if (currentMainTab == 0) {
+            if (currentPage == 1) { 
+                itemCount = 8; // Now 8 items!
+                String[] rLabels = {"Recipe Slot", "Profile Name", "LUT", "Opacity", "Grain Amount", "Grain Size", "Highlight Roll", "Vignette"};
+                
+                // --- ARCADE NAMING RENDER LOGIC ---
+                String rawName = p.profileName;
+                if (rawName == null) rawName = "";
+                while (rawName.length() < 8) rawName += " ";
+                if (rawName.length() > 8) rawName = rawName.substring(0, 8);
+                
+                String displayHtmlName = rawName;
+                
+                if (isNamingMode && menuSelection == 1) {
+                    StringBuilder sb = new StringBuilder();
+                    for (int i = 0; i < 8; i++) {
+                        char c = rawName.charAt(i);
+                        String cStr = (c == ' ') ? "&nbsp;" : String.valueOf(c);
+                        if (i == nameCursorPos) {
+                            sb.append("<font color='#00FFFF'><u>").append(cStr).append("</u></font>");
+                        } else {
+                            sb.append(cStr);
+                        }
                     }
+                    displayHtmlName = sb.toString();
                 }
-                displayHtmlName = sb.toString();
-            }
 
-            String[] rValues = { 
-                String.valueOf(recipeManager.getCurrentSlot() + 1), 
-                displayHtmlName, 
-                recipeManager.getRecipeNames().get(p.lutIndex), 
-                p.opacity + "%", 
-                amtLabels[Math.max(0, Math.min(5, p.grain))], 
-                sizeLabels[Math.max(0, Math.min(2, p.grainSize))], 
-                amtLabels[Math.max(0, Math.min(5, p.rollOff))], 
-                amtLabels[Math.max(0, Math.min(5, p.vignette))] 
-            };
-            
-            for (int i = 0; i < 8; i++) { 
-                menuLabels[i].setText(rLabels[i]); 
-                if (i == 1 && (isNamingMode || displayHtmlName.contains("&nbsp;"))) {
-                    // Render the HTML for the Arcade UI spacing/coloring
-                    menuValues[i].setText(android.text.Html.fromHtml(rValues[i]));
-                } else {
-                    menuValues[i].setText(rValues[i].trim()); 
+                String[] rValues = { 
+                    String.valueOf(recipeManager.getCurrentSlot() + 1), 
+                    displayHtmlName, 
+                    recipeManager.getRecipeNames().get(p.lutIndex), 
+                    p.opacity + "%", 
+                    amtLabels[Math.max(0, Math.min(5, p.grain))], 
+                    sizeLabels[Math.max(0, Math.min(2, p.grainSize))], 
+                    amtLabels[Math.max(0, Math.min(5, p.rollOff))], 
+                    amtLabels[Math.max(0, Math.min(5, p.vignette))] 
+                };
+                
+                for (int i = 0; i < 8; i++) { 
+                    menuLabels[i].setText(rLabels[i]); 
+                    if (i == 1 && (isNamingMode || displayHtmlName.contains("&nbsp;"))) {
+                        // Render the HTML for the Arcade UI spacing/coloring
+                        menuValues[i].setText(android.text.Html.fromHtml(rValues[i]));
+                    } else {
+                        menuValues[i].setText(rValues[i].trim()); 
+                    }
+                    menuRows[i].setVisibility(View.VISIBLE); 
                 }
-                menuRows[i].setVisibility(View.VISIBLE); 
+            } else if (currentPage == 2) {
+                itemCount = 7;
+                String[] cLabels = {"White Balance", "WB Shift (A-B)", "WB Shift (G-M)", "DRO", "Contrast", "Saturation", "Sharpness"};
+                String abStr = p.wbShift == 0 ? "0" : (p.wbShift < 0 ? "B" + Math.abs(p.wbShift) : "A" + p.wbShift);
+                String gmStr = p.wbShiftGM == 0 ? "0" : (p.wbShiftGM < 0 ? "M" + Math.abs(p.wbShiftGM) : "G" + p.wbShiftGM);
+                String[] cValues = { p.whiteBalance, abStr, gmStr, p.dro, String.format("%+d", p.contrast), String.format("%+d", p.saturation), String.format("%+d", p.sharpness) };
+                for (int i = 0; i < 7; i++) { menuLabels[i].setText(cLabels[i]); menuValues[i].setText(cValues[i]); menuRows[i].setVisibility(View.VISIBLE); }
+            } else if (currentPage == 3) {
+                itemCount = 6;
+                String[] mLabels = {"Red Depth", "Green Depth", "Blue Depth", "Cyan Depth", "Magenta Depth", "Yellow Depth"};
+                String[] mValues = { 
+                    String.format("%+d", p.colorDepthRed), String.format("%+d", p.colorDepthGreen), 
+                    String.format("%+d", p.colorDepthBlue), String.format("%+d", p.colorDepthCyan), 
+                    String.format("%+d", p.colorDepthMagenta), String.format("%+d", p.colorDepthYellow) 
+                };
+                for (int i = 0; i < 6; i++) { menuLabels[i].setText(mLabels[i]); menuValues[i].setText(mValues[i]); menuRows[i].setVisibility(View.VISIBLE); }
+            } else if (currentPage == 4) {
+                itemCount = 4;
+                String[] eLabels = {"Color Mode", "Picture Effect", "Toy Cam Tone", "HW Vignette"};
+                String colorModeStr = p.colorMode != null ? p.colorMode.toUpperCase() : "STANDARD";
+                String picEffStr = p.pictureEffect != null ? p.pictureEffect.toUpperCase() : "OFF";
+                String toneStr = p.peToyCameraTone != null ? p.peToyCameraTone.toUpperCase() : "NORMAL";
+                String[] eValues = { colorModeStr, picEffStr, toneStr, String.format("%+d", p.vignetteHardware) };
+                for (int i = 0; i < 4; i++) { menuLabels[i].setText(eLabels[i]); menuValues[i].setText(eValues[i]); menuRows[i].setVisibility(View.VISIBLE); }
             }
-        } else if (currentPage == 2) {
-            itemCount = 7;
-            String[] cLabels = {"White Balance", "WB Shift (A-B)", "WB Shift (G-M)", "DRO", "Contrast", "Saturation", "Sharpness"};
-            String abStr = p.wbShift == 0 ? "0" : (p.wbShift < 0 ? "B" + Math.abs(p.wbShift) : "A" + p.wbShift);
-            String gmStr = p.wbShiftGM == 0 ? "0" : (p.wbShiftGM < 0 ? "M" + Math.abs(p.wbShiftGM) : "G" + p.wbShiftGM);
-            String[] cValues = { p.whiteBalance, abStr, gmStr, p.dro, stepLabels[Math.max(0, Math.min(6, p.contrast + 3))], stepLabels[Math.max(0, Math.min(6, p.saturation + 3))], stepLabels[Math.max(0, Math.min(6, p.sharpness + 3))] };
-            for (int i = 0; i < 7; i++) { menuLabels[i].setText(cLabels[i]); menuValues[i].setText(cValues[i]); menuRows[i].setVisibility(View.VISIBLE); }
-        } else if (currentPage == 3) {
+        } else if (currentPage == 5) {
             itemCount = 6;
             String[] qLabels = {"1/4 RES", "HALF RES", "FULL RES"};
             String[] gLabels = {"Global Resolution", "Base Scene", "Manual Focus Meter", "Anamorphic Crop", "Rule of Thirds Grid", "JPEG Quality"};
             String[] gValues = { qLabels[recipeManager.getQualityIndex()], scn, prefShowFocusMeter ? "ON" : "OFF", prefShowCinemaMattes ? "ON" : "OFF", prefShowGridLines ? "ON" : "OFF", String.valueOf(prefJpegQuality) };
             for (int i = 0; i < 6; i++) { menuLabels[i].setText(gLabels[i]); menuValues[i].setText(gValues[i]); menuRows[i].setVisibility(View.VISIBLE); }
-        } else if (currentPage == 4) {
+        } else if (currentPage == 6) {
             itemCount = 3;
             String[] cLabels = {"Camera Hotspot", "Home Wi-Fi", "Stop Networking"};
             String[] cValues = { hotspotStatus, wifiStatus, "" };
@@ -1848,7 +1921,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             public void run() {
                 if (menuSelection == 0) hotspotStatus = status;
                 else if (menuSelection == 1) wifiStatus = status;
-                if (isMenuOpen && currentPage == 4) renderMenu(); 
+                if (isMenuOpen && currentPage == 6) renderMenu(); 
             }
         });
     }
