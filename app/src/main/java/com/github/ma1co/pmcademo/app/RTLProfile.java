@@ -34,6 +34,10 @@ public class RTLProfile {
     public int mixGreenRed = 0;  // Gold Green
     public int mixBlueGreen = 0; // Deep Teal
 
+    // -- ADVANCED MATRIX TOGGLE --
+    public boolean isMatrixAdvanced = false;
+    public int[] advMatrix = {1024, 0, 0,  0, 1024, 0,  0, 0, 1024};
+
     // PHASE 5: EFFECTS & HACKS
     public String proColorMode = "off";
     public String pictureEffect = "off";

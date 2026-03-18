@@ -878,10 +878,20 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     case 6: p.wbShiftGM = Math.max(-7, Math.min(7, p.wbShiftGM + dir)); break;
                 }
             } else if (currentPage == 3) { // 3. CHANNEL MIXER
-                switch(sel) {
-                    case 0: p.mixRedBlue = Math.max(-200, Math.min(200, p.mixRedBlue + (dir * 10))); break;
-                    case 1: p.mixGreenRed = Math.max(-200, Math.min(200, p.mixGreenRed + (dir * 10))); break;
-                    case 2: p.mixBlueGreen = Math.max(-200, Math.min(200, p.mixBlueGreen + (dir * 10))); break;
+                if (sel == 0) {
+                    p.isMatrixAdvanced = !p.isMatrixAdvanced;
+                    // UX Protection: If they toggle to Advanced while on row 3, 
+                    // bump their cursor up to row 1 so it doesn't get lost in hidden rows.
+                    if (p.isMatrixAdvanced && menuSelection > 1) menuSelection = 1; 
+                } else if (!p.isMatrixAdvanced) { // SIMPLE MODE SLIDERS
+                    switch(sel) {
+                        case 1: p.mixRedBlue = Math.max(-500, Math.min(500, p.mixRedBlue + (dir * 25))); break;
+                        case 2: p.mixGreenRed = Math.max(-500, Math.min(500, p.mixGreenRed + (dir * 25))); break;
+                        case 3: p.mixBlueGreen = Math.max(-500, Math.min(500, p.mixBlueGreen + (dir * 25))); break;
+                    }
+                } else if (p.isMatrixAdvanced && sel == 1) {
+                    // This is the [ENTER] Edit row. Turning the dial here does nothing.
+                    // We will catch the ENTER keypress in Phase 2.
                 }
             } else if (currentPage == 4) { // 4. PRO BASE & 6-AXIS
                 switch(sel) {
@@ -1205,13 +1215,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         renderMenu(); 
     }
 
-    // --- 3. THE MENU RENDERING (Clear Titles) ---
+    // --- 3. THE MENU RENDERING (Dependencies Visualized & Dynamic Rows) ---
     private void renderMenu() {
         String scn = "UNKNOWN";
         if (cameraManager != null && cameraManager.getCamera() != null) {
             try { scn = cameraManager.getCamera().getParameters().getSceneMode().toUpperCase(); } catch(Exception e) {}
         }
 
+        // TABS
         tvTabRTL.setBackgroundColor(menuSelection == -2 && currentMainTab == 0 ? Color.rgb(230, 50, 15) : Color.TRANSPARENT);
         tvTabSettings.setBackgroundColor(menuSelection == -2 && currentMainTab == 1 ? Color.rgb(230, 50, 15) : Color.TRANSPARENT);
         tvTabNetwork.setBackgroundColor(menuSelection == -2 && currentMainTab == 2 ? Color.rgb(230, 50, 15) : Color.TRANSPARENT);
@@ -1221,6 +1232,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         tvTabNetwork.setTextColor(currentMainTab == 2 ? Color.WHITE : Color.GRAY);
         tvTabSupport.setTextColor(currentMainTab == 3 ? Color.WHITE : Color.GRAY);
 
+        // SUBTITLE
         tvMenuSubtitle.setBackgroundColor(menuSelection == -1 ? Color.rgb(230, 50, 15) : Color.TRANSPARENT);
         if (currentPage == 1) tvMenuSubtitle.setText("1. [SW] Look & Textures");
         else if (currentPage == 2) tvMenuSubtitle.setText("2. [HW] Tone & Style");
@@ -1276,10 +1288,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 String[] rValues = { (p.colorMode != null ? p.colorMode : "STANDARD").toUpperCase(), String.format("%+d", p.contrast), String.format("%+d", p.saturation), String.format("%+d", p.sharpness), String.format("%+d", p.sharpnessGain), abStr, gmStr };
                 for (int i = 0; i < 7; i++) { menuLabels[i].setText(rLabels[i]); menuValues[i].setText(rValues[i]); menuRows[i].setVisibility(View.VISIBLE); }
             } else if (currentPage == 3) {
-                itemCount = 3;
-                String[] rLabels = {"Mix: Cine Red", "Mix: Gold Green", "Mix: Deep Teal"};
-                String[] rValues = { String.format("%+d", p.mixRedBlue), String.format("%+d", p.mixGreenRed), String.format("%+d", p.mixBlueGreen) };
-                for (int i = 0; i < 3; i++) { menuLabels[i].setText(rLabels[i]); menuValues[i].setText(rValues[i]); menuRows[i].setVisibility(View.VISIBLE); }
+                if (!p.isMatrixAdvanced) {
+                    itemCount = 4;
+                    String[] rLabels = {"Matrix Mode", "Mix: Cine Red", "Mix: Gold Green", "Mix: Deep Teal"};
+                    String[] rValues = {"[ SIMPLE ]", String.format("%+d", p.mixRedBlue), String.format("%+d", p.mixGreenRed), String.format("%+d", p.mixBlueGreen)};
+                    for (int i = 0; i < 4; i++) { menuLabels[i].setText(rLabels[i]); menuValues[i].setText(rValues[i]); menuRows[i].setVisibility(View.VISIBLE); }
+                } else {
+                    itemCount = 2;
+                    String[] rLabels = {"Matrix Mode", "[ENTER] Edit 9-Point Grid"};
+                    String[] rValues = {"[ ADVANCED ]", ">>>"};
+                    for (int i = 0; i < 2; i++) { menuLabels[i].setText(rLabels[i]); menuValues[i].setText(rValues[i]); menuRows[i].setVisibility(View.VISIBLE); }
+                }
             } else if (currentPage == 4) {
                 itemCount = 7;
                 String[] rLabels = {"Pro Color Base", "Red Depth", "Green Depth", "Blue Depth", "Cyan Depth", "Magenta Depth", "Yellow Depth"};
