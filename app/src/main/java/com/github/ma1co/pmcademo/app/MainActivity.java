@@ -1212,15 +1212,27 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             p.set("color-depth-yellow", String.valueOf(prof.colorDepthYellow));
         }
 
+        // --- SMART ROUTING CHANNEL MIXER ---
         if (p.get("rgb-matrix-mode") != null) {
-            boolean isMixing = (prof.mixRedBlue != 0 || prof.mixGreenRed != 0 || prof.mixBlueGreen != 0);
-            if (!isMixing) {
-                p.set("rgb-matrix-mode", "false");
-                p.set("rgb-matrix", "1024,0,0, 0,1024,0, 0,0,1024"); 
+            if (!prof.isMatrixAdvanced) {
+                // SIMPLE MODE: Use the 3 sliders and force 1024 diagonals
+                boolean isMixing = (prof.mixRedBlue != 0 || prof.mixGreenRed != 0 || prof.mixBlueGreen != 0);
+                if (!isMixing) {
+                    p.set("rgb-matrix-mode", "false");
+                    p.set("rgb-matrix", "1024,0,0, 0,1024,0, 0,0,1024"); 
+                } else {
+                    p.set("rgb-matrix-mode", "true");
+                    String mStr = String.format("1024,0,%d, %d,1024,0, 0,%d,1024", 
+                                    prof.mixRedBlue, prof.mixGreenRed, prof.mixBlueGreen);
+                    p.set("rgb-matrix", mStr);
+                }
             } else {
+                // ADVANCED MODE: Send the live 9-point HUD array!
                 p.set("rgb-matrix-mode", "true");
-                String mStr = String.format("1024,0,%d, %d,1024,0, 0,%d,1024", 
-                                prof.mixRedBlue, prof.mixGreenRed, prof.mixBlueGreen);
+                String mStr = String.format("%d,%d,%d,%d,%d,%d,%d,%d,%d",
+                    prof.advMatrix[0], prof.advMatrix[1], prof.advMatrix[2],
+                    prof.advMatrix[3], prof.advMatrix[4], prof.advMatrix[5],
+                    prof.advMatrix[6], prof.advMatrix[7], prof.advMatrix[8]);
                 p.set("rgb-matrix", mStr);
             }
         }
@@ -1919,6 +1931,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     
     private void updateMainHUD() {
         if (cameraManager == null || cameraManager.getCamera() == null) return;
+        
+        // --- PREVENT UI OVERLAP DURING HUD EDIT ---
+        if (isMatrixEditMode) {
+            setHUDVisibility(View.GONE);
+            if (focusMeter != null) focusMeter.setVisibility(View.GONE);
+            if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.GONE);
+            return; // Skip drawing the normal UI!
+        }
+        
         Camera c = cameraManager.getCamera(); 
         Camera.Parameters p = c.getParameters(); 
         CameraEx.ParametersModifier pm = cameraManager.getCameraEx().createParametersModifier(p);
