@@ -1725,7 +1725,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         for (int i = 0; i < itemCount; i++) {
             boolean isActive = true;
             
-            // Check if the Effect Tweaker has parameters to adjust
+            // Page 3: Effect Tweaker Dependencies
             if (currentMainTab == 0 && currentPage == 3 && i == 1) {
                 String eff = p.pictureEffect != null ? p.pictureEffect : "off";
                 isActive = ("toy-camera".equals(eff) || "soft-focus".equals(eff) || "hdr-art".equals(eff) || "illust".equals(eff) || "watercolor".equals(eff) || "part-color".equals(eff) || "miniature".equals(eff));
