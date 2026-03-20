@@ -352,4 +352,3 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
 
     return JNI_TRUE;
 }
-}
