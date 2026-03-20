@@ -145,7 +145,11 @@ public class RecipeManager {
                   .append(p.vignetteHardware).append(",") // 22
                   .append(p.softFocusLevel).append(",") // 23
                   .append(p.shadingRed).append(",") // 24
-                  .append(p.shadingBlue).append("\n"); // 25
+                  .append(p.shadingBlue).append(",") // 25
+                  
+                  // --- NEW: Fuji-Style Chrome Effects ---
+                  .append(p.colorChrome).append(",") // 26
+                  .append(p.chromeBlue).append("\n"); // 27
             }
             fos.write(sb.toString().getBytes()); 
             fos.flush(); 
@@ -232,6 +236,12 @@ public class RecipeManager {
                                 p.shadingRed = Integer.parseInt(parts[24]);
                                 p.shadingBlue = Integer.parseInt(parts[25]);
                             }
+                            
+                            // --- NEW: Fuji-Style Chrome Effects ---
+                            if (parts.length >= 28) {
+                                p.colorChrome = Integer.parseInt(parts[26]);
+                                p.chromeBlue = Integer.parseInt(parts[27]);
+                            }
                         }
                     }
                 }
@@ -239,5 +249,4 @@ public class RecipeManager {
             } catch (Exception e) {}
         }
     } 
-
 }

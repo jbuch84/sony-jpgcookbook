@@ -43,6 +43,11 @@ public class RTLProfile {
     public int shadingBlue = 0;
     public int sharpnessGain = 0;
 
+    // --- NEW: Fuji-Style Post-Processing Effects ---
+    // 0 = OFF | 1 = WEAK | 2 = STRONG
+    public int colorChrome = 0; 
+    public int chromeBlue = 0;
+
     public RTLProfile(int slotIndex) {
         this.profileName = "RECIPE " + (slotIndex + 1);
     }
