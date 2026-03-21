@@ -167,7 +167,9 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     
     unsigned char* row_buf = (unsigned char*)malloc(row_stride);
     JSAMPROW row_pointer[1];
-    uint32_t master_seed = 98765;
+    // --- FIXED: DYNAMIC SEED ---
+    // Uses the exact millisecond the photo was taken so grain is 100% unique every frame
+    uint32_t master_seed = (uint32_t)(start_time & 0xFFFFFFFF);
 
     int map[256]; 
     int lutMax = nativeLutSize - 1; 

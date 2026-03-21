@@ -1006,25 +1006,22 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 }
                 else if (sel == 2) p.softFocusLevel = Math.max(1, Math.min(3, p.softFocusLevel + dir));
                 
-            } else if (currentPage == 4) { // 4. LUTS & TEXTURES (SW)
+            } else if (currentPage == 4) { // 4. LUTS & TEXTURES
                 if (sel == 0) {
-                     p.lutIndex = Math.max(0, Math.min(recipeManager.getRecipeNames().size() - 1, p.lutIndex + dir));
-                     triggerLutPreload();
+                    if (dir > 0 && p.lutIndex < recipeManager.getRecipeNames().size() - 1) p.lutIndex++;
+                    else if (dir < 0 && p.lutIndex > 0) p.lutIndex--;
                 }
-                else if (sel == 1) p.opacity = Math.max(0, Math.min(100, p.opacity + (dir * 5)));
+                else if (sel == 1) {
+                    if (p.lutIndex > 0) p.opacity = Math.max(10, Math.min(100, p.opacity + (dir * 10)));
+                }
                 else if (sel == 2) p.grain = Math.max(0, Math.min(5, p.grain + dir));
-                else if (sel == 3) p.grainSize = Math.max(0, Math.min(2, p.grainSize + dir));
-                else if (sel == 4) p.rollOff = Math.max(0, Math.min(5, p.rollOff + dir));
-                else if (sel == 5) p.vignette = Math.max(0, Math.min(5, p.vignette + dir));
+                else if (sel == 3) {
+                    if (p.grain > 0) p.grainSize = Math.max(0, Math.min(2, p.grainSize + dir));
+                }
+                else if (sel == 4) p.vignette = Math.max(0, Math.min(5, p.vignette + dir));
                 
-                // --- FIXED: ADDED FUJI CHROME CONTROLS TO D-PAD LOGIC ---
-                else if (sel == 6) p.colorChrome = Math.max(0, Math.min(2, p.colorChrome + dir));
-                else if (sel == 7) p.chromeBlue = Math.max(0, Math.min(2, p.chromeBlue + dir));
-
-                // --- NEW: Analog Physics Controls ---
-                else if (sel == 8) p.shadowToe = (p.shadowToe + dir + 3) % 3;
-                else if (sel == 9) p.subtractiveSat = (p.subtractiveSat + dir + 3) % 3;
-                 else if (sel == 10) p.halation = (p.halation + dir + 3) % 3;
+                // DELETED: All the old sel==6 through sel==10 ghost code!
+                
             } else if (currentPage == 5) { // 5. ANALOG PHYSICS (SW)
                 if (sel == 0) p.rollOff = Math.max(0, Math.min(5, p.rollOff + dir));
                 else if (sel == 1) p.shadowToe = Math.max(0, Math.min(2, p.shadowToe + dir));
@@ -1032,21 +1029,24 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 else if (sel == 3) p.colorChrome = Math.max(0, Math.min(2, p.colorChrome + dir));
                 else if (sel == 4) p.chromeBlue = Math.max(0, Math.min(2, p.chromeBlue + dir));
                 else if (sel == 5) p.halation = Math.max(0, Math.min(2, p.halation + dir));
-            }
-        } else if (currentPage == 6) { // 6. GLOBAL SETTINGS (SHIFTED FROM 5)
-            if (sel == 0) recipeManager.setQualityIndex(Math.max(0, Math.min(2, recipeManager.getQualityIndex() + dir)));
-            else if (sel == 2) prefShowFocusMeter = !prefShowFocusMeter;
-            else if (sel == 3) prefShowCinemaMattes = !prefShowCinemaMattes;
-            else if (sel == 4) prefShowGridLines = !prefShowGridLines;
-            else if (sel == 5) prefJpegQuality = Math.max(60, Math.min(100, prefJpegQuality + (dir * 5)));
-        }
+                
+            } else if (currentPage == 6) { // 6. GLOBAL SETTINGS 
+                if (sel == 0) recipeManager.setQualityIndex(Math.max(0, Math.min(2, recipeManager.getQualityIndex() + dir)));
+                // Note: If you had a sel == 1 here before (like save original RAW), put it back!
+                else if (sel == 2) prefShowFocusMeter = !prefShowFocusMeter;
+                else if (sel == 3) prefShowCinemaMattes = !prefShowCinemaMattes;
+                else if (sel == 4) prefShowGridLines = !prefShowGridLines;
+                else if (sel == 5) prefJpegQuality = Math.max(60, Math.min(100, prefJpegQuality + (dir * 5)));
+                
+            } 
+        } 
         
         renderMenu(); 
         recipeManager.savePreferences(); 
         
         uiHandler.removeCallbacks(applySettingsRunnable); 
         uiHandler.postDelayed(applySettingsRunnable, 300);
-    } 
+    }
 
     private String cycleProMode(String current, int dir) {
         String[] modes = {"off", "pro-standard", "pro-vivid", "pro-portrait"};
