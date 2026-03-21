@@ -2217,7 +2217,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         uiHandler.post(liveUpdater); 
     }
     
-    @@Override 
+    @Override 
     protected void onPause() { 
         super.onPause(); 
         uiHandler.removeCallbacksAndMessages(null); 
