@@ -256,22 +256,22 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
                 int abs_cr = cr_p < 0 ? -cr_p : cr_p;
                 int sat_p = abs_cb + abs_cr;
 
-                // --- FEATHERED COLOR CHROME ---
+                // --- FEATHERED COLOR CHROME (WIDER TAPER) ---
                 if (colorChrome > 0 && sat_p > 15) {
                     int drop = ((sat_p - 15) * colorChrome) >> 2;
-                    if (targetY > 190) {
-                        int fade = 255 - ((targetY - 190) * 4);
+                    if (targetY > 160) {
+                        int fade = 255 - ((targetY - 160) * 3); // Smooth 85-step fade
                         if (fade < 0) fade = 0;
                         drop = (drop * fade) >> 8;
                     }
                     targetY -= drop;
                 }
                 
-                // --- FEATHERED CHROME FX BLUE ---
+                // --- FEATHERED CHROME FX BLUE (WIDER TAPER) ---
                 if (chromeBlue > 0 && cb_p > 5 && cr_p < 25) {
                     int drop = (cb_p * chromeBlue) >> 1; 
-                    if (targetY > 190) {
-                        int fade = 255 - ((targetY - 190) * 4); 
+                    if (targetY > 160) {
+                        int fade = 255 - ((targetY - 160) * 3); 
                         if (fade < 0) fade = 0;
                         drop = (drop * fade) >> 8; 
                     }
@@ -373,22 +373,22 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
                 int abs_cr = cr >= 0 ? cr : -cr;
                 int sat = abs_cb + abs_cr;
 
-                // --- FEATHERED COLOR CHROME ---
+                // --- FEATHERED COLOR CHROME (WIDER TAPER) ---
                 if (colorChrome > 0 && sat > 15) {
                     int drop = ((sat - 15) * colorChrome) >> 2;
-                    if (outY > 190) {
-                        int fade = 255 - ((outY - 190) * 4);
+                    if (outY > 160) {
+                        int fade = 255 - ((outY - 160) * 3);
                         if (fade < 0) fade = 0;
                         drop = (drop * fade) >> 8;
                     }
                     outY -= drop;
                 }
                 
-                // --- FEATHERED CHROME FX BLUE ---
+                // --- FEATHERED CHROME FX BLUE (WIDER TAPER) ---
                 if (chromeBlue > 0 && cb > 5 && cr < 25) {
                     int drop = (cb * chromeBlue) >> 1; 
-                    if (outY > 190) {
-                        int fade = 255 - ((outY - 190) * 4); 
+                    if (outY > 160) {
+                        int fade = 255 - ((outY - 160) * 3); 
                         if (fade < 0) fade = 0;
                         drop = (drop * fade) >> 8; 
                     }
@@ -398,7 +398,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
                         drop = (drop * fade) >> 8;
                     }
                     outY -= drop;
-                    cr -= (drop >> 1); // <--- RESTORED: This pushes the dark blue towards Fuji Teal
+                    cr -= (drop >> 1); // Keeps the teal shift, but fades it naturally too!
                 }
                 
                 if (subtractiveSat > 0 && sat > 20) {
