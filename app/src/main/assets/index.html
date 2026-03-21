@@ -478,7 +478,72 @@
             document.getElementById('lb-img').style.transform = `rotate(${rotation}deg) scale(${scale})`;
         }
 
-        function downloadCurrent() { triggerDownload(viewName); }
+        async function downloadCurrent() {
+            // If it hasn't been rotated, just download the raw file normally
+            if (rotation === 0 || rotation % 360 === 0) {
+                triggerDownload(viewName);
+                return;
+            }
+
+            // Grab the save button to show a loading state 
+            // (Canvas rendering a large JPEG might take a second on mobile)
+            const buttons = document.querySelectorAll('#lightbox .lb-tools button');
+            const saveBtn = buttons[1]; 
+            const originalText = saveBtn.innerText;
+            saveBtn.innerText = "PROCESSING...";
+            saveBtn.disabled = true;
+
+            try {
+                // 1. Load the full image into memory
+                const img = new Image();
+                img.crossOrigin = "Anonymous"; 
+                await new Promise((resolve, reject) => {
+                    img.onload = resolve;
+                    img.onerror = reject;
+                    img.src = `/full/?folder=${mode}&name=${viewName}`;
+                });
+
+                // 2. Create an invisible Canvas
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+
+                // 3. Swap width/height if rotated 90 or 270 degrees
+                const isVertical = (rotation / 90) % 2 !== 0;
+                if (isVertical) {
+                    canvas.width = img.height;
+                    canvas.height = img.width;
+                } else {
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                }
+
+                // 4. Move to center, rotate, and draw the image
+                ctx.translate(canvas.width / 2, canvas.height / 2);
+                ctx.rotate((rotation * Math.PI) / 180);
+                ctx.drawImage(img, -img.width / 2, -img.height / 2);
+
+                // 5. Convert back to a JPEG file and trigger the download
+                canvas.toBlob((blob) => {
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = viewName; // Keeps original filename
+                    link.click();
+                    URL.revokeObjectURL(url);
+                    
+                    // Reset button
+                    saveBtn.innerText = originalText;
+                    saveBtn.disabled = false;
+                }, 'image/jpeg', 0.95);
+
+            } catch (err) {
+                console.error("Failed to rotate and save:", err);
+                // Fallback to original file if canvas fails for any reason
+                saveBtn.innerText = originalText;
+                saveBtn.disabled = false;
+                triggerDownload(viewName); 
+            }
+        }
 
         async function downloadSelected() {
             const list = Array.from(selected);
