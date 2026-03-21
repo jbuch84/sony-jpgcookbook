@@ -168,10 +168,6 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     unsigned char* row_buf = (unsigned char*)malloc(row_stride);
     JSAMPROW row_pointer[1];
 
-    // --- FIXED: DYNAMIC SEED, CAN ACTUAL DELETE I BELIEVE---
-    // Uses the exact millisecond the photo was taken so grain is 100% unique every frame
-    uint32_t master_seed = (uint32_t)(start_time & 0xFFFFFFFF);
-
     int map[256]; 
     int lutMax = nativeLutSize - 1; 
     int lutSize2 = nativeLutSize * nativeLutSize;
@@ -193,7 +189,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     if (seed == 0) seed = 98765; // Failsafe: Xorshift math breaks if seed is exactly 0
     int prev_noise = 0;
 
-    // --- 5. MAIN PROCESSING LOOP ---
+    // --- MAIN PROCESSING LOOP ---
     while (cinfo_d.output_scanline < cinfo_d.output_height) {
         int abs_y = cinfo_d.output_scanline;
         row_pointer[0] = row_buf;
@@ -202,7 +198,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
 
         if (use_rgb_path) {
             // ==========================================
-            // PATH A: RGB + LUT + ANALOG PHYSICS (Fully Restored)
+            // PATH A: RGB + LUT + ANALOG PHYSICS 
             // ==========================================
             for (int x = 0; x < row_stride; x += 3) {
                 int r = row_buf[x], g = row_buf[x+1], b = row_buf[x+2];
@@ -253,21 +249,38 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
                     targetY = targetY - ((targetY - 200) * (targetY - 200) * rollOff) / 11000;
                 }
                 
-                // 3. Fuji Chrome & Subtractive Density (Safeties Restored)
+                // 3. Fuji Chrome & Subtractive Density (Feathered Highlights)
                 int cb_p = ((-38 * outR - 74 * outG + 112 * outB) >> 8); 
                 int cr_p = ((112 * outR - 94 * outG - 18 * outB) >> 8);
                 int abs_cb = cb_p < 0 ? -cb_p : cb_p;
                 int abs_cr = cr_p < 0 ? -cr_p : cr_p;
                 int sat_p = abs_cb + abs_cr;
 
-                if (colorChrome > 0 && targetY > 60 && sat_p > 30) {
-                    int factor = (sat_p * colorChrome * targetY) >> 15;
-                    if (factor > 40) factor = 40; // RESTORED CAP
-                    targetY -= factor;
+                // --- FEATHERED COLOR CHROME ---
+                if (colorChrome > 0 && sat_p > 15) {
+                    int drop = ((sat_p - 15) * colorChrome) >> 2;
+                    if (targetY > 190) {
+                        int fade = 255 - ((targetY - 190) * 4);
+                        if (fade < 0) fade = 0;
+                        drop = (drop * fade) >> 8;
+                    }
+                    targetY -= drop;
                 }
                 
-                if (chromeBlue > 0 && cb_p > 15 && cr_p < 20 && targetY > 80) { // RESTORED PURPLE REJECTION
-                    targetY -= (cb_p * chromeBlue) >> 2;
+                // --- FEATHERED CHROME FX BLUE ---
+                if (chromeBlue > 0 && cb_p > 5 && cr_p < 25) {
+                    int drop = (cb_p * chromeBlue) >> 1; 
+                    if (targetY > 190) {
+                        int fade = 255 - ((targetY - 190) * 4); 
+                        if (fade < 0) fade = 0;
+                        drop = (drop * fade) >> 8; 
+                    }
+                    if (targetY < 50) {
+                        int fade = (targetY * 5); 
+                        if (fade > 255) fade = 255;
+                        drop = (drop * fade) >> 8;
+                    }
+                    targetY -= drop;
                 }
                 
                 if (subtractiveSat > 0 && sat_p > 20) {
@@ -306,7 +319,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
                     outB = (outB * v_m) >> 8;
                 }
                 
-                // 6. Organic Grain (Shadow Taper Restored)
+                // 6. Organic Grain 
                 if (grain > 0) {
                     int raw_noise = (fast_rand(&seed) & 0xFF) - 128;
                     int noise = (grainSize == 0) ? raw_noise : (grainSize == 1) ? (raw_noise + prev_noise) >> 1 : (raw_noise + prev_noise * 2) / 3;
@@ -326,7 +339,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
             }
         } else {
             // ==========================================
-            // PATH B: THE YUV EXPRESSWAY (Fully Restored)
+            // PATH B: THE YUV EXPRESSWAY
             // ==========================================
             for (int x = 0, px = 0; x < row_stride; x += 3, ++px) {
                 int oldY = row_buf[x];
@@ -353,23 +366,38 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
                     outY = (outY * v_m) >> 8;
                 }
                 
-                // 4. Fuji Chrome & Density (Safeties Restored)
+                // 4. Fuji Chrome & Density (Feathered Highlights)
                 int cb = row_buf[x+1] - 128;
                 int cr = row_buf[x+2] - 128;
                 int abs_cb = cb >= 0 ? cb : -cb;
                 int abs_cr = cr >= 0 ? cr : -cr;
                 int sat = abs_cb + abs_cr;
 
-                if (colorChrome > 0 && outY > 60 && sat > 30) {
-                    int factor = (sat * colorChrome * outY) >> 15;
-                    if (factor > 40) factor = 40; // RESTORED CAP
-                    outY -= factor;
+                // --- FEATHERED COLOR CHROME ---
+                if (colorChrome > 0 && sat > 15) {
+                    int drop = ((sat - 15) * colorChrome) >> 2;
+                    if (outY > 190) {
+                        int fade = 255 - ((outY - 190) * 4);
+                        if (fade < 0) fade = 0;
+                        drop = (drop * fade) >> 8;
+                    }
+                    outY -= drop;
                 }
                 
-                if (chromeBlue > 0 && cb > 15 && cr < 20 && outY > 80) { // RESTORED PURPLE REJECTION
-                    int blueDensity = (cb * chromeBlue) >> 2;
-                    outY -= blueDensity;
-                    cr -= (blueDensity >> 1); // RESTORED PROPER HUE SHIFT
+                // --- FEATHERED CHROME FX BLUE ---
+                if (chromeBlue > 0 && cb > 5 && cr < 25) {
+                    int drop = (cb * chromeBlue) >> 1; 
+                    if (outY > 190) {
+                        int fade = 255 - ((outY - 190) * 4); 
+                        if (fade < 0) fade = 0;
+                        drop = (drop * fade) >> 8; 
+                    }
+                    if (outY < 50) {
+                        int fade = (outY * 5); 
+                        if (fade > 255) fade = 255;
+                        drop = (drop * fade) >> 8;
+                    }
+                    outY -= drop;
                 }
                 
                 if (subtractiveSat > 0 && sat > 20) {
@@ -401,7 +429,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
                 row_buf[x+1] = (uint8_t)CLAMP(128+cb); 
                 row_buf[x+2] = (uint8_t)CLAMP(128+cr);
                 
-                // 6. Organic Grain (Shadow Taper Restored)
+                // 6. Organic Grain
                 if (grain > 0) {
                     int raw_noise = (fast_rand(&seed) & 0xFF) - 128;
                     int noise = (grainSize == 0) ? raw_noise : (grainSize == 1) ? (raw_noise + prev_noise) >> 1 : (raw_noise + prev_noise * 2) / 3;
