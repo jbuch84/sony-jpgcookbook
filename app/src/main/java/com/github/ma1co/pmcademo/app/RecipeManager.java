@@ -74,15 +74,9 @@ public class RecipeManager {
     }
 
     private File getLutDir() {
-        // Aggressively hunt for the SD card across all Sony camera models
-        String[] possibleMounts = {
-            Environment.getExternalStorageDirectory().getAbsolutePath(),
-            "/storage/sdcard0", // Default for older/basic models
-            "/storage/sdcard1", // Actual SD card on A7S II, A6500, etc.
-            "/mnt/sdcard",
-            "/mnt/extSdCard",
-            "/storage/extSdCard"
-        };
+        // Now using our centralized dynamic pathing
+        return Filepaths.getLutDir();
+    }
         
         String[] possibleFolders = { "LUTS", "luts", "Luts", "LUTs" };
 

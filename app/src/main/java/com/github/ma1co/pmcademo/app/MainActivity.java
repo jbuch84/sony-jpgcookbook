@@ -244,7 +244,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         
-        File thumbsDir = new File(Environment.getExternalStorageDirectory(), "DCIM/.thumbnails");
+        FFile thumbsDir = new File(Filepaths.getDcimDir(), ".thumbnails");
         if (!thumbsDir.exists()) thumbsDir.mkdirs();
 
         SharedPreferences prefs = getSharedPreferences("JPEG.CAM_Prefs", MODE_PRIVATE);
@@ -289,31 +289,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             @Override public void onProcessFinished(String res) { isProcessing = false; runOnUiThread(new Runnable() { public void run() { if (tvTopStatus != null) { tvTopStatus.setTextColor(Color.WHITE); } updateMainHUD(); } }); }
         });
         
-        String baseDcim = Environment.getExternalStorageDirectory().getAbsolutePath() + "/DCIM";
-        String[] possibleRoots = { Environment.getExternalStorageDirectory().getAbsolutePath(), "/mnt/sdcard", "/storage/sdcard0", "/sdcard" };
-        
-        File targetDir = new File(baseDcim, "100MSDCF"); 
-        long newestDate = 0;
-
-        for (String r : possibleRoots) {
-            File dcim = new File(r + "/DCIM");
-            if (dcim.exists() && dcim.isDirectory()) {
-                File[] subDirs = dcim.listFiles();
-                if (subDirs != null) {
-                    for (File sub : subDirs) {
-                        if (sub.isDirectory() && sub.getName().endsWith("MSDCF")) {
-                            if (sub.lastModified() > newestDate) {
-                                newestDate = sub.lastModified();
-                                targetDir = sub;
-                            }
-                        }
-                    }
-                }
-                break;
-            }
-        }
-        
-        mScanner = new SonyFileScanner(targetDir.getAbsolutePath(), new SonyFileScanner.ScannerCallback() {
+        mScanner = new SonyFileScanner(new SonyFileScanner.ScannerCallback() {
             @Override 
             public boolean isReadyToProcess() { 
                 RTLProfile p = recipeManager.getCurrentProfile();
@@ -361,9 +337,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 
                 long currentSize = f.length();
                 if (currentSize > 0 && currentSize == lastSize[0]) {
-                    File outDir = new File(Environment.getExternalStorageDirectory(), "GRADED");
+                    File outDir = Filepaths.getGradedDir();
                     mProcessor.processJpeg(path, outDir.getAbsolutePath(), recipeManager.getQualityIndex(), prefJpegQuality, recipeManager.getCurrentProfile());
-                } else if (retries[0] < 30) { 
+                } else if (retries[0] < 30) {
                     lastSize[0] = currentSize;
                     retries[0]++;
                     uiHandler.postDelayed(this, 300);
@@ -1967,7 +1943,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         tvSupportTitle.setTypeface(Typeface.DEFAULT_BOLD);
         
         TextView tvSupportSub = new TextView(this);
-        tvSupportSub.setText("by JPG Cookbook");
+        tvSupportSub.setText("by JPEG Cookbook");
         tvSupportSub.setTextColor(Color.LTGRAY);
         tvSupportSub.setTextSize(12);
         tvSupportSub.setPadding(0, 0, 0, 20);
@@ -2587,7 +2563,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     private void enterPlayback() {
         playbackFiles.clear();
-        File dir = new File(Environment.getExternalStorageDirectory(), "GRADED");
+        File dir = Filepaths.getGradedDir();
         if (dir.exists() && dir.listFiles() != null) {
             for (File f : dir.listFiles()) {
                 if (f.getName().toLowerCase().endsWith(".jpg")) playbackFiles.add(f);
