@@ -157,7 +157,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     long long cx = cinfo_d.output_width / 2; 
     long long cy_center = cinfo_d.output_height / 2;
     long long max_dist_sq = cx*cx + cy_center*cy_center;
-    long long vig_coef = ((long long)(((vignette * 20) * 256) / 100) << 24) / (max_dist_sq > 0 ? max_dist_sq : 1);
+    long long vig_coef = get_vig_coef(vignette, max_dist_sq);
     int opac_mapped = (opacity * 256) / 100;
     
     unsigned char* row_buf = (unsigned char*)malloc(row_stride);
@@ -172,10 +172,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
 
     uint8_t rolloff_lut[256];
     if (!use_rgb_path) {
-        for (int i = 0; i < 256; i++) {
-            int r_t = (i > 200) ? i - ((i - 200) * (i - 200) * (rollOff * 20)) / 11000 : i;
-            rolloff_lut[i] = (uint8_t)(r_t < 0 ? 0 : (r_t > 255 ? 255 : r_t));
-        }
+        generate_rolloff_lut(rolloff_lut, rollOff);
     }
 
     // --- CONTINUOUS GRAIN SETUP ---
