@@ -55,7 +55,12 @@ inline void process_pixel_rgb(
     int s_chrome = colorChrome * 40; 
     int s_blue   = chromeBlue * 40;
     int s_sat    = subtractiveSat * 40;
+    
+    // VARIANCE COMPENSATION: Averaging random noise reduces its visual intensity.
+    // We dynamically boost the gain to keep the visual intensity perfectly flat across sizes.
     int s_grain  = grain * 20;
+    if (grainSize == 1) s_grain = (s_grain * 3) >> 1; // Boost by 1.5x (Counteracts 30% loss)
+    if (grainSize == 2) s_grain = (s_grain * 5) >> 2; // Boost by 1.25x (Counteracts 20% loss)
 
     int r = r_ref, g = g_ref, b = b_ref;
     int outR = r, outG = g, outB = b;
@@ -96,7 +101,6 @@ inline void process_pixel_rgb(
         if (targetY < lift) targetY += ((lift - targetY) * (lift - targetY)) / (shadowToe == 1 ? 140 : 180);
     }
 
-    // Roll-off: Fixed to match Path B logic
     if (rollOff > 0 && targetY > 200) targetY -= ((targetY - 200) * (targetY - 200) * s_roll) / 11000;
     
     int cb_p = ((-38 * outR - 74 * outG + 112 * outB) >> 8); 
@@ -104,18 +108,24 @@ inline void process_pixel_rgb(
     int sat_p = (cb_p < 0 ? -cb_p : cb_p) + (cr_p < 0 ? -cr_p : cr_p);
 
     if (s_chrome > 0 && sat_p > 15) {
-        int drop = ((sat_p - 15) * s_chrome) >> 7; // GENTLE SHIFT
+        int drop = ((sat_p - 15) * s_chrome) >> 8; 
         if (targetY > 160) { int fade = 255 - ((targetY - 160) * 3); if (fade < 0) fade = 0; drop = (drop * fade) >> 8; }
+        if (drop > (targetY >> 2)) drop = targetY >> 2; 
         targetY -= drop;
     }
+    
     if (s_blue > 0 && cb_p > 5 && cr_p < 25) {
-        int drop = (cb_p * s_blue) >> 6; // GENTLE SHIFT
+        int drop = (cb_p * s_blue) >> 7; 
         if (targetY > 160) { int fade = 255 - ((targetY - 160) * 3); if (fade < 0) fade = 0; drop = (drop * fade) >> 8; }
+        if (targetY < 50) { int fade = (targetY * 5); if (fade > 255) fade = 255; drop = (drop * fade) >> 8; }
+        if (drop > (targetY >> 2)) drop = targetY >> 2; 
         targetY -= drop;
     }
+    
     if (s_sat > 0 && sat_p > 20) {
-        int density = ((sat_p - 20) * s_sat) >> 8; // GENTLE SHIFT
+        int density = ((sat_p - 20) * s_sat) >> 8; 
         if (targetY > 200) { int fade = 255 - ((targetY - 200) * 4); if (fade < 0) fade = 0; density = (density * fade) >> 8; }
+        if (density > (targetY >> 2)) density = targetY >> 2; 
         targetY -= density;
     }
     
@@ -125,9 +135,13 @@ inline void process_pixel_rgb(
         outR = (outR * r256) >> 8; outG = (outG * r256) >> 8; outB = (outB * r256) >> 8;
     }
     
-    if (halation > 0 && targetY > 230) {
-        int push = ((targetY - 230) * (targetY - 230) * (halation == 1 ? 1 : 2)) >> 4; 
-        outR += push; outB -= (push >> 1); 
+    // --- FIX: Strict Clipping Halation ---
+    // Ignores clouds entirely. ONLY applies to extremely bright/clipped pixels (>245 luma)
+    if (halation > 0 && targetY > 245) {
+        int push = (targetY - 245) * (halation == 1 ? 3 : 6); 
+        outR += push;         // Push red (safely clamps at 255)
+        outG -= (push >> 2);  // Gentle pull on green
+        outB -= (push >> 1);  // Stronger pull on blue for authentic warmth
     }
 
     if (vignette > 0) {
@@ -139,10 +153,35 @@ inline void process_pixel_rgb(
     
     if (s_grain > 0) {
         int raw_noise = (fast_rand(&seed) & 0xFF) - 128;
+        int noise;
+        
+        if (grainSize == 0) {
+            noise = raw_noise;
+        } else {
+            // FRACTAL BROWNIAN MOTION (FBM) APPROXIMATION
+            // Generates larger background clumps using the avalanche hash
+            uint32_t block_x = (grainSize == 1) ? (px >> 1) : ((px * 21845) >> 16);
+            uint32_t block_y = (grainSize == 1) ? (abs_y >> 1) : ((abs_y * 21845) >> 16);
+            
+            uint32_t h = seed + block_x * 1274126177U + block_y * 2654435761U;
+            h = (h ^ (h >> 13)) * 374761393U;
+            int block_noise = (h & 0xFF) - 128;
+            
+            // Mix fine static over the big clumps to soften them organically
+            if (grainSize == 1) {
+                noise = (raw_noise + block_noise) >> 1; // 50% fine, 50% big
+            } else {
+                noise = (raw_noise + block_noise * 3) >> 2; // 25% fine, 75% big
+            }
+        }
+        
         int mask = (targetY < 128) ? targetY : 255 - targetY; 
-        int gv = (raw_noise * mask * s_grain) >> 15; 
+        if (targetY < 64) mask = (mask * targetY) >> 6; 
+        
+        int gv = (noise * mask * s_grain) >> 15; 
         outR += gv; outG += gv; outB += gv; 
     }
+    
     r_ref = (uint8_t)CLAMP(outR); g_ref = (uint8_t)CLAMP(outG); b_ref = (uint8_t)CLAMP(outB);
 }
 
@@ -160,7 +199,12 @@ inline void process_pixel_yuv(
     int s_chrome = colorChrome * 40;
     int s_blue   = chromeBlue * 40;
     int s_sat    = subtractiveSat * 40;
+    
+    // VARIANCE COMPENSATION: Averaging random noise reduces its visual intensity.
+    // We dynamically boost the gain to keep the visual intensity perfectly flat across sizes.
     int s_grain  = grain * 20;
+    if (grainSize == 1) s_grain = (s_grain * 3) >> 1; // Boost by 1.5x (Counteracts 30% loss)
+    if (grainSize == 2) s_grain = (s_grain * 5) >> 2; // Boost by 1.25x (Counteracts 20% loss)
 
     int oldY = y_ref;
     int outY = oldY;
@@ -181,36 +225,72 @@ inline void process_pixel_yuv(
     int sat = (cb >= 0 ? cb : -cb) + (cr >= 0 ? cr : -cr);
 
     if (s_chrome > 0 && sat > 15) {
-        int drop = ((sat - 15) * s_chrome) >> 7;
+        int drop = ((sat - 15) * s_chrome) >> 8;
         if (outY > 160) { int fade = 255 - ((outY - 160) * 3); if (fade < 0) fade = 0; drop = (drop * fade) >> 8; }
+        if (drop > (outY >> 2)) drop = outY >> 2; 
         outY -= drop;
     }
+    
     if (s_blue > 0 && cb > 5 && cr < 25) {
-        int drop = (cb * s_blue) >> 6;
+        int drop = (cb * s_blue) >> 7;
         if (outY > 160) { int fade = 255 - ((outY - 160) * 3); if (fade < 0) fade = 0; drop = (drop * fade) >> 8; }
+        if (outY < 50) { int fade = (outY * 5); if (fade > 255) fade = 255; drop = (drop * fade) >> 8; }
+        if (drop > (outY >> 2)) drop = outY >> 2; 
         outY -= drop; cr -= (drop >> 1);
     }
+    
     if (s_sat > 0 && sat > 20) {
         int density = ((sat - 20) * s_sat) >> 8;
         if (outY > 200) { int fade = 255 - ((outY - 200) * 4); if (fade < 0) fade = 0; density = (density * fade) >> 8; }
+        if (density > (outY >> 2)) density = outY >> 2; 
         outY -= density;
     }
     
     if (outY < 8) outY = 8;
-    if (halation > 0 && outY > 230) {
-        int push = ((outY - 230) * (outY - 230) * (halation == 1 ? 1 : 2)) >> 4; 
-        cr += push; cb -= (push >> 1); 
+    
+    // --- FIX: Strict Clipping Halation ---
+    if (halation > 0 && outY > 245) {
+        int push = (outY - 245) * (halation == 1 ? 3 : 6); 
+        cr += push;        
+        cb -= (push >> 1); 
     }
+
     if (oldY != outY) {
         int r256 = (outY * 256) / (oldY == 0 ? 1 : oldY);
         cb = (cb * r256) >> 8; cr = (cr * r256) >> 8;
     }
     cb_ref = (uint8_t)CLAMP(128+cb); cr_ref = (uint8_t)CLAMP(128+cr);
-    if (s_grain > 0) {
+    
+    if (s_grain > 0) { 
         int raw_noise = (fast_rand(&seed) & 0xFF) - 128;
+        int noise;
+        
+        if (grainSize == 0) {
+            noise = raw_noise;
+        } else {
+            // FRACTAL BROWNIAN MOTION (FBM) APPROXIMATION
+            // Generates larger background clumps using the avalanche hash
+            uint32_t block_x = (grainSize == 1) ? (px >> 1) : ((px * 21845) >> 16);
+            uint32_t block_y = (grainSize == 1) ? (abs_y >> 1) : ((abs_y * 21845) >> 16);
+            
+            uint32_t h = seed + block_x * 1274126177U + block_y * 2654435761U;
+            h = (h ^ (h >> 13)) * 374761393U;
+            int block_noise = (h & 0xFF) - 128;
+            
+            // Mix fine static over the big clumps to soften them organically
+            if (grainSize == 1) {
+                noise = (raw_noise + block_noise) >> 1; // 50% fine, 50% big
+            } else {
+                noise = (raw_noise + block_noise * 3) >> 2; // 25% fine, 75% big
+            }
+        }
+        
         int mask = (outY < 128) ? outY : 255 - outY; 
-        outY += (raw_noise * mask * s_grain) >> 15; 
+        if (outY < 64) mask = (mask * outY) >> 6;
+        
+        outY += (noise * mask * s_grain) >> 15; 
     }
+    
     y_ref = (uint8_t)CLAMP(outY);
 }
 
