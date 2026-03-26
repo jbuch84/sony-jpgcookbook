@@ -246,7 +246,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         super.onCreate(savedInstanceState);
 
         String model = android.os.Build.MODEL;
-        android.util.Log.d("JPEG.CAM", "HARDWARE ID: " + model); // <--- CHECK THIS IN LOGCAT
+        android.util.Log.e("JPEG.CAM", "HARDWARE ID: " + model); // <--- Forced as an error to bypass Sony's filter
         String uModel = model.toUpperCase();
         
         // 1. Check if it's part of a family that typically HAS a dial
