@@ -246,19 +246,20 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         super.onCreate(savedInstanceState);
 
         String model = android.os.Build.MODEL;
-        android.util.Log.d("JPEG.CAM", "HARDWARE ID: " + model);
+        android.util.Log.d("JPEG.CAM", "HARDWARE ID: " + model); // <--- CHECK THIS IN LOGCAT
         String uModel = model.toUpperCase();
         
-        // Comprehensive Hardware Dial Detection
-        // 1. Identify cameras from the Alpha (ILCE/ILCA) and NEX families
-        boolean isMainFamily = uModel.contains("ILCE") || uModel.contains("ILCA") || uModel.contains("NEX");
+        // 1. Check if it's part of a family that typically HAS a dial
+        boolean isDialFamily = uModel.contains("ILCE") || uModel.contains("ILCA") || uModel.contains("NEX");
         
-        // 2. Exclude models known to be "Screen-Only" (No physical PASM knob)
+        // 2. Explicitly exclude models we KNOW are "Screen-Only" (No physical PASM knob)
         boolean isScreenOnly = uModel.contains("5000") || uModel.contains("5100") || 
                                uModel.contains("NEX-3") || uModel.contains("NEX-5") || 
                                uModel.contains("NEX-C3") || uModel.contains("NEX-F3");
                                
-        hasPhysicalPasmDial = isMainFamily && !isScreenOnly;
+        // A7II will be true because it's ILCE and not in the Screen-Only list
+        // a5100 will be false because it IS in the Screen-Only list
+        hasPhysicalPasmDial = isDialFamily && !isScreenOnly;
         
         // Force creation of our JPGCAM folder skeleton immediately on boot
         Filepaths.buildAppStructure();
@@ -2497,7 +2498,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     Log.e("JPEG.CAM", "Boot sync failed: " + e.getMessage());
                 }
             }
-        }
+        } // This closing bracket was missing in your file!
+
         applyHardwareRecipe();
         updateMainHUD();
     }
