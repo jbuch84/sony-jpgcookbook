@@ -246,47 +246,53 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // --- ULTIMATE HARDWARE DETECTION: PARSE BUILD.PROP DIRECTLY ---
-        realCameraModel = android.os.Build.MODEL;
-        try {
-            java.io.BufferedReader br = new java.io.BufferedReader(new java.io.FileReader("/system/build.prop"));
-            String line;
-            while ((line = br.readLine()) != null) {
-                if (line.contains("ro.product.model=") || 
-                    line.contains("ro.sony.cameraname=") || 
-                    line.toUpperCase().contains("ILCE") || 
-                    line.toUpperCase().contains("NEX")) {
-                    
-                    android.util.Log.e("JPEG.CAM", "FOUND IN BUILD.PROP: " + line);
-                    
-                    if (line.contains("=")) {
-                        String val = line.split("=")[1].trim();
-                        if (val.toUpperCase().contains("ILCE") || val.toUpperCase().contains("NEX") || val.toUpperCase().contains("ILCA")) {
-                            realCameraModel = val;
-                        }
-                    }
+        // --- AUTOMATIC HARDWARE SCANNER ---
+        realCameraModel = "UNKNOWN";
+        
+        // Sony moved the name out of Build.MODEL ("ScalarA") on some firmwares.
+        // It is usually hiding in DEVICE, PRODUCT, or DISPLAY. We check them all.
+        String[] buildProps = {
+            android.os.Build.MODEL,
+            android.os.Build.DEVICE,
+            android.os.Build.PRODUCT,
+            android.os.Build.DISPLAY,
+            android.os.Build.BOARD,
+            android.os.Build.HARDWARE
+        };
+        
+        for (String prop : buildProps) {
+            if (prop != null) {
+                String uProp = prop.toUpperCase();
+                if (uProp.contains("ILCE") || uProp.contains("ILCA") || uProp.contains("NEX")) {
+                    realCameraModel = prop;
+                    break;
                 }
             }
-            br.close();
-        } catch (Exception e) {
-            android.util.Log.e("JPEG.CAM", "Build.prop read failed: " + e.getMessage());
         }
-
+        
+        // Log all of them as errors to bypass Sony's filter so we can see them in logcat
+        android.util.Log.e("JPEG.CAM", "--- SONY HARDWARE SCAN ---");
+        android.util.Log.e("JPEG.CAM", "MODEL: " + android.os.Build.MODEL);
+        android.util.Log.e("JPEG.CAM", "DEVICE: " + android.os.Build.DEVICE);
+        android.util.Log.e("JPEG.CAM", "PRODUCT: " + android.os.Build.PRODUCT);
+        android.util.Log.e("JPEG.CAM", "DISPLAY: " + android.os.Build.DISPLAY);
+        android.util.Log.e("JPEG.CAM", "HARDWARE: " + android.os.Build.HARDWARE);
         android.util.Log.e("JPEG.CAM", "FINAL DECIDED MODEL: " + realCameraModel);
+        
         String uModel = realCameraModel.toUpperCase();
         
-        // 1. Check if it's part of a family that typically HAS a dial
+        // 1. Identify cameras from the Alpha (ILCE/ILCA) and NEX families
         boolean isDialFamily = uModel.contains("ILCE") || uModel.contains("ILCA") || uModel.contains("NEX");
         
-        // 2. Explicitly exclude models we KNOW are "Screen-Only" (No physical PASM knob)
+        // 2. Exclude models known to be "Screen-Only" (No physical PASM knob)
         boolean isScreenOnly = uModel.contains("5000") || uModel.contains("5100") || 
                                uModel.contains("NEX-3") || uModel.contains("NEX-5") || 
                                uModel.contains("NEX-C3") || uModel.contains("NEX-F3") ||
-                               uModel.equals("SCALARA"); 
+                               uModel.equals("UNKNOWN");
                                
         hasPhysicalPasmDial = isDialFamily && !isScreenOnly;
         
-        // Force creation of our JPGCAM folder skeleton immediately on boot
+        // Force creation of our JPEGCAM folder skeleton immediately on boot
         Filepaths.buildAppStructure();
         
         File thumbsDir = new File(Filepaths.getDcimDir(), ".thumbnails");
@@ -522,11 +528,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     }
 
     private float getCircleOfConfusion() {
-        String model = realCameraModel.toUpperCase(); // <--- Uses our extracted name!
+        String model = realCameraModel.toUpperCase();
         if (model.contains("ILCE-7") || model.contains("ILCE-9") || model.contains("ILCE-1") || model.contains("DSC-RX1") || model.contains("ILCA-99")) {
-            return 0.030f; // Full Frame
+            return 0.030f; 
         }
-        return 0.020f; // APS-C
+        return 0.020f; 
     }
     
     private void requestHudUpdate() {
@@ -2213,6 +2219,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     
     @Override 
     public boolean onKeyDown(int k, KeyEvent e) { 
+        // SWALLOW PASM DIAL EVENTS ON A7II TO PREVENT OS CRASH
+        if (k == 624 || k == ScalarInput.ISV_KEY_MODE_DIAL || 
+           (k >= ScalarInput.ISV_KEY_MODE_INVALID && k <= ScalarInput.ISV_KEY_MODE_CUSTOM3)) {
+            if (cameraManager != null) onHardwareStateChanged();
+            return true; 
+        }
+        
         if (isProcessing && (k == ScalarInput.ISV_KEY_S1_1 || k == ScalarInput.ISV_KEY_S1_2 || k == ScalarInput.ISV_KEY_S2)) return true; 
         if (k == ScalarInput.ISV_KEY_PLAY) {
             if (isPlaybackMode) exitPlayback(); 
@@ -2225,6 +2238,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     
     @Override 
     public boolean onKeyUp(int k, KeyEvent e) { 
+        // SWALLOW PASM DIAL EVENTS ON A7II TO PREVENT OS CRASH
+        if (k == 624 || k == ScalarInput.ISV_KEY_MODE_DIAL || 
+           (k >= ScalarInput.ISV_KEY_MODE_INVALID && k <= ScalarInput.ISV_KEY_MODE_CUSTOM3)) {
+            return true; 
+        }
+        
         if (isProcessing && (k == ScalarInput.ISV_KEY_S1_1 || k == ScalarInput.ISV_KEY_S1_2 || k == ScalarInput.ISV_KEY_S2)) return true; 
         if (inputManager != null) return inputManager.handleKeyUp(k, e) || super.onKeyUp(k, e); 
         return super.onKeyUp(k, e);
