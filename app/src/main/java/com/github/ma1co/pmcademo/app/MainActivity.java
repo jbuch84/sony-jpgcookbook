@@ -245,9 +245,19 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        String model = android.os.Build.MODEL;
-        android.util.Log.e("JPEG.CAM", "HARDWARE ID: " + model); // <--- Forced as an error to bypass Sony's filter
-        String uModel = model.toUpperCase();
+        // --- BYPASS SCALARA: GET REAL SONY MODEL NAME ---
+        String realModel = android.os.Build.MODEL;
+        try {
+            Class<?> propClass = Class.forName("android.os.SystemProperties");
+            java.lang.reflect.Method getMethod = propClass.getMethod("get", String.class);
+            String sonyName = (String) getMethod.invoke(null, "ro.sony.cameraname");
+            if (sonyName != null && !sonyName.isEmpty()) {
+                realModel = sonyName;
+            }
+        } catch (Exception e) { }
+        
+        android.util.Log.e("JPEG.CAM", "REAL HARDWARE ID: " + realModel); 
+        String uModel = realModel.toUpperCase();
         
         // 1. Check if it's part of a family that typically HAS a dial
         boolean isDialFamily = uModel.contains("ILCE") || uModel.contains("ILCA") || uModel.contains("NEX");
@@ -255,10 +265,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         // 2. Explicitly exclude models we KNOW are "Screen-Only" (No physical PASM knob)
         boolean isScreenOnly = uModel.contains("5000") || uModel.contains("5100") || 
                                uModel.contains("NEX-3") || uModel.contains("NEX-5") || 
-                               uModel.contains("NEX-C3") || uModel.contains("NEX-F3");
+                               uModel.contains("NEX-C3") || uModel.contains("NEX-F3") ||
+                               uModel.equals("SCALARA"); // Failsafe if reflection is blocked
                                
-        // A7II will be true because it's ILCE and not in the Screen-Only list
-        // a5100 will be false because it IS in the Screen-Only list
         hasPhysicalPasmDial = isDialFamily && !isScreenOnly;
         
         // Force creation of our JPGCAM folder skeleton immediately on boot
