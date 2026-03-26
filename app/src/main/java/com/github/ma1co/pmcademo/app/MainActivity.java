@@ -2514,12 +2514,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         syncHardwareState();
         if (cameraManager != null) {
             hardwareFocalLength = cameraManager.getInitialFocalLength();
-            if (hardwareFocalLength > 0.0f) {
-                isNativeLensAttached = true;
-                autoEquipMatchingLens(hardwareFocalLength);
-            } else {
-                isNativeLensAttached = false;
-            }
+            isNativeLensAttached = (hardwareFocalLength > 0.0f);
+            if (isNativeLensAttached) autoEquipMatchingLens(hardwareFocalLength);
 
             if (cameraManager.getCamera() != null) {
                 try {
@@ -2527,17 +2523,29 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     Camera.Parameters p = c.getParameters();
                     cachedIsManualFocus = "manual".equals(p.getFocusMode());
                     
-                    // UNIVERSAL SENSOR CHECK: Full Frame cameras support APS-C cropping.
+                    // UNIVERSAL SENSOR DETECTION: Full frame cameras support APS-C crop mode switching.
                     isFullFrame = "true".equals(p.get("apsc-mode-supported"));
-                    android.util.Log.e("JPEG.CAM", "Universal Sensor Check. Full Frame: " + isFullFrame);
+                    android.util.Log.e("JPEG.CAM", "Sensor size detected as: " + (isFullFrame ? "FULL FRAME" : "APS-C"));
                 } catch (Exception e) {
                     android.util.Log.e("JPEG.CAM", "Boot sync failed: " + e.getMessage());
                 }
             }
-        } // This closing bracket was missing in your file!
-
+        }
+        
         applyHardwareRecipe();
+        
+        // Do an initial HUD draw
         updateMainHUD();
+        
+        // --- FIRMWARE RACE CONDITION FIX ---
+        // The physical dial takes a moment to report its true position to the OS on boot. 
+        // Force a re-sync 500ms after the app opens to guarantee accuracy.
+        uiHandler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (cameraManager != null) onHardwareStateChanged();
+            }
+        }, 500);
     }
     
     @Override public void onShutterSpeedChanged() { runOnUiThread(new Runnable() { public void run() { requestHudUpdate(); } }); }

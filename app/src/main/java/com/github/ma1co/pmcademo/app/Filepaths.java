@@ -13,8 +13,8 @@ public class Filepaths {
 
     public static List<File> getStorageRoots() {
         ArrayList<File> roots = new ArrayList<File>();
-        roots.add(Environment.getExternalStorageDirectory()); // sdcard0
-        roots.add(new File("/storage/sdcard1"));              // sdcard1
+        roots.add(getStorageRoot());           
+        roots.add(new File("/storage/sdcard1")); 
         roots.add(new File("/mnt/sdcard"));
         roots.add(new File("/storage/extSdCard"));
         return roots;
@@ -40,25 +40,24 @@ public class Filepaths {
         return def;
     }
 
-    // --- SMART DCIM DETECTION ---
-    // Searches all roots for the one currently being used by the camera for photos
+    // --- FIX: RETURN THE EXACT SUBDIRECTORY SO FILEOBSERVER SEES NEW PHOTOS ---
     public static File getDcimDir() {
         for (File root : getStorageRoots()) {
             File dcim = new File(root, "DCIM");
-            // Sony always creates a folder like '100MSDCF' or '100ALPHA' inside DCIM
             if (dcim.exists() && dcim.isDirectory()) {
                 File[] subdirs = dcim.listFiles();
                 if (subdirs != null) {
                     for (File s : subdirs) {
+                        // Return the actual '100MSDCF' folder, NOT the 'DCIM' parent
                         if (s.isDirectory() && (s.getName().contains("MSDCF") || s.getName().contains("ALPHA") || s.getName().contains("SONY"))) {
-                            return dcim; // Found the active photo folder!
+                            return s; 
                         }
                     }
                 }
             }
         }
-        // Failsafe
-        return new File(getStorageRoot(), "DCIM");
+        // Failsafe fallback
+        return new File(getStorageRoot(), "DCIM/100MSDCF"); 
     }
 
     public static File getRecipeDir() { File d = new File(getAppDir(), "RECIPES"); if (!d.exists()) d.mkdirs(); return d; }
