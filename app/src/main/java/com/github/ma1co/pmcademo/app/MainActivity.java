@@ -1966,15 +1966,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         supportTabContainer.setGravity(Gravity.CENTER);
         supportTabContainer.setVisibility(View.GONE); 
 
-        // --- UPDATED: Appending the version number here ---
-        TextView tvSupportSub = new TextView(this);
-        tvSupportSub.setText("by JPEG Cookbook • v" + getAppVersion());
-        tvSupportSub.setTextColor(Color.LTGRAY);
-        tvSupportSub.setTextSize(12);
-        tvSupportSub.setPadding(0, 0, 0, 20);
+        TextView tvSupportTitle = new TextView(this);
+        tvSupportTitle.setText("JPEG.CAM");
+        tvSupportTitle.setTextColor(Color.WHITE);
+        tvSupportTitle.setTextSize(28);
+        tvSupportTitle.setTypeface(Typeface.DEFAULT_BOLD);
         
         TextView tvSupportSub = new TextView(this);
-        tvSupportSub.setText("by JPEG Cookbook");
+        tvSupportSub.setText("by JPEG Cookbook • v" + getAppVersion());
         tvSupportSub.setTextColor(Color.LTGRAY);
         tvSupportSub.setTextSize(12);
         tvSupportSub.setPadding(0, 0, 0, 20);

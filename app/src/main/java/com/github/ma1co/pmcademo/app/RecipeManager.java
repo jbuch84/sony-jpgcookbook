@@ -70,7 +70,7 @@ public class RecipeManager {
 
     public void savePreferences() {
         try {
-            File lutDir = getLutDir();
+            File lutDir = Filepaths.getLutDir();
             if (!lutDir.exists()) lutDir.mkdirs(); 
             File backupFile = new File(lutDir, "RTLBAK.TXT");
             
@@ -131,7 +131,7 @@ public class RecipeManager {
     }
 
     public void loadPreferences() {
-        File backupFile = new File(getLutDir(), "RTLBAK.TXT");
+        File backupFile = new File(Filepaths.getLutDir(), "RTLBAK.TXT");
         if (backupFile.exists()) {
             try {
                 BufferedReader br = new BufferedReader(new FileReader(backupFile));
