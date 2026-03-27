@@ -125,6 +125,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private int calibStep = 0; 
     private float minDistanceInput = 0.3f;
     private String detectedLensName = "Manual Lens";
+
+    private String getAppVersion() {
+        try {
+            // Reaches into the OS to grab the versionName from your build.gradle
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Exception e) {
+            return "Unknown"; // Failsafe
+        }
+    }
     
     private float detectedFocalLength = 50.0f;
     private float detectedMaxAperture = 2.8f;
@@ -1957,11 +1966,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         supportTabContainer.setGravity(Gravity.CENTER);
         supportTabContainer.setVisibility(View.GONE); 
 
-        TextView tvSupportTitle = new TextView(this);
-        tvSupportTitle.setText("JPEG.CAM");
-        tvSupportTitle.setTextColor(Color.WHITE);
-        tvSupportTitle.setTextSize(28);
-        tvSupportTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        // --- UPDATED: Appending the version number here ---
+        TextView tvSupportSub = new TextView(this);
+        tvSupportSub.setText("by JPEG Cookbook • v" + getAppVersion());
+        tvSupportSub.setTextColor(Color.LTGRAY);
+        tvSupportSub.setTextSize(12);
+        tvSupportSub.setPadding(0, 0, 0, 20);
         
         TextView tvSupportSub = new TextView(this);
         tvSupportSub.setText("by JPEG Cookbook");
@@ -2387,13 +2397,22 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private void updateMainHUD() {
         if (cameraManager == null || cameraManager.getCamera() == null) return;
         
+        // --- 1. CLEAN DISPLAY CHECK ---
+        // If the user pressed DISP to hide the HUD, we don't need to do any math.
+        // Just hide everything and immediately return to save CPU.
         if (isHudActive) {
             setHUDVisibility(View.GONE);
             if (focusMeter != null) focusMeter.setVisibility(View.GONE);
             if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.GONE);
             return; 
+        } else {
+            // NORMAL STATE: Explicitly force the HUD to reappear after returning from a menu!
+            // (We will selectively hide things again at the bottom if calibrating)
+            setHUDVisibility(View.VISIBLE);
+            if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.GONE);
         }
         
+        // --- 2. GATHER HARDWARE DATA ---
         Camera c = cameraManager.getCamera(); 
         Camera.Parameters p = c.getParameters(); 
         CameraEx.ParametersModifier pm = cameraManager.getCameraEx().createParametersModifier(p);
@@ -2405,6 +2424,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         String customName = prof.profileName != null ? prof.profileName.trim() : ("RECIPE " + (recipeManager.getCurrentSlot() + 1));
         if (customName.isEmpty()) customName = "RECIPE " + (recipeManager.getCurrentSlot() + 1);
         
+        // --- 3. UPDATE TEXT FIELDS ---
         if (!isProcessing && tvTopStatus != null) {
             tvTopStatus.setText(customName + " [" + displayName + "]\n" + (isReady ? "READY" : "LOADING.."));
             
@@ -2468,6 +2488,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             tvFocusMode.setTextColor(mDialMode == DIAL_MODE_FOCUS ? Color.WHITE : Color.rgb(227, 69, 20));
         }
         
+        // --- 4. UPDATE FOCUS METER ---
         if (focusMeter != null) {
             boolean shouldShow = prefShowFocusMeter && cachedIsManualFocus;
             focusMeter.setVisibility(shouldShow ? View.VISIBLE : View.GONE);
@@ -2478,7 +2499,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 float ratioToFeed = (lensManager != null && lensManager.isCurrentProfileManual() && !isCalibrating) ? virtualFocusRatio : cachedFocusRatio;
                 float apToFeed = (lensManager != null && lensManager.isCurrentProfileManual() && !isCalibrating) ? virtualAperture : cachedAperture;
                 
-                // --- NEW: Pass the dynamic CoC to the Focus Meter ---
                 focusMeter.update(ratioToFeed, apToFeed, focalToUse, isCalibrating, ptsToUse, getCircleOfConfusion());
             }
         }
@@ -2486,6 +2506,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (gridLines != null) gridLines.setVisibility(prefShowGridLines ? View.VISIBLE : View.GONE); 
         if (cinemaMattes != null) cinemaMattes.setVisibility(prefShowCinemaMattes ? View.VISIBLE : View.GONE);
 
+        // --- 5. CALIBRATION OVERRIDES ---
+        // Overrides the "Normal State" visibility if we are currently mapping a lens.
         if (isCalibrating || waitingForProfileChoice) {
             setHUDVisibility(View.GONE);
             if (focusMeter != null) focusMeter.setVisibility(View.VISIBLE);
