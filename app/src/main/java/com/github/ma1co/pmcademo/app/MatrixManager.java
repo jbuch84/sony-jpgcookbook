@@ -28,7 +28,8 @@ public class MatrixManager {
         if (files == null) return;
 
         for (File f : files) {
-            if (f.getName().toLowerCase().endsWith(".json")) {
+            // Changed to look exclusively for our proprietary .mtx files
+            if (f.getName().toLowerCase().endsWith(".mtx")) {
                 loadMatrixFile(f);
             }
         }
@@ -47,7 +48,8 @@ public class MatrixManager {
             int[] values = new int[9];
             for (int i = 0; i < 9; i++) values[i] = arr.getInt(i);
 
-            matrixNames.add(file.getName().replace(".json", "").replace("_", " ").toUpperCase());
+            // Strip the new .mtx extension for clean UI display
+            matrixNames.add(file.getName().replace(".mtx", "").replace("_", " ").toUpperCase());
             matrixValues.add(values);
             matrixNotes.add(json.optString("note", "User defined matrix."));
         } catch (Exception e) {
@@ -55,17 +57,23 @@ public class MatrixManager {
         }
     }
 
-    public void saveMatrix(String name, int[] values, String note) {
+    ppublic void saveMatrix(String name, int[] values, String note) {
         try {
-            JSONObject json = new JSONObject();
-            JSONArray arr = new JSONArray();
-            for (int v : values) arr.put(v);
-            json.put("advMatrix", arr);
-            json.put("note", note);
+            // Bypass Sony's flaky org.json library entirely for writing.
+            // Manually construct the JSON string to guarantee success on API 10.
+            StringBuilder sb = new StringBuilder();
+            sb.append("{\n  \"advMatrix\": [");
+            for (int i = 0; i < values.length; i++) {
+                sb.append(values[i]);
+                if (i < values.length - 1) sb.append(", ");
+            }
+            // Safely escape quotes in the note string just in case
+            sb.append("],\n  \"note\": \"").append(note.replace("\"", "\\\"")).append("\"\n}");
 
-            File file = new File(matrixDir, name.replace(" ", "_") + ".json");
+            // Save as our custom format
+            File file = new File(matrixDir, name.replace(" ", "_") + ".mtx");
             FileOutputStream fos = new FileOutputStream(file);
-            fos.write(json.toString().getBytes("UTF-8"));
+            fos.write(sb.toString().getBytes("UTF-8"));
             fos.close();
         } catch (Exception e) {
             android.util.Log.e("JPEG.CAM", "Save failed: " + e.getMessage());
