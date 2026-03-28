@@ -570,17 +570,19 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (isProcessing) return;
 
         if (isHudActive) {
+            // DIAGNOSTIC LOG: Print the exact selection value when Enter is pressed
+            android.util.Log.e("JPEG.CAM", "Enter pressed. HudMode: " + currentHudMode + " Selection: " + hudSelection);
+
             // --- ON-CAMERA CUSTOM MATRIX SAVER ---
-            if (currentHudMode == 0 && hudSelection == -1) {
-                isNamingMode = !isNamingMode; // Toggle your existing state variable
+            // Relaxing the condition temporarily to see if we can trap it at selection 0 or -1
+            if (currentHudMode == 0 && (hudSelection == -1 || hudSelection == 0)) {
+                isNamingMode = !isNamingMode; 
                 
                 if (isNamingMode) {
-                    // 1st Press: ENTER NAMING MODE
                     matrixNameBuffer = "CUSTOM      ".toCharArray();
-                    nameCursorPos = 6; // Start the cursor right after "CUSTOM "
+                    nameCursorPos = 6; 
                     updateHudUI(); 
                 } else {
-                    // 2nd Press: SAVE AND EXIT NAMING MODE
                     String finalName = new String(matrixNameBuffer).trim();
                     if (finalName.isEmpty()) finalName = "CUSTOM";
                     saveCurrentCustomMatrix(finalName);
