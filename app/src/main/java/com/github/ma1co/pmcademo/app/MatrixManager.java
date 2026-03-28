@@ -57,7 +57,7 @@ public class MatrixManager {
         }
     }
 
-    ppublic void saveMatrix(String name, int[] values, String note) {
+    public void saveMatrix(String name, int[] values, String note) {
         try {
             // Bypass Sony's flaky org.json library entirely for writing.
             // Manually construct the JSON string to guarantee success on API 10.
