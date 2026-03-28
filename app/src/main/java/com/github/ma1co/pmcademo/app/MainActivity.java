@@ -210,7 +210,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     };
     private final String[] MATRIX_PRESET_NOTES = {
         "Identity Matrix. Zero color shift.",
-        "Broadens the yellow spectrum. Pro Tip: If skin looks too yellow, drop R-G to 2%.",
+        "Broadens the yellow spectrum. Pro Tip: If skin looks too yellow, drop R-G to 5%.",
         "Fuji-style vintage teals. Pairs best with an Amber (A2) White Balance shift.",
         "Professional Teal/Orange separation. Uses negative values to 'clean' the Red channel.",
         "High color density. WARNING: May clip highlights. Use -0.7 EV on camera.",
@@ -325,7 +325,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (matrixManager.getCount() == 0) {
             // "Factory Burn": Create the files on the first run only
             matrixManager.saveMatrix("01 STANDARD", new int[]{100, 0, 0, 0, 100, 0, 0, 0, 100}, "Identity Matrix. Zero color shift.");
-            matrixManager.saveMatrix("02 GOLDEN HOUR", new int[]{115, 5, 0, 5, 105, 0, 0, 0, 95}, "Broadens yellow spectrum. Drop R-G to 2% if too yellow.");
+            matrixManager.saveMatrix("02 GOLDEN HOUR", new int[]{115, 5, 0, 5, 105, 0, 0, 0, 95}, "Broadens yellow spectrum. Drop R-G to 5% if too yellow.");
             matrixManager.saveMatrix("03 PNW GREEN", new int[]{95, 0, 0, 0, 110, 5, 0, 15, 105}, "Fuji-style vintage teals. Pairs best with Amber (A2) shift.");
             matrixManager.saveMatrix("04 CINEMATIC", new int[]{110, -10, 0, -5, 100, 10, 0, 5, 115}, "Teal/Orange separation. Uses negative values to clean Reds.");
             matrixManager.saveMatrix("05 BLEACH BYPASS", new int[]{130, 0, 0, 0, 130, 0, 0, 0, 130}, "High density. WARNING: May clip highlights. Use -0.7 EV.");
@@ -706,13 +706,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 handleWbAdjustment(0, 1); 
             } else {
                 hudSelection--;
-                
-                // --- NAVIGATION WRAP LOGIC ---
-                // Matrix mode (0) allows selection to go up to -1 (The Preset Bar)
                 int minIdx = (currentHudMode == 0) ? -1 : 0;
-                
                 if (hudSelection < minIdx) {
-                    // Wrap to the bottom based on how many cells are in the current mode
                     if (currentHudMode == 0) hudSelection = 8;
                     else if (currentHudMode == 1) hudSelection = 5;
                     else if (currentHudMode == 3) hudSelection = 2;
@@ -723,7 +718,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             }
             return;
         }
-        
         if (isProcessing || waitingForProfileChoice) return;
         
         if (isCalibrating) {
@@ -767,24 +761,19 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 handleWbAdjustment(0, -1); 
             } else {
                 hudSelection++;
-                
-                // Determine the max index for the current mode
                 int maxIdx = 0;
                 if (currentHudMode == 0) maxIdx = 8;
                 else if (currentHudMode == 1) maxIdx = 5;
                 else if (currentHudMode == 3) maxIdx = 2;
                 else if (currentHudMode == 4 || currentHudMode == 6) maxIdx = 1;
 
-                // --- NAVIGATION WRAP LOGIC ---
                 if (hudSelection > maxIdx) {
-                    // If Matrix mode, wrap back to the Preset Bar (-1). Others wrap to 0.
                     hudSelection = (currentHudMode == 0) ? -1 : 0;
                 }
                 updateHudUI();
             }
             return;
         }
-        
         if (isProcessing) return;
         
         if (waitingForProfileChoice) {
@@ -1506,14 +1495,21 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             }
             
             // 4. Update Description Tooltip based on selection
-            if (hudSelection != -1) {
+            if (hudSelection == -1) {
+                tooltip = "Select active RGB Matrix (SD Card integration pending)";
+            } else {
                 String[] t = {
                     "Red sensitivity to Red light (Primary - baseline 100)", "Pushes Green light into Red channel (baseline 0)", "Pushes Blue light into Red channel (baseline 0)",
                     "Pushes Red light into Green channel (baseline 0)", "Green sensitivity to Green light (Primary - baseline 100)", "Pushes Blue light into Green channel (baseline 0)",
                     "Pushes Red light into Blue channel (baseline 0)", "Pushes Green light into Blue channel (baseline 0)", "Blue sensitivity to Blue light (Primary - baseline 100)."
                 };
-                tooltip = t[hudSelection];
+                // Safety net: Ensure we never exceed the array length
+                if (hudSelection >= 0 && hudSelection < t.length) {
+                    tooltip = t[hudSelection];
+                }
             }
+            
+            // Safely append the live balance math to whatever tooltip we just generated
             tooltip += "\n" + balText;
 
             for (int i=0; i<9; i++) values[i] = p.advMatrix[i] + "%";
