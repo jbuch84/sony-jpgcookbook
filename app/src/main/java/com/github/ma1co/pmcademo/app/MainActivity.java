@@ -41,7 +41,7 @@ import java.util.List;
 public class MainActivity extends Activity implements SurfaceHolder.Callback, 
     SonyCameraManager.CameraEventListener, InputManager.InputListener, ConnectivityManager.StatusUpdateListener {
 
-    rivate SonyCameraManager cameraManager;
+    private SonyCameraManager cameraManager;
     private InputManager inputManager;
     private RecipeManager recipeManager;
     private MatrixManager matrixManager; // <-- NEW
