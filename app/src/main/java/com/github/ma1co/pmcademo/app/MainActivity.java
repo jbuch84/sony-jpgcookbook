@@ -777,8 +777,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 renderMenu();
             }
             else { 
-                isMenuEditing = !isMenuEditing; 
-                renderMenu(); 
+                // --- NEW: SONY NATIVE ENTER BEHAVIOR ---
+                if (menuSelection == -2) {
+                    // "Pressing ENTER while a tab is highlighted does nothing"
+                    return; 
+                } else if (menuSelection >= 0) {
+                    // "Pressing ENTER on an item selects it... pressing ENTER again confirms"
+                    isMenuEditing = !isMenuEditing; 
+                    renderMenu(); 
+                }
             }
         }
     }
@@ -846,9 +853,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             } else if (isMenuEditing) {
                 handleMenuChange(1);
             } else {
-                menuSelection--;
-                if (menuSelection < -2) {
+                // --- NEW: SONY NATIVE VERTICAL WRAP (UP) ---
+                if (menuSelection == -2) {
+                    // UP from the Tab drops to the BOTTOM of the current page
                     menuSelection = currentItemCount - 1;
+                    if (menuSelection < 0) menuSelection = -2; // Failsafe for empty page
+                } else {
+                    menuSelection--;
+                    // Loop from top item to bottom item (bypassing -1 title bar completely)
+                    if (menuSelection < 0) {
+                        menuSelection = currentItemCount - 1;
+                    }
                 }
                 renderMenu();
             }
@@ -923,9 +938,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             } else if (isMenuEditing) {
                 handleMenuChange(-1);
             } else {
-                menuSelection++;
-                if (menuSelection >= currentItemCount) {
-                    menuSelection = -2;
+                // --- NEW: SONY NATIVE VERTICAL WRAP (DOWN) ---
+                if (menuSelection == -2) {
+                    // DOWN from the Tab drops to the TOP of the current page
+                    menuSelection = 0;
+                    if (currentItemCount == 0) menuSelection = -2; // Failsafe if page is empty
+                } else {
+                    menuSelection++;
+                    // If we scroll past the bottom item, loop back to the top! (Bypassing -1)
+                    if (menuSelection >= currentItemCount) {
+                        menuSelection = 0;
+                    }
                 }
                 renderMenu();
             }
@@ -984,24 +1007,22 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         }
 
         if (isMenuOpen) {
-            if (menuSelection == -2) { // TABS ARE HIGHLIGHTED
-                currentMainTab = (currentMainTab - 1 + 4) % 4;
+            if (menuSelection == -2) { // 1. TAB LEVEL NAVIGATION
+                currentMainTab--;
+                if (currentMainTab < 0) currentMainTab = 3; // Loop back to end
+                
+                // Drop into the first page of the newly selected tab
                 if (currentMainTab == 0) currentPage = 1;
-                else if (currentMainTab == 1) currentPage = 6; // FIXED: Settings is now 6
-                else if (currentMainTab == 2) currentPage = 7; // FIXED: Network is now 7
-                else if (currentMainTab == 3) currentPage = 8; // FIXED: Support is now 8
+                else if (currentMainTab == 1) currentPage = 6;
+                else if (currentMainTab == 2) currentPage = 7;
+                else if (currentMainTab == 3) currentPage = 8;
                 renderMenu();
-            } else if (menuSelection == -1) { // SUBTITLE IS HIGHLIGHTED
-                if (currentMainTab == 0) { 
-                    // FIXED: Math updated to cycle through 5 recipe pages instead of 4
-                    currentPage = (currentPage - 2 + 5) % 5 + 1; 
-                    renderMenu();
-                }
+                
             } else if (isNamingMode) {
                 nameCursorPos = Math.max(0, nameCursorPos - 1);
                 renderMenu();
             } else if (isMenuEditing) {
-                // --- NEW: VAULT SCROLLING (LEFT) ---
+                // --- VAULT SCROLLING (LEFT) ---
                 if (currentMainTab == 0 && currentPage == 1 && menuSelection == 2) {
                     if (!vaultFiles.isEmpty() && !vaultFiles.get(0).equals("NO VAULT RECIPES")) {
                         vaultIndex -= 1;
@@ -1011,6 +1032,18 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 } else {
                     handleMenuChange(-1); // Normal menu editing
                 }
+            } else { // 2. PAGE LEVEL NAVIGATION
+                currentPage--;
+                if (currentPage < 1) currentPage = 8; // Wrap from Page 1 to Page 8
+                
+                // Sync the highlighted Tab at the top to match the new page
+                if (currentPage <= 5) currentMainTab = 0;
+                else if (currentPage == 6) currentMainTab = 1;
+                else if (currentPage == 7) currentMainTab = 2;
+                else if (currentPage == 8) currentMainTab = 3;
+                
+                menuSelection = 0; // Drop cursor to the top of the new page
+                renderMenu();
             }
         } else if (!isPlaybackMode && mDialMode == DIAL_MODE_FOCUS && lensManager != null && lensManager.isCurrentProfileManual()) {
             virtualFocusRatio = Math.max(0.0f, virtualFocusRatio - 0.02f);
@@ -1065,24 +1098,22 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         }
 
         if (isMenuOpen) {
-            if (menuSelection == -2) { // TABS ARE HIGHLIGHTED
-                currentMainTab = (currentMainTab + 1) % 4;
+            if (menuSelection == -2) { // 1. TAB LEVEL NAVIGATION
+                currentMainTab++;
+                if (currentMainTab > 3) currentMainTab = 0; // Loop back to start
+                
+                // Drop into the first page of the newly selected tab
                 if (currentMainTab == 0) currentPage = 1;
-                else if (currentMainTab == 1) currentPage = 6; // FIXED: Settings is now 6
-                else if (currentMainTab == 2) currentPage = 7; // FIXED: Network is now 7
-                else if (currentMainTab == 3) currentPage = 8; // FIXED: Support is now 8
+                else if (currentMainTab == 1) currentPage = 6;
+                else if (currentMainTab == 2) currentPage = 7;
+                else if (currentMainTab == 3) currentPage = 8;
                 renderMenu();
-            } else if (menuSelection == -1) { // SUBTITLE IS HIGHLIGHTED
-                if (currentMainTab == 0) { 
-                    // FIXED: Math updated to cycle through 5 recipe pages instead of 4
-                    currentPage = (currentPage % 5) + 1; 
-                    renderMenu();
-                }
+                
             } else if (isNamingMode) {
                 nameCursorPos = Math.min(7, nameCursorPos + 1);
                 renderMenu();
             } else if (isMenuEditing) {
-                // --- NEW: VAULT SCROLLING (RIGHT) ---
+                // --- VAULT SCROLLING (RIGHT) ---
                 if (currentMainTab == 0 && currentPage == 1 && menuSelection == 2) {
                     if (!vaultFiles.isEmpty() && !vaultFiles.get(0).equals("NO VAULT RECIPES")) {
                         vaultIndex = (vaultIndex + 1) % vaultFiles.size();
@@ -1091,6 +1122,18 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 } else {
                     handleMenuChange(1); // Normal menu editing
                 }
+            } else { // 2. PAGE LEVEL NAVIGATION
+                currentPage++;
+                if (currentPage > 8) currentPage = 1; // Wrap from Page 8 to Page 1
+                
+                // Sync the highlighted Tab at the top to match the new page
+                if (currentPage <= 5) currentMainTab = 0;
+                else if (currentPage == 6) currentMainTab = 1;
+                else if (currentPage == 7) currentMainTab = 2;
+                else if (currentPage == 8) currentMainTab = 3;
+                
+                menuSelection = 0; // Drop cursor to the top of the new page
+                renderMenu();
             }
         } else if (!isPlaybackMode && mDialMode == DIAL_MODE_FOCUS && lensManager != null && lensManager.isCurrentProfileManual()) {
             virtualFocusRatio = Math.min(1.0f, virtualFocusRatio + 0.02f);
@@ -1109,14 +1152,31 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             else handleHudAdjustment(direction);
             return;
         }
-        if (isPlaybackMode) { showPlaybackImage(playbackIndex + direction); } 
+        if (isPlaybackMode) { 
+            showPlaybackImage(playbackIndex + direction); 
+        } 
         else if (isMenuOpen) {
             if (isNamingMode) { 
                 handleNamingChange(direction); 
             } else if (isMenuEditing) { 
-                handleMenuChange(direction); 
+                // --- NEW: VAULT SCROLLING (DIAL) ---
+                if (currentMainTab == 0 && currentPage == 1 && menuSelection == 2) {
+                    if (!vaultFiles.isEmpty() && !vaultFiles.get(0).equals("NO VAULT RECIPES")) {
+                        if (direction > 0) {
+                            vaultIndex = (vaultIndex + 1) % vaultFiles.size();
+                        } else {
+                            vaultIndex -= 1;
+                            if (vaultIndex < 0) vaultIndex += vaultFiles.size();
+                        }
+                        renderMenu();
+                    }
+                } else {
+                    handleMenuChange(direction); 
+                }
             } else { 
-                if (direction > 0) onDownPressed(); else onUpPressed(); 
+                // This perfectly inherits the Native loops we built earlier!
+                if (direction > 0) onDownPressed(); 
+                else onUpPressed(); 
             }
         } else if (!isProcessing) {
             handleHardwareInput(direction); 
