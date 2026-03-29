@@ -52,7 +52,7 @@ android {
     // Dynamically rename the final output file based on versionName
     applicationVariants.all { variant ->
         variant.outputs.all {
-            outputFileName = "JPEGCAM-v${variant.versionName}.apk"
+            outputFileName = "JPEGCAM-LANG-v${variant.versionName}.apk"
         }
     }
 }

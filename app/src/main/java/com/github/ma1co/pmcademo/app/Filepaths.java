@@ -4,6 +4,7 @@ import android.os.Environment;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 public class Filepaths {
 
@@ -41,23 +42,22 @@ public class Filepaths {
     }
 
     public static File getDcimDir() {
-        // Check all possible roots to find where the camera is actively saving photos
+        // Iterate through all roots (SD cards first)
         for (File root : getStorageRoots()) {
             File dcim = new File(root, "DCIM");
             if (dcim.exists() && dcim.isDirectory()) {
                 File[] subdirs = dcim.listFiles();
-                if (subdirs != null) {
+                // If there is a DCIM folder with ANY subdirectories, this is likely our target
+                if (subdirs != null && subdirs.length > 0) {
                     for (File s : subdirs) {
-                        String uName = s.getName().toUpperCase();
-                        // Find the exact DCIM containing standard Sony photo folders
-                        if (s.isDirectory() && (uName.endsWith("MSDCF") || uName.contains("ALPHA") || uName.contains("SONY"))) {
+                        if (s.isDirectory() && !s.getName().startsWith(".")) {
                             return dcim; 
                         }
                     }
                 }
             }
         }
-        // Failsafe fallback
+        // Last-ditch: return the standard DCIM on the default root
         return new File(getStorageRoot(), "DCIM"); 
     }
 

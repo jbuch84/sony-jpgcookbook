@@ -28,6 +28,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.util.Log;
+import android.widget.Toast;
 
 import com.sony.scalar.hardware.CameraEx;
 import com.sony.scalar.sysutil.ScalarInput;
@@ -41,11 +42,15 @@ import java.util.List;
 public class MainActivity extends Activity implements SurfaceHolder.Callback, 
     SonyCameraManager.CameraEventListener, InputManager.InputListener, ConnectivityManager.StatusUpdateListener {
 
+    // --- GLOBAL DEBUG FLAG ---
+    // Set to true to see diagnostic Toasts, false for clean public release
+    public static final boolean DEBUG_MODE = false;
+
     private boolean isScrollingMatrices = false;
     private SonyCameraManager cameraManager;
     private InputManager inputManager;
     private RecipeManager recipeManager;
-    private MatrixManager matrixManager; // <-- NEW
+    private MatrixManager matrixManager;
     private ConnectivityManager connectivityManager;
     
     private int activeMatrixIndex = 0; // <-- NEW: Tracks which JSON file we are viewing
@@ -371,7 +376,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             @Override public void onProcessFinished(String res) { isProcessing = false; runOnUiThread(new Runnable() { public void run() { if (tvTopStatus != null) { tvTopStatus.setTextColor(Color.WHITE); } updateMainHUD(); } }); }
         });
         
-        mScanner = new SonyFileScanner(new SonyFileScanner.ScannerCallback() {
+        mScanner = new SonyFileScanner(this, new SonyFileScanner.ScannerCallback() {
             @Override 
             public boolean isReadyToProcess() { 
                 RTLProfile p = recipeManager.getCurrentProfile();
@@ -391,6 +396,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     }
     
     private void processWhenFileReady(final String path) {
+        // Wrap the diagnostic in our global debug flag
+        if (DEBUG_MODE) {
+            android.widget.Toast.makeText(this, "File Detected! Waiting for write...", android.widget.Toast.LENGTH_SHORT).show();
+        }
+        
         final File f = new File(path);
         if (!f.exists()) return; 
 
@@ -1373,7 +1383,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             if (hasPhysicalPasmDial) return; // <-- NEW: Prevent software override on A7II!
             
             List<String> valid = new ArrayList<String>(); 
-            String[] desired = {"program-auto", "aperture-priority", "shutter-priority", "shutter-speed-priority", "manual-exposure"};
+            String[] desired = {"program-auto", "aperture-priority", "shutter-priority", "shutter-speed", "manual-exposure","auto"};
             List<String> supported = p.getSupportedSceneModes();
             if (supported != null) {
                 for (String s : desired) if (supported.contains(s)) valid.add(s); 
@@ -2790,8 +2800,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (tvMode != null) {
             if ("manual-exposure".equals(sm)) tvMode.setText("M"); 
             else if ("aperture-priority".equals(sm)) tvMode.setText("A"); 
-            else if ("shutter-priority".equals(sm) || "shutter-speed-priority".equals(sm)) tvMode.setText("S"); 
+            else if ("shutter-priority".equals(sm) || "shutter-speed".equals(sm)) tvMode.setText("S"); 
             else if ("program-auto".equals(sm)) tvMode.setText("P");
+            else if ("auto".equals(sm)) tvMode.setText("AUTO");
             else tvMode.setText(sm != null ? sm.toUpperCase() : "SCN");
         }
         

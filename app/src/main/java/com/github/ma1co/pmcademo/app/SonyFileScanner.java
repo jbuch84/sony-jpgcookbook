@@ -1,14 +1,18 @@
 package com.github.ma1co.pmcademo.app;
 
+import android.content.Context;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Looper;
 import android.util.Log;
+import android.widget.Toast;
 import java.io.File;
 import java.util.HashSet;
+import java.util.Locale;
 
 public class SonyFileScanner {
     private ScannerCallback mCallback;
+    private Context mContext;
     
     // The Delta Tracker: Remembers every file that existed when the app booted
     private HashSet<String> knownFiles = new HashSet<String>();
@@ -23,7 +27,8 @@ public class SonyFileScanner {
         boolean isReadyToProcess(); 
     }
 
-    public SonyFileScanner(ScannerCallback callback) {
+    public SonyFileScanner(Context context, ScannerCallback callback) {
+        this.mContext = context;
         this.mCallback = callback;
         this.mainHandler = new Handler(Looper.getMainLooper()); 
         
@@ -83,43 +88,66 @@ public class SonyFileScanner {
         File[] subDirs = dcimDir.listFiles();
         if (subDirs != null) {
             for (File dir : subDirs) {
-                String dirName = dir.getName().toUpperCase();
-                
-                // Only look inside valid photo folders
-                if (dir.isDirectory() && (dirName.endsWith("MSDCF") || dirName.contains("ALPHA") || dirName.contains("SONY"))) {
+                // BUG FIX: Don't filter by name. Asian/Regional firmwares use varied names.
+                // If it's a directory in DCIM, we check it.
+                if (dir.isDirectory() && !dir.getName().startsWith(".")) { 
                     File[] files = dir.listFiles();
                     if (files != null) {
                         for (File f : files) {
-                            String name = f.getName().toUpperCase();
+                            // Use Locale.US to ensure ".JPG" is always interpreted correctly
+                            String name = f.getName().toUpperCase(Locale.US);
+                            
                             if (name.endsWith(".JPG") && !name.startsWith("FILM_") && !name.startsWith("PRCS") && !name.startsWith("TEMP_")) {
                                 
-                                // DELTA TRACKING: Ignore sorting entirely. Just ask, "Is this file brand new?"
                                 String currentFilePath = f.getAbsolutePath();
                                 
                                 if (!knownFiles.contains(currentFilePath)) {
-                                    // Add it to the tracker so we don't process it twice
+                                    
+                                    // SAFETY CHECK: Ensure the file is finished being written
+                                    if (f.length() < 1024) continue; 
+
                                     knownFiles.add(currentFilePath);
                                     
                                     if (triggerCallback) {
                                         Log.d("JPEG.CAM", "NEW FILE DETECTED: " + currentFilePath);
                                         
+                                        // DIAGNOSTIC 1: Scanner saw the file
+                                        if (MainActivity.DEBUG_MODE) {
+                                            final String fileName = name; 
+                                            mainHandler.post(new Runnable() {
+                                                @Override
+                                                public void run() {
+                                                    Toast.makeText(mContext, "SCANNER SEEN: " + fileName, Toast.LENGTH_SHORT).show();
+                                                }
+                                            });
+                                        }
+
                                         if (mCallback != null) {
                                             if (mCallback.isReadyToProcess()) {
-                                                
-                                                // Create a final copy of the string to satisfy the Java compiler for the inner class
                                                 final String finalPathToProcess = currentFilePath; 
-                                                
                                                 mainHandler.post(new Runnable() {
-                                                    @Override public void run() { mCallback.onNewPhotoDetected(finalPathToProcess); }
+                                                    @Override public void run() { 
+                                                        // DIAGNOSTIC 2: Engine Handoff
+                                                        if (MainActivity.DEBUG_MODE) {
+                                                            Toast.makeText(mContext, "ENGINE STARTING...", Toast.LENGTH_SHORT).show();
+                                                        }
+                                                        mCallback.onNewPhotoDetected(finalPathToProcess); 
+                                                    }
                                                 });
-                                                
                                             } else {
-                                                Log.w("JPEG.CAM", "Engine blocked processing. (LUT is 0/OFF or processor not initialized).");
+                                                // DIAGNOSTIC 3: The Blocked Wall
+                                                if (MainActivity.DEBUG_MODE) {
+                                                    mainHandler.post(new Runnable() {
+                                                        @Override public void run() {
+                                                            Toast.makeText(mContext, "BLOCKED: Engine not ready or Recipe OFF", Toast.LENGTH_LONG).show();
+                                                        }
+                                                    });
+                                                }
+                                                Log.w("JPEG.CAM", "Engine blocked processing for: " + name);
                                             }
                                         }
                                     }
                                 }
-                                
                             }
                         }
                     }
