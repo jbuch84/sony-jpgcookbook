@@ -475,7 +475,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (isMenuOpen) { exitMenu(); return; }
         if (isProcessing) return; 
         
-        mDialMode = DIAL_MODE_RTL;
+        // mDialMode = DIAL_MODE_RTL; <-- DELETED. Cursor memory is now permanent!
         
         if (displayState == 0 && !isMenuOpen) setHUDVisibility(View.GONE);
         if (cameraManager != null && cameraManager.getCamera() != null && !cachedIsManualFocus) {
@@ -853,17 +853,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             } else if (isMenuEditing) {
                 handleMenuChange(1);
             } else {
-                // --- NEW: SONY NATIVE VERTICAL WRAP (UP) ---
-                if (menuSelection == -2) {
-                    // UP from the Tab drops to the BOTTOM of the current page
+                // --- FIXED: INCLUDES TABS (-2) IN THE LOOP ---
+                if (menuSelection == 0) {
+                    // UP from the top item jumps to the Tabs
+                    menuSelection = -2; 
+                } else if (menuSelection == -2) {
+                    // UP from the Tabs loops to the BOTTOM of the current page
                     menuSelection = currentItemCount - 1;
                     if (menuSelection < 0) menuSelection = -2; // Failsafe for empty page
                 } else {
+                    // Normal scroll up
                     menuSelection--;
-                    // Loop from top item to bottom item (bypassing -1 title bar completely)
-                    if (menuSelection < 0) {
-                        menuSelection = currentItemCount - 1;
-                    }
                 }
                 renderMenu();
             }
@@ -938,17 +938,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             } else if (isMenuEditing) {
                 handleMenuChange(-1);
             } else {
-                // --- NEW: SONY NATIVE VERTICAL WRAP (DOWN) ---
+                // --- FIXED: INCLUDES TABS (-2) IN THE LOOP ---
                 if (menuSelection == -2) {
-                    // DOWN from the Tab drops to the TOP of the current page
+                    // DOWN from the Tabs drops to the TOP item
                     menuSelection = 0;
                     if (currentItemCount == 0) menuSelection = -2; // Failsafe if page is empty
+                } else if (menuSelection == currentItemCount - 1) {
+                    // DOWN from the bottom item loops back to the Tabs
+                    menuSelection = -2;
                 } else {
+                    // Normal scroll down
                     menuSelection++;
-                    // If we scroll past the bottom item, loop back to the top! (Bypassing -1)
-                    if (menuSelection >= currentItemCount) {
-                        menuSelection = 0;
-                    }
                 }
                 renderMenu();
             }
@@ -2614,7 +2614,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     }
     
     @Override 
-    public boolean onKeyDown(int k, KeyEvent e) { 
+    public boolean onKeyDown(int k, android.view.KeyEvent e) { 
         // UNIVERSAL CRASH PROTECTION: Swallow dial events on ALL cameras
         if (k == 624 || k == ScalarInput.ISV_KEY_MODE_DIAL || 
            (k >= ScalarInput.ISV_KEY_MODE_INVALID && k <= ScalarInput.ISV_KEY_MODE_CUSTOM3)) {
@@ -2628,13 +2628,27 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         }
         
         if (isProcessing && (k == ScalarInput.ISV_KEY_S1_1 || k == ScalarInput.ISV_KEY_S1_2 || k == ScalarInput.ISV_KEY_S2)) return true; 
-        if (k == ScalarInput.ISV_KEY_PLAY) {
+        
+        // --- FIXED: Added standard Android keycode ---
+        if (k == ScalarInput.ISV_KEY_PLAY || k == android.view.KeyEvent.KEYCODE_MEDIA_PLAY) {
             if (isPlaybackMode) exitPlayback(); 
             else if (!isMenuOpen && !isProcessing) enterPlayback();
-            return true;
+            return true; // Swallow the press
         }
+        
         if (inputManager != null) return inputManager.handleKeyDown(k, e) || super.onKeyDown(k, e); 
         return super.onKeyDown(k, e);
+    }
+
+    @Override
+    public boolean onKeyUp(int k, android.view.KeyEvent e) {
+        // --- CRITICAL: Swallow the release event so the Sony OS does nothing ---
+        if (k == ScalarInput.ISV_KEY_PLAY || k == android.view.KeyEvent.KEYCODE_MEDIA_PLAY) {
+            return true; 
+        }
+        
+        if (inputManager != null) return inputManager.handleKeyUp(k, e) || super.onKeyUp(k, e);
+        return super.onKeyUp(k, e);
     }
     
     @Override 
