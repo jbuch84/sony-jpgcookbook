@@ -39,68 +39,57 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_loadLutNative(JNIEnv* env, jobject 
     nativeLutSize = 0;
 
     const char *file_path = env->GetStringUTFChars(path, NULL);
-    std::string path_str(file_path);
+    std::string p_str(file_path);
     
-    // --- ROUTE A: HALDCLUT PNG (Universal Unfolding) ---
-    if (path_str.length() >= 4 && path_str.substr(path_str.length() - 4) == ".png") {
-        int width, height, channels;
-        unsigned char *img_data = stbi_load(file_path, &width, &height, &channels, 3);
-        
-        if (img_data) {
-            // 1. Calculate LUT size (e.g., 512x512 PNG = size 64)
-            nativeLutSize = round(cbrt(width * height)); 
-            int total_points = nativeLutSize * nativeLutSize * nativeLutSize;
-            nativeLut.resize(total_points * 3);
-            
-            // 2. The Robust Unfolding Loop
-            // Standard HaldCLUTs are arranged in a grid.
-            // Blue determines the tile, Green is vertical, Red is horizontal.
-            for (int i = 0; i < total_points; i++) {
-                // img_idx is the linear position in the PNG file
-                // We map this to the R->G->B cube order our kernel expects.
-                nativeLut[i * 3 + 0] = img_data[i * 3 + 0]; // Red
-                nativeLut[i * 3 + 1] = img_data[i * 3 + 1]; // Green
-                nativeLut[i * 3 + 2] = img_data[i * 3 + 2]; // Blue
-            }
-            
-            stbi_image_free(img_data);
-            LOGD("Standardized HaldCLUT PNG to 3D Vector. Size: %d", nativeLutSize);
-        }
+    // Convert extension to lowercase for the check
+    std::string ext = "";
+    if (p_str.length() >= 4) {
+        ext = p_str.substr(p_str.length() - 4);
+        for(int i = 0; i < ext.length(); i++) ext[i] = tolower(ext[i]);
     }
-    // --- ROUTE B: STANDARD .CUBE (High Speed Indexing) ---
-    else {
-        FILE *file = fopen(file_path, "r");
-        if (file) {
-            char line[256];
-            size_t write_ptr = 0;
 
-            while(fgets(line, sizeof(line), file)) {
-                // Find the size header first
+    // --- ROUTE A: PNG (The HaldCLUT Route) ---
+    if (ext == ".png") {
+        int w, h, c;
+        unsigned char *data = stbi_load(file_path, &w, &h, &c, 3);
+        if (data) {
+            nativeLutSize = round(cbrt(w * h));
+            int total_bytes = nativeLutSize * nativeLutSize * nativeLutSize * 3;
+            nativeLut.resize(total_bytes);
+            memcpy(nativeLut.data(), data, total_bytes);
+            stbi_image_free(data);
+            LOGD("SUCCESS: Loaded PNG HaldCLUT. Size: %d", nativeLutSize);
+        } else {
+            LOGD("ERROR: stbi_load failed for path: %s", file_path);
+        }
+    } 
+    // --- ROUTE B: .CUBE (The Text Route) ---
+    else {
+        FILE *f = fopen(file_path, "r");
+        if (f) {
+            char line[256];
+            int count = 0;
+            while(fgets(line, sizeof(line), f)) {
                 if (strncmp(line, "LUT_3D_SIZE", 11) == 0) {
                     sscanf(line, "LUT_3D_SIZE %d", &nativeLutSize);
-                    // PRE-ALLOCATE: No more slow push_backs!
                     nativeLut.resize(nativeLutSize * nativeLutSize * nativeLutSize * 3);
-                    continue;
                 }
-
-                // If we found the size and the line contains 3 numbers (the colors)
                 float r, g, b;
                 if (nativeLutSize > 0 && sscanf(line, "%f %f %f", &r, &g, &b) == 3) {
-                    // Safety check to prevent crashing if the file has more lines than the header said
-                    if (write_ptr + 2 < nativeLut.size()) {
-                        nativeLut[write_ptr++] = (uint8_t)(r * 255.0f); 
-                        nativeLut[write_ptr++] = (uint8_t)(g * 255.0f); 
+                    if (count + 2 < nativeLut.size()) {
+                        nativeLut[count++] = (uint8_t)(r * 255.0f); 
+                        nativeLut[count++] = (uint8_t)(g * 255.0f); 
                         nativeLut[write_ptr++] = (uint8_t)(b * 255.0f);
                     }
                 }
             }
-            fclose(file);
-            LOGD("Successfully loaded .cube via Direct Indexing. Size: %d", nativeLutSize);
+            fclose(f);
+            LOGD("SUCCESS: Loaded .cube file. Size: %d", nativeLutSize);
         }
     }
 
     env->ReleaseStringUTFChars(path, file_path);
-    return nativeLutSize > 0 ? JNI_TRUE : JNI_FALSE;
+    return (nativeLutSize > 0) ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL

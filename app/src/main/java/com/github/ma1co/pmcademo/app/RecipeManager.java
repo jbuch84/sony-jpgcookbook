@@ -57,7 +57,12 @@ public class RecipeManager {
                 File[] files = lutDir.listFiles();
                 if (files != null) {
                     java.util.Arrays.sort(files); 
-                    // THE FIX: Add checks for startsWith("_") and contains("~")
+                    
+                    // RE-ADDED THE MISSING LOOP START
+                    for (File f : files) {
+                        String u = f.getName().toUpperCase();
+                        
+                        // THE FIX: Filter out dots, underscores (Mac junk), and tildes (backup files)
                         if (!u.startsWith(".") && 
                             !u.startsWith("_") && 
                             !u.contains("~") && 
@@ -66,11 +71,10 @@ public class RecipeManager {
                             if (!recipePaths.contains(f.getAbsolutePath())) {
                                 recipePaths.add(f.getAbsolutePath());
                                 
-                                // 2. CLEAN NAME (Removes the extension for the menu display)
+                                // Remove extension for clean menu name
                                 String name = u.replace(".CUBE", "").replace(".CUB", "").replace(".PNG", "");
                                 
-                                // 3. ONLY READ TITLE METADATA FOR .CUBE FILES
-                                // (Trying to read text lines from a binary PNG would just get us gibberish)
+                                // Only read title metadata if it's a text-based .cube file
                                 if (u.endsWith(".CUBE") || u.endsWith(".CUB")) {
                                     try {
                                         BufferedReader br = new BufferedReader(new FileReader(f));
@@ -86,11 +90,10 @@ public class RecipeManager {
                                         br.close();
                                     } catch (Exception e) {}
                                 }
-                                
                                 recipeNames.add(name);
                             }
                         }
-                    }
+                    } // END for loop
                 }
             }
         }
