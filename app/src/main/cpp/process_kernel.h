@@ -18,7 +18,6 @@
 // === END_METADATA ===
 
 // --- SHARED HELPERS ---
-
 inline long long get_vig_coef(int vignette, long long max_dist_sq) {
     int s_vig = vignette * 12; 
     return ((long long)((s_vig * 256) / 100) << 24) / (max_dist_sq > 0 ? max_dist_sq : 1);
@@ -33,6 +32,7 @@ inline void generate_rolloff_lut(uint8_t* lut, int rollOff) {
 }
 
 inline uint32_t fast_rand(uint32_t* state) {
+    // Xorshift for high-frequency "salt" noise
     uint32_t x = *state; x ^= x << 13; x ^= x >> 17; x ^= x << 5; *state = x; return x;
 }
 
@@ -55,14 +55,9 @@ inline void process_row_rgb(
     if (grainSize == 1) s_grain = (s_grain * 3) >> 1;
     if (grainSize == 2) s_grain = (s_grain * 5) >> 2;
 
-    // VIGNETTE: Forward Differencing setup
     long long dy = (long long)(abs_y - cy_center);
     long long d_sq = ((long long)(0 - cx) * (long long)(0 - cx)) + (dy * dy);
     long long d_sq_step = 1 - (2 * (long long)cx);
-
-    // GRAIN: FBM Hoisted component
-    uint32_t block_y = (grainSize == 1) ? (abs_y >> 1) : ((abs_y * 21845) >> 16);
-    uint32_t h_y_base = seed + block_y * 2654435761U;
 
     for (int x = 0; x < width; x++) {
         int i = x * 3;
@@ -87,20 +82,16 @@ inline void process_row_rgb(
             else { v1=x0+y1*nativeLutSize+z0*lutSize2; v2=x1+y1*nativeLutSize+z0*lutSize2; w0=128-dy_l; w1=dy_l-dx; w2=dx-dz; w3=dz; }
         }
         
-        const uint8_t* p0 = &nativeLut[(x0 + y0*nativeLutSize + z0*lutSize2)*3];
-        const uint8_t* p1 = &nativeLut[v1*3];
-        const uint8_t* p2 = &nativeLut[v2*3];
-        const uint8_t* p3 = &nativeLut[(x1 + y1*nativeLutSize + z1*lutSize2)*3];
+        const uint8_t* p = &nativeLut[(x0 + y0*nativeLutSize + z0*lutSize2)*3];
+        const uint8_t* p1_v = &nativeLut[v1*3];
+        const uint8_t* p2_v = &nativeLut[v2*3];
+        const uint8_t* p3_v = &nativeLut[(x1 + y1*nativeLutSize + z1*lutSize2)*3];
         
-        int lR = (p0[0]*w0 + p1[0]*w1 + p2[0]*w2 + p3[0]*w3) >> 7;
-        int lG = (p0[1]*w0 + p1[1]*w1 + p2[1]*w2 + p3[1]*w3) >> 7;
-        int lB = (p0[2]*w0 + p1[2]*w1 + p2[2]*w2 + p3[2]*w3) >> 7;
-        
-        int outR = r + (((lR - r) * opac_mapped) >> 8);
-        int outG = g + (((lG - g) * opac_mapped) >> 8);
-        int outB = b + (((lB - b) * opac_mapped) >> 8);
+        int outR = r + ((((p[0]*w0 + p1_v[0]*w1 + p2_v[0]*w2 + p3_v[0]*w3) >> 7) - r) * opac_mapped >> 8);
+        int outG = g + ((((p[1]*w0 + p1_v[1]*w1 + p2_v[1]*w2 + p3_v[1]*w3) >> 7) - g) * opac_mapped >> 8);
+        int outB = b + ((((p[2]*w0 + p1_v[2]*w1 + p2_v[2]*w2 + p3_v[2]*w3) >> 7) - b) * opac_mapped >> 8);
 
-        // --- FILM DENSITY ---
+        // --- FILM DENSITY & PHYSICS ---
         int currentY = (outR*77 + outG*150 + outB*29) >> 8;
         int targetY = currentY;
         
@@ -151,17 +142,27 @@ inline void process_row_rgb(
             outR = (outR * v_m) >> 8; outG = (outG * v_m) >> 8; outB = (outB * v_m) >> 8;
         }
         
+        // --- GRAIN (ORGANIC JITTERED FBM) ---
         if (s_grain > 0) {
-            int raw_noise = (fast_rand(&seed) & 0xFF) - 128;
-            int noise = raw_noise;
+            // Salt (Sharp high-frequency noise)
+            uint32_t salt_raw = fast_rand(&seed);
+            int salt = (int)(salt_raw & 0xFF) - 128;
+            int noise = salt;
+
             if (grainSize > 0) {
-                uint32_t block_x = (grainSize == 1) ? (x >> 1) : ((x * 21845) >> 16);
-                uint32_t h = h_y_base + block_x * 1274126177U;
+                // Clump (Low-frequency organic grouping)
+                // Use a chaotic hash that includes the raw x/y to "jitter" the blocks
+                uint32_t bx = (grainSize == 1) ? (x >> 1) : ((x * 21845) >> 16);
+                uint32_t by = (grainSize == 1) ? (abs_y >> 1) : ((abs_y * 21845) >> 16);
+                
+                uint32_t h = (bx * 1274126177U) ^ (by * 2654435761U) ^ seed;
                 h = (h ^ (h >> 13)) * 374761393U;
-                int block_noise = (h & 0xFF) - 128;
-                if (grainSize == 1) noise = (raw_noise + block_noise) >> 1;
-                else noise = (raw_noise + block_noise * 3) >> 2;
+                int clump = (int)(h & 0xFF) - 128;
+                
+                // Mixing: 40% sharp salt, 60% soft clump
+                noise = (salt * 100 + clump * 150) >> 8;
             }
+
             int mask = (targetY < 128) ? targetY : 255 - targetY; 
             if (targetY < 64) mask = (mask * targetY) >> 6; 
             int gv = (noise * mask * s_grain) >> 15; 
@@ -169,9 +170,7 @@ inline void process_row_rgb(
         }
         
         row[i] = (uint8_t)CLAMP(outR); row[i+1] = (uint8_t)CLAMP(outG); row[i+2] = (uint8_t)CLAMP(outB);
-        
-        d_sq += d_sq_step;
-        d_sq_step += 2;
+        d_sq += d_sq_step; d_sq_step += 2;
     }
 }
 
@@ -195,9 +194,6 @@ inline void process_row_yuv(
     long long dy = (long long)(abs_y - cy_center);
     long long d_sq = ((long long)(0 - cx) * (long long)(0 - cx)) + (dy * dy);
     long long d_sq_step = 1 - (2 * (long long)cx);
-
-    uint32_t block_y = (grainSize == 1) ? (abs_y >> 1) : ((abs_y * 21845) >> 16);
-    uint32_t h_y_base = seed + block_y * 2654435761U;
 
     for(int x = 0; x < width; x++) {
         int i = x * 3;
@@ -249,26 +245,28 @@ inline void process_row_yuv(
             cb = (cb * r256) >> 8; cr = (cr * r256) >> 8;
         }
         
+        // --- GRAIN (ORGANIC RESTORED) ---
         if (s_grain > 0) { 
-            int raw_noise = (fast_rand(&seed) & 0xFF) - 128;
-            int noise = raw_noise;
+            uint32_t salt_raw = fast_rand(&seed);
+            int salt = (int)(salt_raw & 0xFF) - 128;
+            int noise = salt;
+
             if (grainSize > 0) {
-                uint32_t block_x = (grainSize == 1) ? (x >> 1) : ((x * 21845) >> 16);
-                uint32_t h = h_y_base + block_x * 1274126177U;
+                uint32_t bx = (grainSize == 1) ? (x >> 1) : ((x * 21845) >> 16);
+                uint32_t by = (grainSize == 1) ? (abs_y >> 1) : ((abs_y * 21845) >> 16);
+                uint32_t h = (bx * 1274126177U) ^ (by * 2654435761U) ^ seed;
                 h = (h ^ (h >> 13)) * 374761393U;
-                int block_noise = (h & 0xFF) - 128;
-                if (grainSize == 1) noise = (raw_noise + block_noise) >> 1;
-                else noise = (raw_noise + block_noise * 3) >> 2;
+                int clump = (int)(h & 0xFF) - 128;
+                noise = (salt * 100 + clump * 150) >> 8;
             }
+
             int mask = (outY < 128) ? outY : 255 - outY; 
-            if (outY < 64) mask = (mask * outY) >> 6; // FIXED: outY instead of targetY
+            if (outY < 64) mask = (mask * outY) >> 6;
             outY += (noise * mask * s_grain) >> 15; 
         }
         
         row[i] = (uint8_t)CLAMP(outY); row[i+1] = (uint8_t)CLAMP(128+cb); row[i+2] = (uint8_t)CLAMP(128+cr);
-        
-        d_sq += d_sq_step;
-        d_sq_step += 2;
+        d_sq += d_sq_step; d_sq_step += 2;
     }
 }
 
