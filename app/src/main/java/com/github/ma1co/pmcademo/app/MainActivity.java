@@ -1146,7 +1146,38 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     }
     
     @Override 
-    public void onDialRotated(int direction) { 
+    public void onFrontDialRotated(int direction) { 
+        // If UI is open, act like a normal scroll wheel
+        if (isHudActive || isPlaybackMode || isMenuOpen) { onControlWheelRotated(direction); return; }
+        
+        // If shooting, forcefully change Shutter Speed
+        if (!isProcessing && cameraManager != null && cameraManager.getCameraEx() != null) {
+            if (direction > 0) cameraManager.getCameraEx().incrementShutterSpeed();
+            else cameraManager.getCameraEx().decrementShutterSpeed();
+            updateMainHUD();
+        }
+    }
+
+    @Override 
+    public void onRearDialRotated(int direction) { 
+        // If UI is open, act like a normal scroll wheel
+        if (isHudActive || isPlaybackMode || isMenuOpen) { onControlWheelRotated(direction); return; }
+        
+        // If shooting, forcefully change Aperture
+        if (!isProcessing && cameraManager != null && cameraManager.getCameraEx() != null) {
+            if (cachedIsManualFocus && lensManager != null && lensManager.isCurrentProfileManual()) {
+                adjustVirtualAperture(direction);
+            } else {
+                if (direction > 0) cameraManager.getCameraEx().incrementAperture();
+                else cameraManager.getCameraEx().decrementAperture();
+            }
+            updateMainHUD();
+        }
+    }
+
+    @Override 
+    public void onControlWheelRotated(int direction) { 
+        // The original logic for the back wheel remains unchanged!
         if (isHudActive) {
             if (currentHudMode == 2) handleWbAdjustment(direction, 0); 
             else handleHudAdjustment(direction);
@@ -1159,7 +1190,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             if (isNamingMode) { 
                 handleNamingChange(direction); 
             } else if (isMenuEditing) { 
-                // --- NEW: VAULT SCROLLING (DIAL) ---
                 if (currentMainTab == 0 && currentPage == 1 && menuSelection == 2) {
                     if (!vaultFiles.isEmpty() && !vaultFiles.get(0).equals("NO VAULT RECIPES")) {
                         if (direction > 0) {
@@ -1174,7 +1204,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     handleMenuChange(direction); 
                 }
             } else { 
-                // This perfectly inherits the Native loops we built earlier!
                 if (direction > 0) onDownPressed(); 
                 else onUpPressed(); 
             }

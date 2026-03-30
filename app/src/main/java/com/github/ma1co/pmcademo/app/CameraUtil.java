@@ -80,6 +80,11 @@ public class CameraUtil
             clean = clean.substring(0, dotIndex);
         }
         
+        // --- FIX: Eradicate MS-DOS 8.3 "~1" artifacts ---
+        // This uses Regex to find a tilde followed by any amount of numbers
+        // and deletes it entirely.
+        clean = clean.replaceAll("~\\d+", "");
+        
         // 2. Replace ugly computer characters with spaces
         clean = clean.replace("_", " ").replace("-", " ");
         
@@ -96,7 +101,8 @@ public class CameraUtil
             titleCase.append(c);
         }
         
-        return titleCase.toString();
+        // .trim() removes any dangling spaces left behind by the deleted ~1
+        return titleCase.toString().trim(); 
     }
     
     public static int getShutterValueIndex(final Pair<Integer,Integer> speed)
