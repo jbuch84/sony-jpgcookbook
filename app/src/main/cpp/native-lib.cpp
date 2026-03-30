@@ -9,6 +9,10 @@
 #include "jpeglib.h"
 #include <android/log.h>
 #include "process_kernel.h" // <-- YOUR NEW SHARED KERNEL
+#include "stb_image.h"
+
+#define STB_IMAGE_IMPLEMENTATION
+
 
 #define LOG_TAG "COOKBOOK_NATIVE"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
@@ -35,22 +39,51 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_loadLutNative(JNIEnv* env, jobject 
     nativeLutSize = 0;
 
     const char *file_path = env->GetStringUTFChars(path, NULL);
-    FILE *file = fopen(file_path, "r");
-    if (!file) { env->ReleaseStringUTFChars(path, file_path); return JNI_FALSE; }
-    char line[256];
-    while(fgets(line, sizeof(line), file)) {
-        if (strncmp(line, "LUT_3D_SIZE", 11) == 0) {
-            sscanf(line, "LUT_3D_SIZE %d", &nativeLutSize);
-            nativeLut.reserve(nativeLutSize * nativeLutSize * nativeLutSize * 3);
+    std::string path_str(file_path);
+    
+    // --- ROUTE A: HALDCLUT PNG ---
+    if (path_str.length() >= 4 && path_str.substr(path_str.length() - 4) == ".png") {
+        int width, height, channels;
+        // Force loading as 3 channels (RGB) to ignore alpha if present
+        unsigned char *img_data = stbi_load(file_path, &width, &height, &channels, 3);
+        
+        if (img_data) {
+            // A standard HaldCLUT is usually 1089x33 (which implies a LUT size of 33)
+            // Or 512x64 (LUT size 64). We calculate the size mathematically:
+            nativeLutSize = round(cbrt(width * height)); 
+            
+            int total_pixels = nativeLutSize * nativeLutSize * nativeLutSize;
+            nativeLut.assign(img_data, img_data + (total_pixels * 3));
+            
+            stbi_image_free(img_data);
+            LOGD("Successfully loaded HaldCLUT PNG. Size: %d", nativeLutSize);
+        } else {
+            LOGD("Failed to decode PNG HaldCLUT.");
         }
-        float r, g, b;
-        if (sscanf(line, "%f %f %f", &r, &g, &b) == 3) {
-            nativeLut.push_back((uint8_t)(r * 255.0f)); 
-            nativeLut.push_back((uint8_t)(g * 255.0f)); 
-            nativeLut.push_back((uint8_t)(b * 255.0f));
+    } 
+    // --- ROUTE B: STANDARD .CUBE ---
+    else {
+        FILE *file = fopen(file_path, "r");
+        if (file) {
+            char line[256];
+            while(fgets(line, sizeof(line), file)) {
+                if (strncmp(line, "LUT_3D_SIZE", 11) == 0) {
+                    sscanf(line, "LUT_3D_SIZE %d", &nativeLutSize);
+                    nativeLut.reserve(nativeLutSize * nativeLutSize * nativeLutSize * 3);
+                }
+                float r, g, b;
+                if (sscanf(line, "%f %f %f", &r, &g, &b) == 3) {
+                    nativeLut.push_back((uint8_t)(r * 255.0f)); 
+                    nativeLut.push_back((uint8_t)(g * 255.0f)); 
+                    nativeLut.push_back((uint8_t)(b * 255.0f));
+                }
+            }
+            fclose(file);
+            LOGD("Successfully loaded .cube text. Size: %d", nativeLutSize);
         }
     }
-    fclose(file); env->ReleaseStringUTFChars(path, file_path);
+
+    env->ReleaseStringUTFChars(path, file_path);
     return nativeLutSize > 0 ? JNI_TRUE : JNI_FALSE;
 }
 
@@ -188,30 +221,24 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
 
         if (use_rgb_path) {
             // ==========================================
-            // PATH A: ROUTE TO SHARED KERNEL
+            // PATH A: ROUTE ENTIRE ROW TO SHARED KERNEL
             // ==========================================
-            for (int x = 0, px = 0; x < row_stride; x += 3, ++px) {
-                process_pixel_rgb(
-                    row_buf[x], row_buf[x+1], row_buf[x+2],
-                    px, abs_y, cx, cy_center, vig_coef,
-                    shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, halation, vignette,
-                    grain, grainSize, seed, prev_noise,
-                    opac_mapped, map, nativeLut.data(), nativeLutSize, lutMax, lutSize2
-                );
-            }
+            process_row_rgb(
+                row_buf, cinfo_d.output_width, abs_y, cx, cy_center, vig_coef,
+                shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, halation, vignette,
+                grain, grainSize, seed,
+                opac_mapped, map, nativeLut.data(), nativeLutSize, lutMax, lutSize2
+            );
         } else {
             // ==========================================
-            // PATH B: ROUTE TO SHARED KERNEL
+            // PATH B: ROUTE ENTIRE ROW TO SHARED KERNEL
             // ==========================================
-            for (int x = 0, px = 0; x < row_stride; x += 3, ++px) {
-                process_pixel_yuv(
-                    row_buf[x], row_buf[x+1], row_buf[x+2],
-                    px, abs_y, cx, cy_center, vig_coef,
-                    shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, halation, vignette,
-                    grain, grainSize, seed, prev_noise,
-                    rolloff_lut
-                );
-            }
+            process_row_yuv(
+                row_buf, cinfo_d.output_width, abs_y, cx, cy_center, vig_coef,
+                shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, halation, vignette,
+                grain, grainSize, seed,
+                rolloff_lut
+            );
         }
         jpeg_write_scanlines(&cinfo_c, row_pointer, 1);
     }
