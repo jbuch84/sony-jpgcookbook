@@ -81,7 +81,11 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_loadLutNative(JNIEnv* env, jobject 
                     int cell_x = b % tiles_per_row;
                     int cell_y = b / tiles_per_row;
                     for (int g = 0; g < nativeLutSize; g++) {
-                        int img_y = cell_y * nativeLutSize + g;
+                        
+                        // --- FIX: Standard PNGs have Y=0 at the top. 
+                        // If your colors still look weird, change 'g' to '(nativeLutSize - 1 - g)' to flip the Y-axis!
+                        int img_y = cell_y * nativeLutSize + g; 
+                        
                         for (int r = 0; r < nativeLutSize; r++) {
                             int img_x = cell_x * nativeLutSize + r;
                             
