@@ -9,9 +9,8 @@
 #include "jpeglib.h"
 #include <android/log.h>
 #include "process_kernel.h" // <-- YOUR NEW SHARED KERNEL
-#include "stb_image.h"
-
 #define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
 
 
 #define LOG_TAG "COOKBOOK_NATIVE"
