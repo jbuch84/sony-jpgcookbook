@@ -19,11 +19,7 @@ public class InputManager {
         void onDownPressed();
         void onLeftPressed();
         void onRightPressed();
-        
-        // --- FIX: Replace onDialRotated with our 3 specific dials ---
-        void onFrontDialRotated(int direction);
-        void onRearDialRotated(int direction);
-        void onControlWheelRotated(int direction);
+        void onDialRotated(int direction);
     }
 
     private InputListener listener;
@@ -59,6 +55,30 @@ public class InputManager {
             listener.onEnterPressed();
             return true;
         }
+
+        // --- DIAL ROTATION (Catches Front, Rear, Kuru/Wheel, and Lens Rings) ---
+        // We evaluate dials BEFORE directional pads, because some dials fire D-Pad codes
+        // if the OS hasn't fully suppressed them. We want to catch the raw ISV codes first.
+        if (sc == ScalarInput.ISV_DIAL_1_CLOCKWISE || 
+            sc == ScalarInput.ISV_DIAL_2_CLOCKWISE || 
+            sc == ScalarInput.ISV_DIAL_3_CLOCKWISE || 
+            sc == ScalarInput.ISV_DIAL_KURU_CLOCKWISE || 
+            sc == ScalarInput.ISV_RING_CLOCKWISE ||
+            sc == ScalarInput.ISV_RING_LENS_APERTURE_CLOCKWISE) {
+            listener.onDialRotated(1);
+            return true;
+        }
+        if (sc == ScalarInput.ISV_DIAL_1_COUNTERCW || 
+            sc == ScalarInput.ISV_DIAL_2_COUNTERCW || 
+            sc == ScalarInput.ISV_DIAL_3_COUNTERCW || 
+            sc == ScalarInput.ISV_DIAL_KURU_COUNTERCW || 
+            sc == ScalarInput.ISV_RING_COUNTERCW ||
+            sc == ScalarInput.ISV_RING_LENS_APERTURE_COUNTERCW) {
+            listener.onDialRotated(-1);
+            return true;
+        }
+
+        // Now we handle the standard D-Pad directions
         if (sc == ScalarInput.ISV_KEY_UP || keyCode == KeyEvent.KEYCODE_DPAD_UP) {
             listener.onUpPressed();
             return true;
@@ -73,28 +93,6 @@ public class InputManager {
         }
         if (sc == ScalarInput.ISV_KEY_RIGHT || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
             listener.onRightPressed();
-            return true;
-        }
-
-        // --- FRONT DIAL (INDEX FINGER) ---
-        if (sc == ScalarInput.ISV_DIAL_1_CLOCKWISE) { listener.onFrontDialRotated(1); return true; }
-        if (sc == ScalarInput.ISV_DIAL_1_COUNTERCW) { listener.onFrontDialRotated(-1); return true; }
-
-        // --- REAR DIAL (THUMB) ---
-        if (sc == ScalarInput.ISV_DIAL_2_CLOCKWISE) { listener.onRearDialRotated(1); return true; }
-        if (sc == ScalarInput.ISV_DIAL_2_COUNTERCW) { listener.onRearDialRotated(-1); return true; }
-
-        // --- REAR CONTROL WHEEL & LENS RINGS ---
-        if (sc == ScalarInput.ISV_DIAL_3_CLOCKWISE || 
-            sc == ScalarInput.ISV_DIAL_KURU_CLOCKWISE || 
-            sc == ScalarInput.ISV_RING_CLOCKWISE) {
-            listener.onControlWheelRotated(1);
-            return true;
-        }
-        if (sc == ScalarInput.ISV_DIAL_3_COUNTERCW || 
-            sc == ScalarInput.ISV_DIAL_KURU_COUNTERCW || 
-            sc == ScalarInput.ISV_RING_COUNTERCW) {
-            listener.onControlWheelRotated(-1);
             return true;
         }
 
