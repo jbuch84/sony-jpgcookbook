@@ -1566,21 +1566,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     // --- NEW: KELVIN CYCLE HELPER ---
     private String cycleKelvin(String current, int dir) {
         if (current == null) current = "Auto";
-        
         List<String> list = new ArrayList<String>();
         list.add("Auto");
-        for (int i = 2500; i <= 9900; i += 100) {
-            list.add(i + "K");
-        }
+        for (int i = 2500; i <= 9900; i += 100) { list.add(i + "K"); }
         
         int idx = 0;
         for (int i = 0; i < list.size(); i++) {
-            if (list.get(i).equalsIgnoreCase(current)) {
-                idx = i;
-                break;
-            }
+            if (list.get(i).equalsIgnoreCase(current)) { idx = i; break; }
         }
-        
         int newIdx = (idx + dir + list.size()) % list.size();
         return list.get(newIdx);
     }
@@ -1649,22 +1642,20 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
         p = c.getParameters(); 
 
-        // --- NEW: KELVIN WHITE BALANCE APPLICATION ---
+        // --- UPDATED: KELVIN WHITE BALANCE (Using PARAMS.TXT keys) ---
         String wb = "auto";
         String profWb = prof.whiteBalance != null ? prof.whiteBalance : "Auto";
         
-        // Legacy support for older saved files
-        if ("DAY".equals(profWb)) wb = "daylight"; 
+        if (profWb.endsWith("K")) {
+            wb = "color-temp"; // Key from whitebalance-values 
+            // Key from color-temperture-white-balance 
+            p.set("color-temperture-white-balance", profWb.replace("K", "")); 
+        } else if ("DAY".equals(profWb)) wb = "daylight"; 
         else if ("SHD".equals(profWb)) wb = "shade"; 
         else if ("CLD".equals(profWb)) wb = "cloudy-daylight"; 
         else if ("INC".equals(profWb)) wb = "incandescent"; 
         else if ("FLR".equals(profWb)) wb = "fluorescent";
-        else if (profWb.endsWith("K")) {
-            wb = "color-temperature";
-            if (p.get("color-temperature") != null) {
-                p.set("color-temperature", profWb.replace("K", ""));
-            }
-        }
+
         p.setWhiteBalance(wb);
         
         if (p.get("white-balance-shift-mode") != null) p.set("white-balance-shift-mode", (prof.wbShift != 0 || prof.wbShiftGM != 0) ? "true" : "false");
@@ -1905,7 +1896,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         } else if (currentHudMode == 7) { 
             activeCells = 1; labels = new String[]{"WHITE BALANCE"};
             values[0] = p.whiteBalance != null ? p.whiteBalance.toUpperCase() : "AUTO";
-            tooltip = "Adjust White Balance: Auto or specific Kelvin temperature";
+            tooltip = "Adjust Kelvin Temperature (2500K - 9900K)";
 
         } else if (currentHudMode == 8) {
             activeCells = 1; labels = new String[]{"EFFECT"};
@@ -2199,6 +2190,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 boolean mtxIsStd = p.advMatrix[0]==100 && p.advMatrix[1]==0 && p.advMatrix[2]==0 && p.advMatrix[3]==0 && p.advMatrix[4]==100 && p.advMatrix[5]==0 && p.advMatrix[6]==0 && p.advMatrix[7]==0 && p.advMatrix[8]==100;
                 String mtxStr = mtxIsStd ? "[ STANDARD ]" : "[ " + getActiveMatrixName() + " ]";
 
+                // --- UPDATED LABELS ---
                 String[] rLabels = {"White Balance Shift", "White Balance", "6-Axis Color Depths", "BIONZ RGB Matrix"};
                 String[] rValues = { combinedWb, (p.whiteBalance != null ? p.whiteBalance : "Auto").toUpperCase(), sixStr, mtxStr };
                 for (int i = 0; i < 4; i++) { menuLabels[i].setText(rLabels[i]); menuValues[i].setText(rValues[i]); menuRows[i].setVisibility(View.VISIBLE); }
