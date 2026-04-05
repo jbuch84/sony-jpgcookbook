@@ -253,22 +253,52 @@ public class RecipeManager {
         } catch (Exception e) {}
     }
 
-    public List<String> getVaultFiles() {
-        List<String> files = new ArrayList<String>();
+    // --- NEW VAULT DATA STRUCTURE ---
+    public static class VaultItem {
+        public String filename;
+        public String profileName;
+        public VaultItem(String fn, String pn) { filename = fn; profileName = pn; }
+    }
+    private List<VaultItem> vaultItems = new ArrayList<VaultItem>();
+
+    public void scanVault() {
+        vaultItems.clear();
         File[] all = recipeDir.listFiles();
         if (all != null) {
             for (File f : all) {
                 String n = f.getName().toUpperCase();
-                // RESTORED: Hide R_SLOT files and PREFS.TXT from the Vault menu
-                if (n.endsWith(".TXT") && !n.startsWith("R_SLOT") && !n.equals("PREFS.TXT")) files.add(f.getName());
+                // Hide system slots and PREFS
+                if (n.endsWith(".TXT") && !n.startsWith("R_SLOT") && !n.equals("PREFS.TXT")) {
+                    String pName = n.replace(".TXT", ""); // Fallback name
+                    try {
+                        // Quick scan into the JSON to extract the pretty profileName
+                        BufferedReader br = new BufferedReader(new FileReader(f));
+                        String line;
+                        while ((line = br.readLine()) != null) {
+                            if (line.contains("\"profileName\"")) {
+                                String[] parts = line.split("\"");
+                                if (parts.length >= 4) pName = parts[3];
+                                break; // Stop reading once we find it
+                            }
+                        }
+                        br.close();
+                    } catch (Exception e) {}
+                    vaultItems.add(new VaultItem(f.getName(), pName));
+                }
             }
         }
-        if (files.isEmpty()) files.add("NO VAULT RECIPES");
-        return files;
+        if (vaultItems.isEmpty()) {
+            vaultItems.add(new VaultItem("NONE", "NO VAULT RECIPES"));
+        }
+    }
+
+    public List<VaultItem> getVaultItems() {
+        if (vaultItems.isEmpty()) scanVault();
+        return vaultItems;
     }
 
     public void copyVaultToSlot(String vaultFilename) {
-        if (vaultFilename.equals("NO VAULT RECIPES")) return;
+        if (vaultFilename.equals("NONE") || vaultFilename.equals("NO VAULT RECIPES")) return;
         loadedProfiles[currentSlot] = loadProfileFromFile(vaultFilename, currentSlot);
         savePreferences();
     }
