@@ -101,7 +101,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private TextView[] hudValues = new TextView[9];
 
     // --- VAULT UI VARIABLES ---
-    private List<String> vaultFiles = new ArrayList<String>();
+    private List<RecipeManager.VaultItem> vaultItems = new ArrayList<RecipeManager.VaultItem>();
     private int vaultIndex = 0;
 
      // --- RGB MATRIX MATH ---
@@ -766,11 +766,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     isMenuEditing = true; // Enter "Scroll Mode"
                 } else {
                     // They hit Enter to confirm the load!
-                    if (!vaultFiles.isEmpty() && !vaultFiles.get(0).equals("NO VAULT RECIPES")) {
-                        recipeManager.copyVaultToSlot(vaultFiles.get(vaultIndex));
+                    if (!vaultItems.isEmpty() && !vaultItems.get(0).filename.equals("NONE")) {
+                        recipeManager.copyVaultToSlot(vaultItems.get(vaultIndex).filename);
                         isMenuEditing = false; // Exit "Scroll Mode"
                         if (tvTopStatus != null) {
-                            tvTopStatus.setText("LOADED: " + vaultFiles.get(vaultIndex).replace(".TXT", ""));
+                            tvTopStatus.setText("LOADED: " + vaultItems.get(vaultIndex).profileName);
                             tvTopStatus.setTextColor(Color.GREEN);
                         }
                     } else {
@@ -1027,7 +1027,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             } else if (isMenuEditing) {
                 // --- VAULT SCROLLING (LEFT) ---
                 if (currentMainTab == 0 && currentPage == 1 && menuSelection == 2) {
-                    if (!vaultFiles.isEmpty() && !vaultFiles.get(0).equals("NO VAULT RECIPES")) {
+                    if (!vaultItems.isEmpty() && !vaultItems.get(0).filename.equals("NONE")) {
                         vaultIndex -= 1;
                         if (vaultIndex < 0) vaultIndex += vaultFiles.size();
                         renderMenu();
@@ -1118,7 +1118,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             } else if (isMenuEditing) {
                 // --- VAULT SCROLLING (RIGHT) ---
                 if (currentMainTab == 0 && currentPage == 1 && menuSelection == 2) {
-                    if (!vaultFiles.isEmpty() && !vaultFiles.get(0).equals("NO VAULT RECIPES")) {
+                    if (!vaultItems.isEmpty() && !vaultItems.get(0).filename.equals("NONE")) {
                         vaultIndex = (vaultIndex + 1) % vaultFiles.size();
                         renderMenu();
                     }
@@ -1218,7 +1218,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 handleNamingChange(direction); 
             } else if (isMenuEditing) { 
                 if (currentMainTab == 0 && currentPage == 1 && menuSelection == 2) {
-                    if (!vaultFiles.isEmpty() && !vaultFiles.get(0).equals("NO VAULT RECIPES")) {
+                    if (!vaultItems.isEmpty() && !vaultItems.get(0).filename.equals("NONE")) {
                         if (direction > 0) {
                             vaultIndex = (vaultIndex + 1) % vaultFiles.size();
                         } else {
@@ -1326,7 +1326,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             }
             // ROW 3: LOAD FROM VAULT (NEW INDEX 2)
             else if (sel == 2) {
-                if (!vaultFiles.isEmpty() && !vaultFiles.get(0).equals("NO VAULT RECIPES")) {
+                if (!vaultItems.isEmpty() && !vaultItems.get(0).filename.equals("NONE")) {
                     vaultIndex += dir;
                     // Wrap-around logic for the list
                     while (vaultIndex < 0) vaultIndex += vaultFiles.size();
@@ -2162,14 +2162,23 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 String tsStr = String.format("[ %+d,  %+d,  %+d ]", p.contrast, p.saturation, p.sharpness);
 
                 // --- NEW: FETCH VAULT FILES FOR ROW 3 ---
-                vaultFiles = recipeManager.getVaultFiles();
-                if (vaultIndex >= vaultFiles.size() || vaultIndex < 0) vaultIndex = 0;
-                String vaultDisplay = vaultFiles.isEmpty() || vaultFiles.get(0).equals("NO VAULT RECIPES") 
-                        ? "[ NO FILES ]" 
-                        : "< " + vaultFiles.get(vaultIndex).replace(".TXT", "") + " >";
+                vaultItems = recipeManager.getVaultItems();
+                if (vaultIndex >= vaultItems.size() || vaultIndex < 0) vaultIndex = 0;
+                
+                String vaultDisplay;
+                if (vaultItems.isEmpty() || vaultItems.get(0).filename.equals("NONE")) {
+                    vaultDisplay = "[ NO FILES ]";
+                } else if (menuSelection == 2) { 
+                    // ONLY show the name if they are hovering over the Load row
+                    vaultDisplay = "< " + vaultItems.get(vaultIndex).profileName + " >";
+                } else {
+                    // Otherwise, keep the menu clean
+                    vaultDisplay = "[ BROWSE ]";
+                }
 
                 // --- NEW: 6-ROW LAYOUT ---
-                String[] rLabels = {"Recipe Slot", "Active Recipe (Save)", "Load from Vault", "Foundation Base", "Tone & Style", "DRO (Dynamic Range)"};
+                // Updated labels to make the Sandbox vs Vault relationship clearer
+                String[] rLabels = {"Workspace (1-10)", "Save to Vault (Rename)", "Load from Vault", "Foundation Base", "Tone & Style", "DRO (Dynamic Range)"};
                 String[] rValues = { String.valueOf(recipeManager.getCurrentSlot() + 1), displayHtmlName, vaultDisplay, fndStr, tsStr, p.dro != null ? p.dro.toUpperCase() : "OFF" };
                 
                 for (int i = 0; i < 6; i++) {
