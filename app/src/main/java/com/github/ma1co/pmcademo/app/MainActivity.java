@@ -591,44 +591,57 @@ public void onEnterPressed() {
 
     if (isHudActive) {
         // --- VAULT HUD (MODE 10) ---
+        // --- VAULT HUD (MODE 10) ---
         if (currentHudMode == 10) {
             if (isNamingMode) {
                 isNamingMode = false;
-                recipeManager.saveSlotToVault(new String(matrixNameBuffer).trim());
-                isHudActive = false; 
+                String finalName = new String(matrixNameBuffer).trim();
+                recipeManager.saveSlotToVault(finalName);
+                
+                // --- FIX: STAY IN HUD & SNAP TO NEW RECIPE ---
+                vaultItems = recipeManager.getVaultItems(); 
+                for (int i = 0; i < vaultItems.size(); i++) {
+                    if (vaultItems.get(i).profileName.equalsIgnoreCase(finalName)) {
+                        vaultIndex = i; 
+                        break;
+                    }
+                }
+                updateHudUI(); 
+                return;
+                
             } else if (isConfirmingDelete) {
                 // --- HANDLE CONFIRM/CANCEL ---
                 if (hudSelection == 0) { // CONFIRM
-                    recipeManager.deleteVaultItem(vaultIndex); // Delete the item shown in the browser
-                    vaultIndex = 0; // Reset browser cursor
+                    recipeManager.deleteVaultItem(vaultIndex); 
+                    vaultIndex = 0; 
                     
-                    // Stay in HUD, preview the next item (or default if empty)
                     vaultItems = recipeManager.getVaultItems();
                     if (!vaultItems.isEmpty() && !vaultItems.get(0).filename.equals("NONE")) {
                         recipeManager.previewVaultToSlot(vaultItems.get(0).filename);
                     } else {
                         recipeManager.resetCurrentSlot();
                     }
+                    
+                    // --- FIX: FORCE HARDWARE TO UPDATE LIVE ---
                     triggerLutPreload();
+                    applyHardwareRecipe();
                     
                     isConfirmingDelete = false;
-                    hudSelection = 1; // Safely put cursor back on BROWSE
+                    hudSelection = 1; 
                     updateHudUI();
                     return;
                 } else if (hudSelection == 1) { // CANCEL
                     isConfirmingDelete = false;
-                    hudSelection = 0; // Safely reset cursor to SAVE
+                    hudSelection = 0; 
                     updateHudUI();
                     return;
                 }
             } else {
                 if (hudSelection == 0) { 
                     isNamingMode = true;
-                    // --- SMART NAMING BUFFER ---
                     RTLProfile activeProfile = recipeManager.getCurrentProfile();
                     String currentName = (activeProfile != null) ? activeProfile.profileName : "";
                     
-                    // If it has a name, and it isn't a default scratchpad like "SLOT 1", auto-fill it!
                     if (currentName != null && !currentName.isEmpty() && !currentName.startsWith("SLOT ")) {
                         StringBuilder sb = new StringBuilder(currentName);
                         while(sb.length() < 12) sb.append(" ");
@@ -641,26 +654,29 @@ public void onEnterPressed() {
                     updateHudUI();
                     return; 
                 } else if (hudSelection == 1) { 
-                    // ACTION: CONFIRM LOAD
+                    // ACTION: CONFIRM LOAD (Exits HUD)
                     recipeManager.savePreferences(); 
                     isHudActive = false; 
                 } else if (hudSelection == 2) { 
                     // ACTION: RESET
                     recipeManager.resetCurrentSlot();
-                    isHudActive = false; 
+                    
+                    // --- FIX: FORCE HARDWARE TO UPDATE LIVE & STAY IN HUD ---
+                    triggerLutPreload();
+                    applyHardwareRecipe();
+                    updateHudUI(); 
+                    return; 
                 } else if (hudSelection == 3) {
-                    // --- TRIGGER DELETE CONFIRMATION ---
-                    List<RecipeManager.VaultItem> vaultItems = recipeManager.getVaultItems();
                     if (!vaultItems.isEmpty() && !vaultItems.get(vaultIndex).filename.equals("NONE")) {
                         isConfirmingDelete = true;
-                        hudSelection = 1; // Safely default their cursor to "CANCEL"
+                        hudSelection = 1; 
                         updateHudUI();
                         return;
                     }
                 }
             }
             
-            // Clean up UI if we exited the HUD
+            // Clean up UI if we exited the HUD (like hitting Confirm Load)
             if (!isHudActive) { 
                 hudOverlayContainer.setVisibility(View.GONE);
                 mainUIContainer.setVisibility(View.GONE);
@@ -1937,7 +1953,8 @@ public void onEnterPressed() {
                 activeCells = 4;
                 labels = new String[]{"SAVE", "BROWSE", "RESET", "DELETE"};
                 
-                List<RecipeManager.VaultItem> vaultItems = recipeManager.getVaultItems();
+                // FIX: Update the global class variable, do NOT create a local variable!
+                vaultItems = recipeManager.getVaultItems();
                 if (vaultIndex >= vaultItems.size() || vaultIndex < 0) vaultIndex = 0;
                 
                 String vName = (vaultItems.isEmpty() || vaultItems.get(0).filename.equals("NONE")) 
