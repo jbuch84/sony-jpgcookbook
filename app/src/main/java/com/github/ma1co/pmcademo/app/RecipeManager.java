@@ -303,6 +303,16 @@ public class RecipeManager {
         savePreferences();
     }
 
+    public void resetCurrentSlot() {
+        // Create a completely fresh, default profile
+        RTLProfile blankProfile = new RTLProfile(); 
+        blankProfile.profileName = "SLOT " + (currentSlot + 1);
+        
+        // Overwrite the current active slot with the blank one
+        loadedProfiles[currentSlot] = blankProfile;
+        savePreferences();
+    }
+
     public void saveSlotToVault(String customName) {
         String safe = customName.trim().replaceAll("[^A-Za-z0-9_\\- ]", "").toUpperCase();
         if (safe.isEmpty()) safe = "CUSTOM";
