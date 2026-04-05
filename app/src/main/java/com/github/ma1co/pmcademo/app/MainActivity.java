@@ -588,50 +588,39 @@ public void onEnterPressed() {
     if (isProcessing) return;
 
     if (isHudActive) {
-        // --- NEW: VAULT HUD (MODE 10) ---
+        // --- VAULT HUD (MODE 10) ---
         if (currentHudMode == 10) {
             if (isNamingMode) {
-                // Finalize Naming & Save to SD
                 isNamingMode = false;
                 String finalName = new String(matrixNameBuffer).trim();
-                if (finalName.isEmpty()) finalName = "CUSTOM";
-                
+                // Engine handles the save, the name update, and the scan
                 recipeManager.saveSlotToVault(finalName);
-                recipeManager.getCurrentProfile().profileName = finalName; // Update active memory!
-                
-                // --- FIXED: FORCE SD CARD RESCAN ---
-                // Tell the engine to read the SD card right now so the new file appears in the HUD instantly
-                recipeManager.scanVault(); 
-                
                 isHudActive = false; 
             } else {
-                if (hudSelection == 0) {
-                    if (!vaultItems.isEmpty() && !vaultItems.get(0).filename.equals("NONE")) {
-                        recipeManager.copyVaultToSlot(vaultItems.get(vaultIndex).filename);
-                    }
+                if (hudSelection == 0) { 
+                    // Confirm Load: The wheel already loaded the recipe for preview
                     isHudActive = false; 
-                } else if (hudSelection == 1) {
+                } else if (hudSelection == 1) { 
+                    // Start Naming: Switch to letter-scrolling mode
                     isNamingMode = true;
                     matrixNameBuffer = "CUSTOM      ".toCharArray();
                     nameCursorPos = 0;
                     updateHudUI();
                     return; 
-                } else if (hudSelection == 2) {
+                } else if (hudSelection == 2) { 
+                    // Reset: Wipe slot to defaults
                     recipeManager.resetCurrentSlot();
                     isHudActive = false; 
                 }
             }
-            
-            // Clean exit without Toasts
+
+            // Cleanup: If we are exiting the HUD, restore the Main Menu
             if (!isHudActive) { 
                 hudOverlayContainer.setVisibility(View.GONE);
-                if (hudTooltipText != null) hudTooltipText.setVisibility(View.GONE);
                 mainUIContainer.setVisibility(View.GONE);
                 menuContainer.setVisibility(View.VISIBLE); 
                 recipeManager.savePreferences(); 
                 renderMenu(); 
-            } else {
-                hudOverlayContainer.setVisibility(View.VISIBLE);
             }
             return;
         }
@@ -1926,9 +1915,9 @@ public void onEnterPressed() {
             values[1] = "[ NAME & EXPORT ]";
             values[2] = "[ RESTORE DEFAULTS ]";
             
-            if (hudSelection == 0) tooltip = "Scroll wheel to browse. LIVE VIEW will update automatically.";
-            else if (hudSelection == 1) tooltip = "Press ENTER. Same name = OVERWRITE. New name = NEW FILE.";
-            else tooltip = "Press ENTER to wipe this Slot back to default settings.";
+            if (hudSelection == 0) tooltip = "Wheel to browse. LIVE VIEW updates automatically.";
+            else if (hudSelection == 1) tooltip = "Enter to Name. Same name = OVERWRITE. New name = NEW FILE.";
+            else tooltip = "Enter to wipe this Slot back to default settings.";
 
             // --- TOP BAR NAMING UI ---
             if (tvTopStatus != null) {
@@ -2077,8 +2066,7 @@ public void onEnterPressed() {
             if (hudSelection == 0 && !vaultItems.isEmpty() && !vaultItems.get(0).filename.equals("NONE")) {
                 vaultIndex = (vaultIndex + dir + vaultItems.size()) % vaultItems.size();
                 
-                // --- REACTIVE LIVE PREVIEW ---
-                // Load it immediately so the user sees the look change while browsing
+                // --- REACTIVE PREVIEW ---
                 recipeManager.copyVaultToSlot(vaultItems.get(vaultIndex).filename);
                 triggerLutPreload(); 
             }

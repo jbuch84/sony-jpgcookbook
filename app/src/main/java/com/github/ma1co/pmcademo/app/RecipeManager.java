@@ -253,7 +253,7 @@ public class RecipeManager {
         } catch (Exception e) {}
     }
 
-    // --- NEW VAULT DATA STRUCTURE ---
+    // --- VAULT DATA STRUCTURE ---
     public static class VaultItem {
         public String filename;
         public String profileName;
@@ -264,16 +264,18 @@ public class RecipeManager {
     public void scanVault() {
         vaultItems.clear();
         File[] all = recipeDir.listFiles();
+        // Identify the current slot's scratchpad (e.g., R_SLOT01.TXT)
         String currentSlotFilename = String.format("R_SLOT%02d.TXT", currentSlot + 1);
 
         if (all != null) {
             for (File f : all) {
                 String n = f.getName().toUpperCase();
                 if (!n.endsWith(".TXT") || n.equals("PREFS.TXT")) continue;
-                // Hide other scratchpads; only show current slot's sandbox and saved recipes
+                
+                // HIDE other slots' scratchpads, but SHOW the current one and all saved recipes
                 if (n.startsWith("R_SLOT") && !n.equals(currentSlotFilename)) continue;
 
-                String pName = n.replace(".TXT", ""); 
+                String pName = n.replace(".TXT", ""); // Fallback
                 try {
                     BufferedReader br = new BufferedReader(new FileReader(f));
                     String line;
@@ -281,7 +283,7 @@ public class RecipeManager {
                         if (line.contains("\"profileName\"")) {
                             String[] parts = line.split("\"");
                             if (parts.length >= 4) pName = parts[3];
-                            break; 
+                            break;
                         }
                     }
                     br.close();
@@ -304,36 +306,36 @@ public class RecipeManager {
     }
 
     public void resetCurrentSlot() {
-        // Create a completely fresh, default profile
-        RTLProfile blankProfile = new RTLProfile(); 
-        blankProfile.profileName = "SLOT " + (currentSlot + 1);
-        
-        // Overwrite the current active slot with the blank one
-        loadedProfiles[currentSlot] = blankProfile;
+        RTLProfile blank = new RTLProfile(currentSlot);
+        blank.profileName = "SLOT " + (currentSlot + 1);
+        loadedProfiles[currentSlot] = blank;
         savePreferences();
     }
 
     public void saveSlotToVault(String newPrettyName) {
         String targetFile = null;
-        // Check for overwrite
+        // 1. Overwrite check: does a saved recipe already have this pretty name?
         for (VaultItem item : getVaultItems()) {
             if (item.profileName.equalsIgnoreCase(newPrettyName) && !item.filename.startsWith("R_SLOT")) {
                 targetFile = item.filename;
                 break;
             }
         }
-        // Generate new 8.3 filename if not found
+        // 2. If new, generate a safe 8.3 filename (e.g., VINTAG01.TXT)
         if (targetFile == null) {
-            String base = newPrettyName.replaceAll("[^a-zA-Z0-9]", "").toUpperCase();
+            String base = newPrettyName.replaceAll("[^A-Z0-9]", "").toUpperCase();
             if (base.length() > 6) base = base.substring(0, 6);
+            if (base.isEmpty()) base = "RECIPE";
             int count = 1;
             do {
                 targetFile = base + String.format("%02d", count++) + ".TXT";
             } while (new File(recipeDir, targetFile).exists() && count < 100);
         }
+        
+        // 3. Update memory and save to SD
         RTLProfile p = loadedProfiles[currentSlot];
         p.profileName = newPrettyName;
-        saveProfileToFile(p, targetFile); 
-        scanVault(); // Refresh list immediately
+        saveProfileToFile(new File(recipeDir, targetFile), p); 
+        scanVault(); // Refresh list so it shows up in the HUD immediately
     }
 }
