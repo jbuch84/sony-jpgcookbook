@@ -2,7 +2,7 @@ package com.github.ma1co.pmcademo.app;
 
 import android.content.Context;
 import android.graphics.Color;
-import android.graphics.Gravity;
+import android.view.Gravity;
 import android.graphics.Typeface;
 import android.os.Handler;
 import android.view.View;

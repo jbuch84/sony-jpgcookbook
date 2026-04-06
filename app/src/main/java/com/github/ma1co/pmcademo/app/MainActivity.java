@@ -1510,7 +1510,7 @@ public void onEnterPressed() {
     }
 
     // --- PlaybackController.HostCallback ---
-    @Override public View getMainUIContainer() { return mainUIContainer; }
+    @Override public FrameLayout getMainUIContainer() { return mainUIContainer; }
     @Override public int getDisplayState()      { return displayState; }
 
     // --- LensCalibrationController.HostCallback ---
