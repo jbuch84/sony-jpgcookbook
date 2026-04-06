@@ -1586,7 +1586,7 @@ public void onEnterPressed() {
         uiHandler.postDelayed(applySettingsRunnable, 150);
     }
     @Override public void onHudModeRequested(int mode) { launchHudMode(mode); }
-    @Override public void setAutoPowerOffMode(boolean on) { MainActivity.this.setAutoPowerOffMode(on); }
+    @Override public void onSetAutoPowerOffMode(boolean on) { setAutoPowerOffMode(on); }
 
     @Override public void restoreFocusMode(String savedMode) {
         if (savedMode != null && cameraManager != null && cameraManager.getCamera() != null) {
