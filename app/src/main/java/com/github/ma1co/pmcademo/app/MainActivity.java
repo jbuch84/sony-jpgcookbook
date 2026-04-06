@@ -41,7 +41,8 @@ import java.util.List;
 
 public class MainActivity extends Activity implements SurfaceHolder.Callback,
     SonyCameraManager.CameraEventListener, InputManager.InputListener,
-    ConnectivityManager.StatusUpdateListener, PlaybackController.HostCallback {
+    ConnectivityManager.StatusUpdateListener, PlaybackController.HostCallback,
+    LensCalibrationController.HostCallback {
 
     // --- GLOBAL DEBUG FLAG ---
     // Set to true to see diagnostic Toasts, false for clean public release
@@ -136,12 +137,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private List<String> availableLenses = new ArrayList<String>();
     private int currentLensIndex = 0;
     
-    private boolean isCalibrating = false;
-    private boolean waitingForProfileChoice = false;
-    private List<LensProfileManager.CalPoint> tempCalPoints = new ArrayList<LensProfileManager.CalPoint>();
-    private int calibStep = 0; 
-    private float minDistanceInput = 0.3f;
-    private String detectedLensName = "Manual Lens";
+    private LensCalibrationController calibController;
 
     private String getAppVersion() {
         try {
@@ -152,9 +148,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         }
     }
     
-    private float detectedFocalLength = 50.0f;
-    private float detectedMaxAperture = 2.8f;
-    
+
     private float hardwareFocalLength = 0.0f;
     private boolean isNativeLensAttached = false;
     private boolean hasPhysicalPasmDial = false;
@@ -265,7 +259,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                             requestHudUpdate(); 
                         }
                         if (tvTopStatus != null && tvTopStatus.getVisibility() != View.VISIBLE) {
-                            if (!isCalibrating && !waitingForProfileChoice) {
+                            if (!calibController.isActive()) {
                                 setHUDVisibility(View.VISIBLE);
                             }
                         }
@@ -376,7 +370,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             public boolean isReadyToProcess() { 
                 RTLProfile p = recipeManager.getCurrentProfile();
                 // --- FIXED: Added shadowToe, subtractiveSat, and halation to the trigger ---
-                return isReady && !isProcessing && !isCalibrating && 
+                return isReady && !isProcessing && !calibController.isCalibrating() && 
                        (p.lutIndex != 0 || p.grain != 0 || p.vignette != 0 || 
                         p.rollOff != 0 || p.colorChrome != 0 || p.chromeBlue != 0 ||
                         p.shadowToe != 0 || p.subtractiveSat != 0 || p.halation != 0); 
@@ -567,10 +561,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         updateMainHUD(); 
     }
 
-    private float getCircleOfConfusion() {
-        return isFullFrame ? 0.030f : 0.020f; 
-    }
-    
     private void requestHudUpdate() {
         if (!isHudUpdatePending) {
             isHudUpdatePending = true;
@@ -767,68 +757,15 @@ public void onEnterPressed() {
             launchHudMode(4); return;
         }
         
-        if (isCalibrating && calibStep == 0) {
-            calibStep = 10; 
-            updateCalibrationUI();
-            return;
-        }
-
-        if (isCalibrating && calibStep == 10) {
-            if (!isNativeLensAttached) {
-                tempCalPoints = lensManager.generateManualDummyProfile(detectedFocalLength, detectedMaxAperture, getCircleOfConfusion());
-                lensManager.saveProfileToFile(detectedFocalLength, detectedMaxAperture, tempCalPoints, true); 
-                
-                availableLenses = lensManager.getAvailableLenses();
-                String newFilename = LensProfileManager.generateFilename(detectedFocalLength, detectedMaxAperture, true);
-                currentLensIndex = availableLenses.indexOf(newFilename);
-                if (currentLensIndex == -1) currentLensIndex = 0;
-                
-                lensManager.loadProfileFromFile(newFilename);
-                
-                virtualAperture = lensManager.currentMaxAperture;
-                virtualFocusRatio = 0.5f; 
-                
-                isCalibrating = false;
-                if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.GONE);
-                setHUDVisibility(View.VISIBLE);
-                updateMainHUD(); 
-            } else {
-                calibStep = 1; 
-                minDistanceInput = 0.3f;
-                updateCalibrationUI();
-            }
-            return;
-        }
-        
-        if (isCalibrating && isNativeLensAttached) {
-            if (calibStep == 1) {
-                tempCalPoints.add(new LensProfileManager.CalPoint(cachedFocusRatio, minDistanceInput));
-                calibStep = 2; 
-                updateCalibrationUI();
-            } else if (calibStep == 2) {
-                tempCalPoints.add(new LensProfileManager.CalPoint(cachedFocusRatio, minDistanceInput));
-                updateCalibrationUI(); 
-            }
-            return;
-        }
+        if (calibController.handleEnter()) return;
 
         if (!isMenuOpen) {
             if (mDialMode == DIAL_MODE_REVIEW) {
                 playbackController.enter();
             } else if (mDialMode == DIAL_MODE_FOCUS && cachedIsManualFocus) {
-                waitingForProfileChoice = true;
-                setHUDVisibility(View.GONE); 
-                if (focusMeter != null) focusMeter.setVisibility(View.VISIBLE); 
-                if (tvCalibrationPrompt != null) {
-                    tvCalibrationPrompt.setVisibility(View.VISIBLE);
-                    
-                    boolean canAppend = isNativeLensAttached && lensManager.hasActiveProfile() && !lensManager.isCurrentProfileManual();
-                    if (canAppend) {
-                        tvCalibrationPrompt.setText("LENS MAPPING\n\n[DOWN] Map Attached Lens\n[LEFT] Append Points\n[RIGHT] Cancel");
-                    } else {
-                        tvCalibrationPrompt.setText("LENS MAPPING\n\n[DOWN] Map Attached Lens\n[RIGHT] Cancel");
-                    }
-                }
+                calibController.beginWaiting();
+                setHUDVisibility(View.GONE);
+                if (focusMeter != null) focusMeter.setVisibility(View.VISIBLE);
             } else {
                 displayState = (displayState == 0) ? 1 : 0; 
                 mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE);
@@ -889,24 +826,9 @@ public void onEnterPressed() {
             return;
         }
         
-        if (isProcessing || waitingForProfileChoice) return;
+        if (isProcessing || calibController.isWaiting()) return;
         
-        if (isCalibrating) {
-            if (calibStep == 2) {
-                tempCalPoints.add(new LensProfileManager.CalPoint(1.0f, 999.0f));
-                lensManager.saveProfileToFile(detectedFocalLength, detectedMaxAperture, tempCalPoints, false);
-                availableLenses = lensManager.getAvailableLenses();
-                String newFilename = LensProfileManager.generateFilename(detectedFocalLength, detectedMaxAperture, false);
-                currentLensIndex = availableLenses.indexOf(newFilename);
-                if (currentLensIndex == -1) currentLensIndex = 0;
-                lensManager.loadProfileFromFile(newFilename);
-                isCalibrating = false;
-                if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.GONE);
-                setHUDVisibility(View.VISIBLE);
-                updateMainHUD();
-            }
-            return;
-        }
+        if (calibController.handleUp()) return;
 
         if (isMenuOpen) {
             if (isNamingMode) {
@@ -973,25 +895,7 @@ public void onEnterPressed() {
         
         if (isProcessing) return;
         
-        if (waitingForProfileChoice) {
-            waitingForProfileChoice = false;
-            isCalibrating = true;
-            if (isNativeLensAttached) {
-                detectedLensName = "Electronic Lens";
-                detectedFocalLength = hardwareFocalLength > 0.0f ? hardwareFocalLength : 50.0f;
-                detectedMaxAperture = 2.8f;
-                calibStep = 10;
-                tempCalPoints.clear();
-            } else {
-                detectedLensName = "Manual Lens";
-                detectedFocalLength = 50.0f;
-                detectedMaxAperture = 2.8f;
-                calibStep = 0;
-                tempCalPoints.clear();
-            }
-            updateCalibrationUI();
-            return;
-        }
+        if (calibController.handleDown()) return;
 
         if (isMenuOpen) {
             if (isNamingMode) {
@@ -1037,35 +941,7 @@ public void onEnterPressed() {
             return;
         }
         if (isProcessing) return;
-        if (isCalibrating && calibStep == 0) {
-            detectedFocalLength = Math.max(10.0f, detectedFocalLength - 1.0f);
-            updateCalibrationUI();
-            return;
-        }
-        if (isCalibrating && calibStep == 10) {
-            detectedMaxAperture = Math.max(1.0f, detectedMaxAperture - 0.1f);
-            updateCalibrationUI();
-            return;
-        }
-        if (waitingForProfileChoice) {
-            boolean canAppend = isNativeLensAttached && lensManager.hasActiveProfile() && !lensManager.isCurrentProfileManual();
-            if (canAppend) {
-                waitingForProfileChoice = false;
-                isCalibrating = true;
-                tempCalPoints = new ArrayList<LensProfileManager.CalPoint>(lensManager.getCurrentPoints());
-                detectedLensName = lensManager.getCurrentLensName();
-                detectedFocalLength = lensManager.getCurrentFocalLength();
-                detectedMaxAperture = lensManager.currentMaxAperture;
-                if (!tempCalPoints.isEmpty() && tempCalPoints.get(tempCalPoints.size() - 1).ratio >= 0.99f) {
-                    tempCalPoints.remove(tempCalPoints.size() - 1);
-                }
-                calibStep = 2;
-                minDistanceInput = lensManager.getDistanceForRatio(cachedFocusRatio);
-                if (minDistanceInput < 0) minDistanceInput = 1.0f;
-                updateCalibrationUI();
-            }
-            return;
-        }
+        if (calibController.handleLeft()) return;
 
         if (isMenuOpen) {
             if (menuSelection == -2) { // 1. TAB LEVEL NAVIGATION
@@ -1133,22 +1009,7 @@ public void onEnterPressed() {
             return;
         }
         if (isProcessing) return;
-        if (isCalibrating && calibStep == 0) {
-            detectedFocalLength = Math.min(600.0f, detectedFocalLength + 1.0f);
-            updateCalibrationUI();
-            return;
-        }
-        if (isCalibrating && calibStep == 10) {
-            detectedMaxAperture = Math.min(22.0f, detectedMaxAperture + 0.1f);
-            updateCalibrationUI();
-            return;
-        }
-        if (waitingForProfileChoice || isCalibrating) {
-            waitingForProfileChoice = false; isCalibrating = false;
-            if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.GONE);
-            setHUDVisibility(View.VISIBLE); updateMainHUD();
-            return;
-        }
+        if (calibController.handleRight()) return;
 
         if (isMenuOpen) {
             if (menuSelection == -2) { // 1. TAB LEVEL NAVIGATION
@@ -1193,7 +1054,7 @@ public void onEnterPressed() {
     @Override
     public void onCustomButtonPressed() {
         // Do nothing if we are in a menu, looking at photos, or processing
-        if (playbackController.isActive() || isMenuOpen || isProcessing || isCalibrating) return;
+        if (playbackController.isActive() || isMenuOpen || isProcessing || calibController.isCalibrating()) return;
 
         // Simply jump the HUD cursor directly to the ISO slot
         mDialMode = DIAL_MODE_ISO;
@@ -1475,11 +1336,7 @@ public void onEnterPressed() {
     }
 
     private void handleHardwareInput(int d) {
-        if (isCalibrating && calibStep >= 1 && calibStep != 10) {
-            minDistanceInput = Math.max(0.1f, minDistanceInput + (d * 0.1f));
-            updateCalibrationUI();
-            return;
-        }
+        if (calibController.handleDial(d)) return;
 
         if (cameraManager == null || cameraManager.getCamera() == null || cameraManager.getCameraEx() == null) return;
         
@@ -2387,6 +2244,9 @@ public void onEnterPressed() {
         cpParams.setMargins(0, 20, 0, 0); 
         mainUIContainer.addView(tvCalibrationPrompt, cpParams);
 
+        // Calibration controller — receives the prompt view it needs to render into
+        calibController = new LensCalibrationController(tvCalibrationPrompt, this);
+
         menuContainer = new LinearLayout(this); 
         menuContainer.setOrientation(LinearLayout.VERTICAL); 
         menuContainer.setBackgroundColor(Color.argb(250, 15, 15, 15)); 
@@ -2823,60 +2683,6 @@ public void onEnterPressed() {
         }
     }
 
-    private void updateCalibrationUI() {
-        if (!isCalibrating) return;
-        
-        String distStr;
-        if (minDistanceInput >= 999.0f) {
-            distStr = "INFINITY";
-        } else {
-            float totalInches = minDistanceInput * 39.3701f;
-            int ft = (int) (totalInches / 12);
-            int in = (int) (totalInches % 12);
-            distStr = String.format("%.2fm / %d'%d\"", minDistanceInput, ft, in);
-        }
-        
-        String header = "<font color='#FFFFFF'><b>[ MAPPING: " + detectedLensName + " | POINTS LOGGED: " + tempCalPoints.size() + " ]</b></font><br>";
-        String wheelText = "<font color='#00FFFF'><b>rear scroll wheel</b></font>"; 
-        String sliderHtml = "<font color='#E6320F'><big><b>◄ " + distStr + " ►</b></big></font>"; 
-        String enterBtn = "<font color='#00FF00'><b>[ENTER]</b></font>"; 
-        String upBtn = "<font color='#00FF00'><b>[UP]</b></font>"; 
-        
-        String instructions = "";
-        
-        if (calibStep == 0) {
-            String mmSlider = "<font color='#E6320F'><big><b>◄ " + (int)detectedFocalLength + "mm ►</b></big></font>";
-            instructions = "<font color='#FFFFFF'><small>STEP 0A: Lens Detected.</small><br>";
-            instructions += "<small>Use [LEFT] / [RIGHT] to set Focal Length: </small> " + mmSlider + "<br>";
-            instructions += "<small>Press " + enterBtn + " to confirm.</small></font>";
-        } else if (calibStep == 10) {
-            String apSlider = "<font color='#E6320F'><big><b>◄ f/" + String.format("%.1f", detectedMaxAperture) + " ►</b></big></font>";
-            instructions = "<font color='#FFFFFF'><small>STEP 0B: Set Max Aperture for Lens ID.</small><br>";
-            instructions += "<small>Use [LEFT] / [RIGHT] to set Max Aperture: </small> " + apSlider + "<br>";
-            instructions += "<small>Press " + enterBtn + " to confirm.</small></font>";
-        } else if (calibStep == 1) {
-            instructions = "<font color='#FFFFFF'><small>STEP 1: Turn lens ring to hard stop (MIN FOCUS).</small><br>";
-            instructions += "<small>Use " + wheelText + " to dial distance: </small> " + sliderHtml + "<br>";
-            instructions += "<small>Press " + enterBtn + " to lock min point.</small></font>";
-        } else if (calibStep == 2) {
-            instructions = "<font color='#FFFFFF'><small>STEP 2: Focus on next object.</small><br>";
-            instructions += "<small>Use " + wheelText + " to dial distance: </small> " + sliderHtml + "<br>";
-            instructions += "<small>Press " + enterBtn + " to log point, or " + upBtn + " to Save & Finish.</small></font>";
-        }
-        
-        if (tvCalibrationPrompt != null) {
-            try {
-                FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) tvCalibrationPrompt.getLayoutParams();
-                lp.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
-                lp.topMargin = 10; 
-                tvCalibrationPrompt.setLayoutParams(lp);
-            } catch (Exception e) { }
-            tvCalibrationPrompt.setBackgroundColor(Color.argb(210, 15, 15, 15)); 
-            tvCalibrationPrompt.setPadding(25, 15, 25, 15); 
-            tvCalibrationPrompt.setText(android.text.Html.fromHtml(header + instructions));
-        }
-    }
-    
     private void updateMainHUD() {
         if (cameraManager == null || cameraManager.getCamera() == null) return;
         
@@ -2979,13 +2785,13 @@ public void onEnterPressed() {
             boolean shouldShow = prefShowFocusMeter && cachedIsManualFocus;
             focusMeter.setVisibility(shouldShow ? View.VISIBLE : View.GONE);
             if (shouldShow) {
-                float focalToUse = isCalibrating ? detectedFocalLength : (lensManager != null ? lensManager.getCurrentFocalLength() : 50.0f);
-                List<LensProfileManager.CalPoint> ptsToUse = isCalibrating ? tempCalPoints : (lensManager != null ? lensManager.getCurrentPoints() : null);
+                boolean cal = calibController.isCalibrating();
+                float focalToUse = cal ? calibController.getDetectedFocalLength() : (lensManager != null ? lensManager.getCurrentFocalLength() : 50.0f);
+                List<LensProfileManager.CalPoint> ptsToUse = cal ? calibController.getTempCalPoints() : (lensManager != null ? lensManager.getCurrentPoints() : null);
+                float ratioToFeed = (lensManager != null && lensManager.isCurrentProfileManual() && !cal) ? virtualFocusRatio : cachedFocusRatio;
+                float apToFeed    = (lensManager != null && lensManager.isCurrentProfileManual() && !cal) ? virtualAperture   : cachedAperture;
                 
-                float ratioToFeed = (lensManager != null && lensManager.isCurrentProfileManual() && !isCalibrating) ? virtualFocusRatio : cachedFocusRatio;
-                float apToFeed = (lensManager != null && lensManager.isCurrentProfileManual() && !isCalibrating) ? virtualAperture : cachedAperture;
-                
-                focusMeter.update(ratioToFeed, apToFeed, focalToUse, isCalibrating, ptsToUse, getCircleOfConfusion());
+                focusMeter.update(ratioToFeed, apToFeed, focalToUse, cal, ptsToUse, getCircleOfConfusion());
             }
         }
         
@@ -2994,7 +2800,7 @@ public void onEnterPressed() {
 
         // --- 5. CALIBRATION OVERRIDES ---
         // Overrides the "Normal State" visibility if we are currently mapping a lens.
-        if (isCalibrating || waitingForProfileChoice) {
+        if (calibController.isActive()) {
             setHUDVisibility(View.GONE);
             if (focusMeter != null) focusMeter.setVisibility(View.VISIBLE);
             if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.VISIBLE);
@@ -3072,12 +2878,13 @@ public void onEnterPressed() {
         if (focusMeter != null && cachedIsManualFocus) { 
             runOnUiThread(new Runnable() { 
                 public void run() {
-                    cachedFocusRatio = ratio; 
-                    float focalToUse = isCalibrating ? detectedFocalLength : (lensManager != null ? lensManager.getCurrentFocalLength() : 50.0f);
-                    List<LensProfileManager.CalPoint> ptsToUse = isCalibrating ? tempCalPoints : (lensManager != null ? lensManager.getCurrentPoints() : null);
-                    float ratioToFeed = (lensManager != null && lensManager.isCurrentProfileManual() && !isCalibrating) ? virtualFocusRatio : cachedFocusRatio;
-                    float apToFeed = (lensManager != null && lensManager.isCurrentProfileManual() && !isCalibrating) ? virtualAperture : cachedAperture;
-                    focusMeter.update(ratioToFeed, apToFeed, focalToUse, isCalibrating, ptsToUse, getCircleOfConfusion());
+                    cachedFocusRatio = ratio;
+                    boolean cal = calibController.isCalibrating();
+                    float focalToUse = cal ? calibController.getDetectedFocalLength() : (lensManager != null ? lensManager.getCurrentFocalLength() : 50.0f);
+                    List<LensProfileManager.CalPoint> ptsToUse = cal ? calibController.getTempCalPoints() : (lensManager != null ? lensManager.getCurrentPoints() : null);
+                    float ratioToFeed = (lensManager != null && lensManager.isCurrentProfileManual() && !cal) ? virtualFocusRatio : cachedFocusRatio;
+                    float apToFeed    = (lensManager != null && lensManager.isCurrentProfileManual() && !cal) ? virtualAperture   : cachedAperture;
+                    focusMeter.update(ratioToFeed, apToFeed, focalToUse, cal, ptsToUse, getCircleOfConfusion());
                 }
             });
         }
@@ -3130,6 +2937,30 @@ public void onEnterPressed() {
     // --- PlaybackController.HostCallback ---
     @Override public View getMainUIContainer() { return mainUIContainer; }
     @Override public int getDisplayState() { return displayState; }
+
+    // --- LensCalibrationController.HostCallback ---
+    @Override public LensProfileManager getLensManager() { return lensManager; }
+    @Override public boolean isNativeLensAttached() { return isNativeLensAttached; }
+    @Override public float getHardwareFocalLength() { return hardwareFocalLength; }
+    @Override public float getCircleOfConfusion() { return isFullFrame ? 0.030f : 0.020f; }
+    @Override public float getCachedFocusRatio() { return cachedFocusRatio; }
+
+    @Override
+    public void onCalibrationComplete(String lensFilename) {
+        availableLenses = lensManager.getAvailableLenses();
+        currentLensIndex = availableLenses.indexOf(lensFilename);
+        if (currentLensIndex == -1) currentLensIndex = 0;
+        virtualAperture = lensManager.currentMaxAperture;
+        virtualFocusRatio = 0.5f;
+        setHUDVisibility(View.VISIBLE);
+        updateMainHUD();
+    }
+
+    @Override
+    public void onCalibrationCancelled() {
+        setHUDVisibility(View.VISIBLE);
+        updateMainHUD();
+    }
 
     private void syncHardwareState() {
         if (cameraManager == null || cameraManager.getCamera() == null) return;
