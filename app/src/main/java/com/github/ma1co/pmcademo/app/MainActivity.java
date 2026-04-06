@@ -456,43 +456,40 @@ public void onEnterPressed() {
                 }
                 hudController.update(); return;
             } else if (menuController.isConfirmingDelete()) {
-                if (hudController.setSelection(0) {
-                    recipeManager.deleteVaultItem(hudController.getVaultIndex())); hudController.setVaultIndex(0);
+                if (hudController.getSelection() == 0) {
+                    recipeManager.deleteVaultItem(hudController.getVaultIndex()); hudController.setVaultIndex(0);
                     hudController.refreshVaultItems();
                     if (!hudController.getVaultItems().isEmpty() && !hudController.getVaultItems().get(0).filename.equals("NONE")) recipeManager.previewVaultToSlot(hudController.getVaultItems().get(0).filename);
                     else recipeManager.resetCurrentSlot();
                     triggerLutPreload(); applyHardwareRecipe();
                     menuController.setConfirmingDelete(false); hudController.setSelection(1); hudController.update(); return;
-                } else if (hudController.setSelection(1) {
-                    menuController.setConfirmingDelete(false)); hudController.setSelection(0); hudController.update(); return;
+                } else if (hudController.getSelection() == 1) {
+                    menuController.setConfirmingDelete(false); hudController.setSelection(0); hudController.update(); return;
                 }
             } else {
-                if (hudController.setSelection(0) {
-                    menuController.setNamingMode(true));
+                if (hudController.getSelection() == 0) {
+                    menuController.setNamingMode(true);
                     RTLProfile activeProfile = recipeManager.getCurrentProfile();
                     String currentName = (activeProfile != null) ? activeProfile.profileName : "";
                     if (currentName != null && !currentName.isEmpty() && !currentName.startsWith("SLOT ")) menuController.fillNameBuffer(currentName);
                     else menuController.resetNameBuffer();
                     menuController.resetNameCursor(); hudController.update(); return;
-                } else if (hudController.setSelection(1) { recipeManager.savePreferences()); // hudController marks itself inactive via close()
-                } else if (hudController.setSelection(2) { recipeManager.resetCurrentSlot()); triggerLutPreload(); applyHardwareRecipe(); hudController.update(); return;
-                } else if (hudController.setSelection(3) {
+                } else if (hudController.getSelection() == 1) { recipeManager.savePreferences(); hudController.close(); return;
+                } else if (hudController.getSelection() == 2) { recipeManager.resetCurrentSlot(); triggerLutPreload(); applyHardwareRecipe(); hudController.update(); return;
+                } else if (hudController.getSelection() == 3) {
                     if (!hudController.getVaultItems().isEmpty() && !hudController.getVaultItems().get(hudController.getVaultIndex()).filename.equals("NONE")) {
-                        menuController.setConfirmingDelete(true)); hudController.setSelection(1); hudController.update(); return;
+                        menuController.setConfirmingDelete(true); hudController.setSelection(1); hudController.update(); return;
                     }
                 }
             }
             if (!hudController.isActive()) {
-                hudController.getOverlay().setVisibility(View.GONE);
-                mainUIContainer.setVisibility(View.GONE);
-                menuController.getContainer().setVisibility(View.VISIBLE);
-                menuController.refreshDisplay();
+                hudController.close();
             }
             return;
         }
 
-        if (hudController.getMode() == 0 && hudController.setSelection(-1) {
-            RTLProfile p = recipeManager.getCurrentProfile());
+        if (hudController.getMode() == 0 && hudController.getSelection() == -1) {
+            RTLProfile p = recipeManager.getCurrentProfile();
             if (!menuController.isNamingMode()) {
                 for (int i = 0; i < matrixManager.getCount(); i++) {
                     int[] existing = matrixManager.getValues(i); boolean isMatch = true;
@@ -506,14 +503,9 @@ public void onEnterPressed() {
             return;
         }
 
-        // hudController marks itself inactive via close()
-        hudController.getOverlay().setVisibility(View.GONE);
-        if (hudController.getTooltip() != null) hudController.getTooltip().setVisibility(View.GONE);
-        if (hudController.getWbGrid() != null) hudController.getWbGrid().setVisibility(View.GONE);
-        mainUIContainer.setVisibility(View.GONE);
-        menuController.getContainer().setVisibility(View.VISIBLE);
+        // Standard HUD exit — controller hides overlays and fires onHudClosed callback
+        hudController.close();
         recipeManager.savePreferences();
-        menuController.refreshDisplay();
         return;
     }
         
