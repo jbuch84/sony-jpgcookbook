@@ -68,6 +68,9 @@ public class ConnectivityManager {
     }
 
     public void startHomeWifi() {
+        stopNetworking(); // Safety Check: Clear out any stuck receivers
+        if (wifiManager == null || connManager == null) return;
+        
         isHomeWifiRunning = true;
         updateStatus("WIFI", "Connecting to Router...");
         
@@ -98,7 +101,6 @@ public class ConnectivityManager {
         };
         
         IntentFilter filter = new IntentFilter();
-        // Fully qualify the Android constant
         filter.addAction(android.net.ConnectivityManager.CONNECTIVITY_ACTION);
         filter.addAction(WifiManager.WIFI_STATE_CHANGED_ACTION);
         context.registerReceiver(wifiReceiver, filter);
@@ -108,6 +110,12 @@ public class ConnectivityManager {
     }
 
     public void startHotspot() {
+        stopNetworking(); // Safety Check: Clear out any stuck receivers
+        if (wifiManager == null || directManager == null) {
+            updateStatus("HOTSPOT", "Hardware not ready.");
+            return;
+        }
+
         isHotspotRunning = true;
         updateStatus("HOTSPOT", "Starting Hotspot...");
         
