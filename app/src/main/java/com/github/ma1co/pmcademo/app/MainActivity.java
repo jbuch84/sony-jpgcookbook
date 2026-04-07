@@ -478,7 +478,16 @@ public void onEnterPressed() {
                     if (currentName != null && !currentName.isEmpty() && !currentName.startsWith("SLOT ")) menuController.fillNameBuffer(currentName);
                     else menuController.resetNameBuffer();
                     menuController.resetNameCursor(); hudController.update(); return;
-                } else if (hudController.getSelection() == 1) { recipeManager.savePreferences(); hudController.close(); return;
+                } else if (hudController.getSelection() == 1) { 
+                    // NEW: Explicitly force the highlighted Vault recipe to load into memory!
+                    if (!hudController.getVaultItems().isEmpty() && !hudController.getVaultItems().get(hudController.getVaultIndex()).filename.equals("NONE")) {
+                        recipeManager.previewVaultToSlot(hudController.getVaultItems().get(hudController.getVaultIndex()).filename);
+                        triggerLutPreload(); 
+                        applyHardwareRecipe();
+                    }
+                    recipeManager.savePreferences(); 
+                    hudController.close(); 
+                    return;
                 } else if (hudController.getSelection() == 2) { recipeManager.resetCurrentSlot(); triggerLutPreload(); applyHardwareRecipe(); hudController.update(); return;
                 } else if (hudController.getSelection() == 3) {
                     if (!hudController.getVaultItems().isEmpty() && !hudController.getVaultItems().get(hudController.getVaultIndex()).filename.equals("NONE")) {

@@ -181,6 +181,20 @@ public class HudController {
         selection = defaultSel;
         host.getMenuController().setConfirmingDelete(false);
         host.getMenuController().getContainer().setVisibility(View.GONE);
+        
+        // NEW: Sync the vault cursor to your currently active recipe
+        if (hudMode == 10) {
+            refreshVaultItems();
+            String activeName = host.getRecipeManager().getCurrentProfile().profileName;
+            vaultIndex = 0;
+            for (int i = 0; i < vaultItems.size(); i++) {
+                if (vaultItems.get(i).profileName.equals(activeName)) {
+                    vaultIndex = i;
+                    break;
+                }
+            }
+        }
+
         if (hudMode == 2) {
             overlay.setVisibility(View.GONE);
             if (tooltip != null) tooltip.setVisibility(View.GONE);
