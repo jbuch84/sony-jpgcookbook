@@ -115,40 +115,31 @@ public class ConnectivityManager {
 
     public void startHotspot() {
         stopNetworking(); 
-        isHotspotRunning = true;
-        updateStatus("HOTSPOT", "Initializing...");
+        
+        StringBuilder debug = new StringBuilder();
 
-        // Re-fetch manager if it was null at app launch
-        if (directManager == null) {
-            directManager = (DirectManager) context.getSystemService(DirectManager.WIFI_DIRECT_SERVICE);
-        }
+        // 1. Check standard WifiManager
+        if (wifiManager == null) debug.append("Wifi:NULL ");
+        else debug.append("Wifi:OK ");
 
-        if (directManager == null) {
-            updateStatus("HOTSPOT", "Hardware Unavailable");
-            isHotspotRunning = false;
-            return;
-        }
+        // 2. Check original Sony DirectManager (A5100 method)
+        DirectManager dm1 = (DirectManager) context.getSystemService(DirectManager.WIFI_DIRECT_SERVICE);
+        if (dm1 == null) debug.append("DM1:NULL ");
+        else debug.append("DM1:OK ");
 
-        // Logic matched to pmcaFilesystemServer state machine
-        directStateReceiver = new BroadcastReceiver() {
-            @Override
-            public void onReceive(Context context, Intent intent) {
-                int state = intent.getIntExtra(DirectManager.EXTRA_DIRECT_STATE, DirectManager.DIRECT_STATE_UNKNOWN);
-                if (state == DirectManager.DIRECT_STATE_ENABLING) {
-                    updateStatus("HOTSPOT", "Enabling Direct...");
-                } else if (state == DirectManager.DIRECT_STATE_ENABLED) {
-                    // GEN 3 FIX: Once enabled, we MUST explicitly start the group
-                    List<DirectConfiguration> configs = directManager.getConfigurations();
-                    if (configs != null && !configs.isEmpty()) {
-                        updateStatus("HOTSPOT", "Creating Group...");
-                        directManager.startGo(configs.get(configs.size() - 1).getNetworkId());
-                    } else {
-                        updateStatus("HOTSPOT", "Error: No Hotspot Configs");
-                        stopNetworking();
-                    }
-                }
-            }
-        };
+        // 3. Check AppContext DirectManager (Gold Standard fallback)
+        DirectManager dm2 = (DirectManager) context.getApplicationContext().getSystemService("wifi-direct");
+        if (dm2 == null) debug.append("DM2:NULL ");
+        else debug.append("DM2:OK ");
+
+        // 4. Check Standard Android P2P Manager (Gen 3 API shift?)
+        Object p2p = context.getSystemService(Context.WIFI_P2P_SERVICE);
+        if (p2p == null) debug.append("P2P:NULL");
+        else debug.append("P2P:OK");
+
+        // Print the hardware reality directly to the screen
+        updateStatus("HOTSPOT", debug.toString());
+    }
         
         groupCreateSuccessReceiver = new BroadcastReceiver() {
             @Override
