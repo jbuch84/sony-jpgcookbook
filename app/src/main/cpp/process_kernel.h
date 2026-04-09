@@ -42,93 +42,98 @@ inline uint32_t fast_rand(uint32_t* state) {
 }
 
 // ==========================================
-// TRUE 2D EMULSION SIMULATION V2 (Wide-Radius)
+// TRUE 2D EMULSION SIMULATION V3 (Optical IIR)
 //
-// Uses a 21-row symmetric buffer to apply a circular dye-cloud blur.
-// This ensures the softness is visible at arm's length on 24MP sensors.
+// Replaces Box Blur with a Dual-Pass IIR (Infinite Impulse Response).
+// This creates a smooth, optical "bloom" tail that mimics real light
+// scattering in film layers.
 //
-// Chroma: Wide circular blur (mimics 20-30 micron dye clouds).
-// Luma: Tight 3x3 core blur (mimics silver-halide roll-off).
+// Visibility: Significantly increased Luma softening in THICK mode.
 // ==========================================
 inline void apply_emulsion_v2(
     unsigned char** rows, uint8_t* out_row, int width, bool is_yuv, int emulsion)
 {
     if (emulsion == 0 || width < 1) return;
 
-    // RADIUS SCALING: 10 pixels at FULL 24MP (6000px)
+    // Radius scaling for resolution independence
+    // Radius 10 at 6000px = 10-pixel tail
     int radius = (width * 10) / 6000;
     if (radius < 1) radius = 1;
-    if (radius > 10) radius = 10; // Max supported by 21-row buffer
-    
-    int diameter = radius * 2 + 1;
-    int samples = diameter * diameter;
+    if (radius > 10) radius = 10;
 
-    // MAXED WEIGHTS for extreme visibility during testing
-    int chroma_mix = (emulsion == 1) ? 180 : 255; 
-    int luma_mix   = (emulsion == 1) ? 40  : 120; // Up to 47% luma blur
+    // IIR Alpha: higher = more memory/longer tail.
+    // Level 1 (STD) = 210/256 tail. Level 2 (THICK) = 235/256 tail (massive).
+    int alpha = (emulsion == 1) ? 210 : 235;
+    int inv_alpha = 256 - alpha;
 
-    // HEAP ALLOCATION
-    int* vsum_r = (int*)malloc(width * sizeof(int));
-    int* vsum_g = (int*)malloc(width * sizeof(int));
-    int* vsum_b = (int*)malloc(width * sizeof(int));
+    // Temporary row buffers for IIR passes
+    int* row_r = (int*)malloc(width * sizeof(int));
+    int* row_g = (int*)malloc(width * sizeof(int));
+    int* row_b = (int*)malloc(width * sizeof(int));
 
-    if (!vsum_r || !vsum_g || !vsum_b) {
-        if (vsum_r) free(vsum_r); if (vsum_g) free(vsum_g); if (vsum_b) free(vsum_b);
+    if (!row_r || !row_g || !row_b) {
+        if (row_r) free(row_r); if (row_g) free(row_g); if (row_b) free(row_b);
         return;
     }
 
+    // --- 1. VERTICAL PASS (Column by Column) ---
+    // Uses the 21-row buffer to simulate a vertical IIR blur tail
     for (int x = 0; x < width; x++) {
-        int r_acc = 0, g_acc = 0, b_acc = 0;
-        // Window is centered at rows[10]
-        for (int y = 10 - radius; y <= 10 + radius; y++) {
-            r_acc += rows[y][x*3];
-            g_acc += rows[y][x*3+1];
-            b_acc += rows[y][x*3+2];
+        int r_acc = rows[0][x*3];
+        int g_acc = rows[0][x*3+1];
+        int b_acc = rows[0][x*3+2];
+        for (int y = 1; y <= 20; y++) {
+            r_acc = (r_acc * alpha + (int)rows[y][x*3]   * inv_alpha) / 256;
+            g_acc = (g_acc * alpha + (int)rows[y][x*3+1] * inv_alpha) / 256;
+            b_acc = (b_acc * alpha + (int)rows[y][x*3+2] * inv_alpha) / 256;
         }
-        vsum_r[x] = r_acc;
-        vsum_g[x] = g_acc;
-        vsum_b[x] = b_acc;
+        row_r[x] = r_acc;
+        row_g[x] = g_acc;
+        row_b[x] = b_acc;
     }
 
+    // --- 2. HORIZONTAL PASS (Forward + Backward) ---
+    // Forward
+    int r_acc = row_r[0], g_acc = row_g[0], b_acc = row_b[0];
+    for (int x = 1; x < width; x++) {
+        r_acc = (r_acc * alpha + row_r[x] * inv_alpha) / 256;
+        g_acc = (g_acc * alpha + row_g[x] * inv_alpha) / 256;
+        b_acc = (b_acc * alpha + row_b[x] * inv_alpha) / 256;
+        row_r[x] = r_acc; row_g[x] = g_acc; row_b[x] = b_acc;
+    }
+    // Backward
+    r_acc = row_r[width-1]; g_acc = row_g[width-1]; b_acc = row_b[width-1];
+    for (int x = width - 2; x >= 0; x--) {
+        r_acc = (r_acc * alpha + row_r[x] * inv_alpha) / 256;
+        g_acc = (g_acc * alpha + row_g[x] * inv_alpha) / 256;
+        b_acc = (b_acc * alpha + row_b[x] * inv_alpha) / 256;
+        row_r[x] = r_acc; row_g[x] = g_acc; row_b[x] = b_acc;
+    }
+
+    // --- 3. MIX BACK ---
+    // THICK mode now applies a visible softening to Luma too
+    int chroma_mix = (emulsion == 1) ? 180 : 255; 
+    int luma_mix   = (emulsion == 1) ? 20  : 90; // Level 2: 35% Luma softening
+
     for (int x = 0; x < width; x++) {
-        int r_hsum = 0, g_hsum = 0, b_hsum = 0;
-        for (int i = -radius; i <= radius; i++) {
-            int xi = x + i;
-            if (xi < 0) xi = 0; else if (xi >= width) xi = width - 1;
-            r_hsum += vsum_r[xi];
-            g_hsum += vsum_g[xi];
-            b_hsum += vsum_b[xi];
-        }
-
-        int blur_r = r_hsum / samples;
-        int blur_g = g_hsum / samples;
-        int blur_b = b_hsum / samples;
-
+        int r_o = rows[10][x*3], g_o = rows[10][x*3+1], b_o = rows[10][x*3+2];
+        
         if (is_yuv) {
-            // YUV Path: rows[10] is R=Y, G=Cb, B=Cr
-            int y_orig = rows[10][x*3], cb_orig = rows[10][x*3+1], cr_orig = rows[10][x*3+2];
-            
-            // Tight 3x3 Luma Blur
-            int y_sum3 = 0;
-            for(int ix=-1; ix<=1; ix++) {
-                int xi = x+ix; if(xi<0) xi=0; else if(xi>=width) xi=width-1;
-                y_sum3 += rows[9][xi*3] + rows[10][xi*3] + rows[11][xi*3];
-            }
-            int y_blur3 = y_sum3 / 9;
-
-            out_row[x*3]   = (uint8_t)CLAMP((y_orig * (256 - luma_mix) + y_blur3 * luma_mix) / 256);
-            out_row[x*3+1] = (uint8_t)CLAMP((cb_orig * (256 - chroma_mix) + blur_g * chroma_mix) / 256);
-            out_row[x*3+2] = (uint8_t)CLAMP((cr_orig * (256 - chroma_mix) + blur_b * chroma_mix) / 256);
+            // YUV: R=Y, G=Cb, B=Cr
+            int y  = (r_o * (256 - luma_mix)   + row_r[x] * luma_mix)   / 256;
+            int cb = (g_o * (256 - chroma_mix) + row_g[x] * chroma_mix) / 256;
+            int cr = (b_o * (256 - chroma_mix) + row_b[x] * chroma_mix) / 256;
+            out_row[x*3] = (uint8_t)CLAMP(y); out_row[x*3+1] = (uint8_t)CLAMP(cb); out_row[x*3+2] = (uint8_t)CLAMP(cr);
         } else {
-            // RGB Path
-            int r_o = rows[10][x*3], g_o = rows[10][x*3+1], b_o = rows[10][x*3+2];
-            out_row[x*3]   = (uint8_t)CLAMP((r_o * (256 - chroma_mix) + blur_r * chroma_mix) / 256);
-            out_row[x*3+1] = (uint8_t)CLAMP((g_o * (256 - chroma_mix) + blur_g * chroma_mix) / 256);
-            out_row[x*3+2] = (uint8_t)CLAMP((b_o * (256 - chroma_mix) + blur_b * chroma_mix) / 256);
+            // RGB
+            int r = (r_o * (256 - chroma_mix) + row_r[x] * chroma_mix) / 256;
+            int g = (g_o * (256 - chroma_mix) + row_g[x] * chroma_mix) / 256;
+            int b = (b_o * (256 - chroma_mix) + row_b[x] * chroma_mix) / 256;
+            out_row[x*3] = (uint8_t)CLAMP(r); out_row[x*3+1] = (uint8_t)CLAMP(g); out_row[x*3+2] = (uint8_t)CLAMP(b);
         }
     }
 
-    free(vsum_r); free(vsum_g); free(vsum_b);
+    free(row_r); free(row_g); free(row_b);
 }
 
 // ==========================================
@@ -329,7 +334,7 @@ inline void process_row_yuv(
         if (s_blue > 0 && cb > 5 && cr < 25) {
             int drop = (cb * s_blue) / 128;
             if (outY > 160) { int fade = 255 - ((outY - 160) * 3); if (fade < 0) fade = 0; drop = (drop * fade) / 256; }
-            if (outY < 50) { int fade = (outY * 5); if (fade > 255) fade = 255; drop = (drop * fade) / 256; }
+            if (outY < 50) { int fade = (targetY * 5); if (fade > 255) fade = 255; drop = (drop * fade) / 256; }
             if (drop > (outY / 4)) drop = outY / 4;
             outY -= drop; cr -= (drop / 2);
         }

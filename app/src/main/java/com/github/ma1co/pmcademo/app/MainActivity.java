@@ -373,6 +373,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     private void triggerLutPreload() {
         RTLProfile p = recipeManager.getCurrentProfile();
+        if (p.lutIndex == 0) {
+            // No LUT selected, engine is ready immediately for other effects
+            isReady = true;
+            updateMainHUD();
+            return;
+        }
         mProcessor.triggerLutPreload(recipeManager.getRecipePaths().get(p.lutIndex), recipeManager.getRecipeNames().get(p.lutIndex));
     }
 
