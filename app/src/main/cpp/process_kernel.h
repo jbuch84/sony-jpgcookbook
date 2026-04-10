@@ -58,27 +58,27 @@ inline void apply_bloom_halation(
         return;
     }
 
-    // 1. Vertical Summation (Radius 10 window)
+    // 1. Vertical Summation (Weighted Triangle / Gaussian Approximation)
     for (int x = 0; x < width; x++) {
-        long long s0 = 0, s1 = 0, s2 = 0;
-        int h_max = 0;
+        long long s0 = 0, s1 = 0, s2 = 0, sh = 0;
         for (int y = 0; y <= 20; y++) {
+            int w = (y <= 10) ? (y + 1) : (21 - y); // Weights: 1 to 11 (center) to 1
             int v0 = rows[y][x*3];
             int v1 = rows[y][x*3+1];
             int v2 = rows[y][x*3+2];
             
             if (is_yuv) {
-                // Y=v0, Cb=v1-128, Cr=v2-128
-                s0 += v0; s1 += (v1 - 128); s2 += (v2 - 128);
-                if (v0 > 240 && (v0 - 240) > h_max) h_max = (v0 - 240);
+                s0 += v0 * w; s1 += (v1 - 128) * w; s2 += (v2 - 128) * w;
+                if (v0 > 225) sh += (v0 - 225) * w; // Strict threshold: only clips and direct light
             } else {
-                s0 += v0; s1 += v1; s2 += v2;
+                s0 += v0 * w; s1 += v1 * w; s2 += v2 * w;
                 int lum = (v0*77 + v1*150 + v2*29)/256;
-                if (lum > 240 && (lum - 240) > h_max) h_max = (lum - 240);
+                if (lum > 225) sh += (lum - 225) * w;
             }
         }
-        work_0[x] = (int)(s0 / 21); work_1[x] = (int)(s1 / 21); work_2[x] = (int)(s2 / 21);
-        work_h[x] = h_max;
+        // Sum of all weights is exactly 121
+        work_0[x] = (int)(s0 / 121); work_1[x] = (int)(s1 / 121); work_2[x] = (int)(s2 / 121);
+        work_h[x] = (int)(sh / 121);
     }
 
     // 2. Horizontal IIR Bloom
@@ -101,28 +101,28 @@ inline void apply_bloom_halation(
         }
     }
 
-    // 3. Horizontal Halation Scan (Peak Detect)
+    // 3. Horizontal Halation (Smooth IIR Falloff replaces Peak Detect)
     if (halation > 0) {
-        int hal_rad = (halation == 1) ? 12 : 24;
-        if (h_line) {
-            for (int x = 0; x < width; x++) {
-                int peak = 0;
-                for (int i = -hal_rad; i <= hal_rad; i++) {
-                    int xi = x + i; if (xi < 0) xi = 0; else if (xi >= width) xi = width - 1;
-                    int dist = (i < 0) ? -i : i;
-                    int val = work_h[xi] - ((dist * 15) / hal_rad);
-                    if (val > peak) peak = val;
-                }
-                h_line[x] = peak;
-            }
-            for (int x = 0; x < width; x++) work_h[x] = h_line[x];
+        int h_alpha = (halation == 1) ? 220 : 240;
+        int inv_h = 256 - h_alpha;
+        // Forward
+        int ah = work_h[0];
+        for (int x = 1; x < width; x++) {
+            ah = (ah * h_alpha + work_h[x] * inv_h) / 256;
+            work_h[x] = ah;
+        }
+        // Backward
+        ah = work_h[width-1];
+        for (int x = width-2; x >= 0; x--) {
+            ah = (ah * h_alpha + work_h[x] * inv_h) / 256;
+            work_h[x] = ah;
         }
     }
 
     // 4. Reconstruction
     for (int x = 0; x < width; x++) {
         int v0_o = rows[10][x*3], v1_o = rows[10][x*3+1], v2_o = rows[10][x*3+2];
-        int mix = (bloom == 1) ? 100 : 180;
+        int mix = (bloom == 1) ? 70 : 140; // Softened mix slightly for organic blend
 
         if (is_yuv) {
             // YUV Path: 0=Y, 1=Cb, 2=Cr
@@ -132,13 +132,24 @@ inline void apply_bloom_halation(
                 cb_res = (cb_res * (256 - mix) + work_1[x] * mix) / 256;
                 cr_res = (cr_res * (256 - mix) + work_2[x] * mix) / 256;
                 y_res  = (y_res * (256 - mix) + work_0[x] * mix) / 256;
+                
+                // KODAK BLOOM: Tint only the scattered light golden-orange
+                int bleed = work_0[x] - v0_o; // Positive when light bleeds into shadows
+                if (bleed > 0) {
+                    int warm_push = (bleed * mix) / 128;
+                    cr_res += warm_push;        // Push Red
+                    cb_res -= warm_push;        // Pull Blue (Creates Yellow)
+                    y_res  += warm_push / 4;    // Slight organic luminance bump to the glow
+                }
             }
 
             if (halation > 0 && work_h[x] > 0) {
-                int hl = (work_h[x] * ((halation == 1) ? 128 : 255)) / 16;
-                y_res  += hl / 4;
-                cr_res += hl;      // Red
-                cb_res -= hl / 4;  // Roll off Blue
+                // Halation becomes a tighter, deeper red inner fringe
+                // Level 1 is subtle/natural, Level 2 is heavy stylized impact
+                int hl = work_h[x] * ((halation == 1) ? 3 : 6);
+                y_res  += hl / 4;      
+                cr_res += hl;          // Strong Red
+                cb_res -= hl / 4;      // Very mild yellow
             }
             out_row[x*3]   = (uint8_t)CLAMP(y_res);
             out_row[x*3+1] = (uint8_t)CLAMP(cb_res + 128);
@@ -151,13 +162,25 @@ inline void apply_bloom_halation(
                 r_res = (r_res * (256 - mix) + work_0[x] * mix) / 256;
                 g_res = (g_res * (256 - mix) + work_1[x] * mix) / 256;
                 b_res = (b_res * (256 - mix) + work_2[x] * mix) / 256;
+
+                // Approximate Luma Bleed for RGB path
+                int blur_luma = (work_0[x]*77 + work_1[x]*150 + work_2[x]*29)/256;
+                int orig_luma = (v0_o*77 + v1_o*150 + v2_o*29)/256;
+                int bleed = blur_luma - orig_luma;
+                
+                if (bleed > 0) {
+                    int warm_push = (bleed * mix) / 128;
+                    r_res += warm_push;             // Push Red
+                    g_res += warm_push / 2;         // Push Green (Red+Green = Orange)
+                    b_res -= warm_push / 2;         // Pull Blue
+                }
             }
 
             if (halation > 0 && work_h[x] > 0) {
-                int hl = (work_h[x] * ((halation == 1) ? 128 : 255)) / 16;
-                r_res = CLAMP(r_res + hl);
-                g_res = CLAMP(g_res - hl/8);
-                b_res = CLAMP(b_res - hl/4);
+                int hl = work_h[x] * ((halation == 1) ? 3 : 6);
+                r_res += hl;           // Strong Red
+                g_res += hl / 4;       
+                b_res -= hl / 4;
             }
             out_row[x*3]   = (uint8_t)CLAMP(r_res);
             out_row[x*3+1] = (uint8_t)CLAMP(g_res);
