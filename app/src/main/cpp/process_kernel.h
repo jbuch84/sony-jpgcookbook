@@ -67,18 +67,18 @@ inline void apply_bloom_halation(
             int v1 = rows[y][x*3+1];
             int v2 = rows[y][x*3+2];
             
-            if (is_yuv) {
-                s0 += v0 * w; s1 += (v1 - 128) * w; s2 += (v2 - 128) * w;
-                if (v0 > 225) sh += (v0 - 225) * w; // Strict threshold: only clips and direct light
-            } else {
-                s0 += v0 * w; s1 += v1 * w; s2 += v2 * w;
-                int lum = (v0*77 + v1*150 + v2*29)/256;
-                if (lum > 225) sh += (lum - 225) * w;
-            }
+            // Fix: Treat all values as 0-255 positive to avoid negative truncation bugs
+            s0 += v0 * w; 
+            s1 += v1 * w; 
+            s2 += v2 * w;
+            
+            int lum = is_yuv ? v0 : ((v0*77 + v1*150 + v2*29) / 256);
+            if (lum > 225) sh += (lum - 225) * w;
         }
-        // Sum of all weights is exactly 121
-        work_0[x] = (int)(s0 / 121); work_1[x] = (int)(s1 / 121); work_2[x] = (int)(s2 / 121);
-        work_h[x] = (int)(sh / 121);
+        work_0[x] = (int)(s0 / 121); 
+        work_1[x] = (int)(s1 / 121); 
+        work_2[x] = (int)(s2 / 121);
+        work_h[x] = (int)sh; // Fix: Keep full precision (0-3630) to prevent IIR degradation
     }
 
     // 2. Horizontal IIR Bloom
@@ -86,35 +86,36 @@ inline void apply_bloom_halation(
         // Forward
         int a0 = work_0[0], a1 = work_1[0], a2 = work_2[0];
         for (int x = 1; x < width; x++) {
-            a0 = (a0 * alpha + work_0[x] * inv_alpha) / 256;
-            a1 = (a1 * alpha + work_1[x] * inv_alpha) / 256;
-            a2 = (a2 * alpha + work_2[x] * inv_alpha) / 256;
+            // Fix: Add +128 to force round-to-nearest and stop deadbands
+            a0 = (a0 * alpha + work_0[x] * inv_alpha + 128) / 256;
+            a1 = (a1 * alpha + work_1[x] * inv_alpha + 128) / 256;
+            a2 = (a2 * alpha + work_2[x] * inv_alpha + 128) / 256;
             work_0[x] = a0; work_1[x] = a1; work_2[x] = a2;
         }
         // Backward
         a0 = work_0[width-1]; a1 = work_1[width-1]; a2 = work_2[width-1];
         for (int x = width-2; x >= 0; x--) {
-            a0 = (a0 * alpha + work_0[x] * inv_alpha) / 256;
-            a1 = (a1 * alpha + work_1[x] * inv_alpha) / 256;
-            a2 = (a2 * alpha + work_2[x] * inv_alpha) / 256;
+            a0 = (a0 * alpha + work_0[x] * inv_alpha + 128) / 256;
+            a1 = (a1 * alpha + work_1[x] * inv_alpha + 128) / 256;
+            a2 = (a2 * alpha + work_2[x] * inv_alpha + 128) / 256;
             work_0[x] = a0; work_1[x] = a1; work_2[x] = a2;
         }
     }
 
-    // 3. Horizontal Halation (Smooth IIR Falloff replaces Peak Detect)
+    // 3. Horizontal Halation
     if (halation > 0) {
         int h_alpha = (halation == 1) ? 220 : 240;
         int inv_h = 256 - h_alpha;
         // Forward
         int ah = work_h[0];
         for (int x = 1; x < width; x++) {
-            ah = (ah * h_alpha + work_h[x] * inv_h) / 256;
+            ah = (ah * h_alpha + work_h[x] * inv_h + 128) / 256;
             work_h[x] = ah;
         }
         // Backward
         ah = work_h[width-1];
         for (int x = width-2; x >= 0; x--) {
-            ah = (ah * h_alpha + work_h[x] * inv_h) / 256;
+            ah = (ah * h_alpha + work_h[x] * inv_h + 128) / 256;
             work_h[x] = ah;
         }
     }
@@ -125,35 +126,34 @@ inline void apply_bloom_halation(
         int mix = (bloom == 1) ? 70 : 140; // Softened mix slightly for organic blend
 
         if (is_yuv) {
-            // YUV Path: 0=Y, 1=Cb, 2=Cr
-            int y_res = v0_o, cb_res = v1_o - 128, cr_res = v2_o - 128;
+            // YUV Path: 0=Y, 1=Cb, 2=Cr (Now safely kept in 0-255 domain)
+            int y_res = v0_o, cb_res = v1_o, cr_res = v2_o;
 
             if (bloom > 0) {
                 cb_res = (cb_res * (256 - mix) + work_1[x] * mix) / 256;
                 cr_res = (cr_res * (256 - mix) + work_2[x] * mix) / 256;
                 y_res  = (y_res * (256 - mix) + work_0[x] * mix) / 256;
                 
-                // KODAK BLOOM: Tint only the scattered light golden-orange
+                // KODAK BLOOM: Tint scattered light golden-orange
                 int bleed = work_0[x] - v0_o; // Positive when light bleeds into shadows
                 if (bleed > 0) {
                     int warm_push = (bleed * mix) / 128;
                     cr_res += warm_push;        // Push Red
                     cb_res -= warm_push;        // Pull Blue (Creates Yellow)
-                    y_res  += warm_push / 4;    // Slight organic luminance bump to the glow
+                    y_res  += warm_push / 4;    // Slight luma bump
                 }
             }
 
             if (halation > 0 && work_h[x] > 0) {
-                // Halation becomes a tighter, deeper red inner fringe
-                // Level 1 is subtle/natural, Level 2 is heavy stylized impact
-                int hl = work_h[x] * ((halation == 1) ? 3 : 6);
+                // Fix: Scale down the high-precision work_h value back to visual ranges
+                int hl = work_h[x] / ((halation == 1) ? 40 : 20);
                 y_res  += hl / 4;      
                 cr_res += hl;          // Strong Red
-                cb_res -= hl / 4;      // Very mild yellow
+                cb_res -= hl / 4;      
             }
             out_row[x*3]   = (uint8_t)CLAMP(y_res);
-            out_row[x*3+1] = (uint8_t)CLAMP(cb_res + 128);
-            out_row[x*3+2] = (uint8_t)CLAMP(cr_res + 128);
+            out_row[x*3+1] = (uint8_t)CLAMP(cb_res);
+            out_row[x*3+2] = (uint8_t)CLAMP(cr_res);
         } else {
             // RGB Path
             int r_res = v0_o, g_res = v1_o, b_res = v2_o;
@@ -177,7 +177,7 @@ inline void apply_bloom_halation(
             }
 
             if (halation > 0 && work_h[x] > 0) {
-                int hl = work_h[x] * ((halation == 1) ? 3 : 6);
+                int hl = work_h[x] / ((halation == 1) ? 40 : 20);
                 r_res += hl;           // Strong Red
                 g_res += hl / 4;       
                 b_res -= hl / 4;
