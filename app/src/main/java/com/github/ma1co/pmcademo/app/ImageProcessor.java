@@ -94,7 +94,7 @@ public class ImageProcessor {
                         original.getAbsolutePath(), outFile.getAbsolutePath(),
                         scale, p.opacity, p.grain, p.grainSize, p.vignette, p.rollOff,
                         p.colorChrome, p.chromeBlue, p.shadowToe, p.subtractiveSat,
-                        p.halation, p.bloom, finalJpegQuality)) {
+                        p.halation, p.bloom, p.advancedGrainExperimental, finalJpegQuality)) {
                     return "SAVED";
                 }
             } catch (Exception e) { Log.e("COOKBOOK", "Java error: " + e.getMessage()); }

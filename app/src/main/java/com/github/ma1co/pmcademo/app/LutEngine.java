@@ -31,9 +31,10 @@ public class LutEngine {
     public boolean applyLutToJpeg(String in, String out, int scale, int opacity,
                                   int grain, int grainSize, int vignette, int rollOff,
                                   int colorChrome, int chromeBlue, int shadowToe,
-                                  int subtractiveSat, int halation, int bloom, int quality) {
+                                  int subtractiveSat, int halation, int bloom,
+                                  int advancedGrainExperimental, int quality) {
         return processImageNative(in, out, scale, opacity, grain, grainSize, vignette,
                                  rollOff, colorChrome, chromeBlue, shadowToe,
-                                 subtractiveSat, halation, bloom, quality);
+                                 subtractiveSat, halation, bloom, advancedGrainExperimental, quality);
     }
 }
