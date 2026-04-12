@@ -49,9 +49,6 @@ public class ConnectivityManager {
         this.wifiManager = (WifiManager) context.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
         this.connManager = (android.net.ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
         
-        // --- THE SERVER FIX ---
-        // Boot the server once and leave it running. 
-        // Prevents BindExceptions when switching networks.
         this.server = new HttpServer(context);
         try {
             if (!server.isAlive()) server.start();
@@ -71,7 +68,6 @@ public class ConnectivityManager {
         context.sendBroadcast(intent);
     }
 
-    // Wake up the physical RTOS hardware (This worked perfectly for you)
     private void wakeUpSonyWifiHardware() {
         try {
             Class<?> nmClass = Class.forName("com.sony.scalar.sysutil.NetworkManager");
@@ -198,21 +194,38 @@ public class ConnectivityManager {
                         public void onReceive(Context context, Intent intent) {
                             DirectConfiguration config = intent.getParcelableExtra(DirectManager.EXTRA_DIRECT_CONFIG);
                             if (config != null) {
-                                String password = "N/A";
                                 
-                                // --- THE PASSWORD FIX (REFLECTION) ---
-                                // Bypasses the incomplete ma1co compile-time stubs to find the password at runtime
-                                try {
-                                    Method getPassphrase = config.getClass().getMethod("getPassphrase");
-                                    password = (String) getPassphrase.invoke(config);
-                                } catch (NoSuchMethodException | IllegalAccessException | java.lang.reflect.InvocationTargetException e) {
-                                    // Fallback for weird firmware variants
+                                // --- THE ULTIMATE PASSWORD EXTRACTOR ---
+                                String password = "N/A";
+                                String[] methodNames = {"getPassphrase", "getPassword", "getNetworkKey", "getPreSharedKey"};
+                                
+                                // 1. Try standard known Sony names
+                                for (String methodName : methodNames) {
                                     try {
-                                        Method m = config.getClass().getMethod("getNetworkKey");
-                                        password = (String) m.invoke(config);
-                                    } catch (Exception ex) {
-                                        // If all else fails, keep "N/A"
-                                    }
+                                        Method m = config.getClass().getMethod(methodName);
+                                        m.setAccessible(true);
+                                        String val = (String) m.invoke(config);
+                                        if (val != null && val.length() >= 8) {
+                                            password = val;
+                                            break;
+                                        }
+                                    } catch (Exception e) {}
+                                }
+                                
+                                // 2. Fallback: Search all methods for anything returning an 8+ char string
+                                if ("N/A".equals(password)) {
+                                    try {
+                                        for (Method m : config.getClass().getMethods()) {
+                                            if (m.getReturnType() == String.class && m.getParameterTypes().length == 0) {
+                                                m.setAccessible(true);
+                                                String val = (String) m.invoke(config);
+                                                if (val != null && val.length() >= 8 && !val.contains("DIRECT-")) {
+                                                    password = val;
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    } catch (Exception e) {}
                                 }
                                 
                                 updateStatus("HOTSPOT", "PW: " + password + " (192.168.122.1)");
@@ -298,13 +311,24 @@ public class ConnectivityManager {
             } catch (Exception e) {}
             isHotspotRunning = false;
         }
-        
-        sleepSonyWifiHardware();
-        try { wifiManager.setWifiEnabled(false); } catch (Exception e) {}
+
+        // CRITICAL FIX: DO NOT power down the Sony hardware here. 
+        // Only disconnect the Android-level software so we can toggle cleanly.
+        // It will remain powered on until shutdown() is called by the Activity.
 
         updateStatus("WIFI", "Press ENTER to Start");
         updateStatus("HOTSPOT", "Press ENTER to Start");
         setAutoPowerOffMode(true); 
+    }
+
+    // --- MUST CALL THIS FROM MAINACTIVITY.ONDESTROY() ---
+    public void shutdown() {
+        stopNetworking();
+        if (server != null && server.isAlive()) server.stop();
+        
+        // Power down the physical antenna so the camera battery doesn't drain when the app is closed.
+        sleepSonyWifiHardware();
+        try { wifiManager.setWifiEnabled(false); } catch (Exception e) {}
     }
 
     private void updateStatus(String target, String status) {
