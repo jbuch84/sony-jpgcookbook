@@ -5,7 +5,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.net.NetworkInfo;
-import android.net.wifi.WifiConfiguration;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
 import android.os.Handler;
@@ -48,8 +47,10 @@ public class ConnectivityManager {
         this.listener = listener;
         this.wifiManager = (WifiManager) context.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
         this.connManager = (android.net.ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
-        this.directManager = (DirectManager) context.getSystemService(DirectManager.WIFI_DIRECT_SERVICE);
         this.server = new HttpServer(context);
+        
+        // Note: We deliberately DO NOT initialize DirectManager here anymore. 
+        // We must wait until the hardware is awake.
     }
 
     public String getConnStatusHotspot() { return connStatusHotspot; }
@@ -65,8 +66,30 @@ public class ConnectivityManager {
         context.sendBroadcast(intent);
     }
 
-    // --- THE FIX: WAIT FOR HARDWARE TO BOOT ---
+    // --- SONY RTOS HARDWARE WAKEUP ---
+    private void wakeUpSonyWifiHardware() {
+        try {
+            Class<?> nmClass = Class.forName("com.sony.scalar.sysutil.NetworkManager");
+            Object nmInstance = nmClass.newInstance();
+            Method enableWifi = nmClass.getMethod("enableWifi");
+            enableWifi.invoke(nmInstance);
+        } catch (Exception e) {}
+    }
+
+    private void sleepSonyWifiHardware() {
+        try {
+            Class<?> nmClass = Class.forName("com.sony.scalar.sysutil.NetworkManager");
+            Object nmInstance = nmClass.newInstance();
+            Method disableWifi = nmClass.getMethod("disableWifi");
+            disableWifi.invoke(nmInstance);
+        } catch (Exception e) {}
+    }
+
+    // --- HARDWARE BOOT SEQUENCER ---
     private void waitForHardwareAndExecute(final Runnable action) {
+        // 1. Physically flip the Sony hardware switch
+        wakeUpSonyWifiHardware();
+
         if (wifiManager.isWifiEnabled()) {
             action.run();
             return;
@@ -84,7 +107,7 @@ public class ConnectivityManager {
                         unregisterReceiverSafe(hardwareBootReceiver);
                         hardwareBootReceiver = null;
                         
-                        // Give the chip 1 extra second to stabilize before hammering it
+                        // Give the chip 1 extra second to stabilize the driver
                         new Handler().postDelayed(action, 1000);
                     }
                 }
@@ -126,7 +149,7 @@ public class ConnectivityManager {
                         }
 
                         attempts++;
-                        if (attempts > 15) { // 30 seconds total
+                        if (attempts > 15) { 
                             updateStatus("WIFI", "Timed out.");
                             stopNetworking();
                         } else {
@@ -150,7 +173,11 @@ public class ConnectivityManager {
                 if (!isHotspotRunning) return;
                 updateStatus("HOTSPOT", "Starting Hotspot...");
 
-                // --- GEN 2 LOGIC (A5100) ---
+                // 2. NOW we fetch the DirectManager (because the hardware is awake)
+                if (directManager == null) {
+                    directManager = (DirectManager) context.getSystemService(DirectManager.WIFI_DIRECT_SERVICE);
+                }
+
                 if (directManager != null) {
                     directStateReceiver = new BroadcastReceiver() {
                         @Override
@@ -173,17 +200,20 @@ public class ConnectivityManager {
                             DirectConfiguration config = intent.getParcelableExtra(DirectManager.EXTRA_DIRECT_CONFIG);
                             if (config != null) {
                                 String password = "N/A";
+                                
+                                // 3. ROBUST REFLECTION: Loops all methods to bypass subclass hiding 
                                 try {
-                                    Method getPassphrase = config.getClass().getMethod("getPassphrase");
-                                    password = (String) getPassphrase.invoke(config);
-                                } catch (Exception e1) {
-                                    try {
-                                        Method getPassword = config.getClass().getMethod("getPassword");
-                                        password = (String) getPassword.invoke(config);
-                                    } catch (Exception e2) {
-                                        password = "Error";
+                                    for (Method m : config.getClass().getMethods()) {
+                                        if (m.getName().equalsIgnoreCase("getPassphrase") || m.getName().equalsIgnoreCase("getPassword")) {
+                                            m.setAccessible(true);
+                                            password = (String) m.invoke(config);
+                                            break;
+                                        }
                                     }
+                                } catch (Exception e) {
+                                    password = "Parse Error";
                                 }
+                                
                                 updateStatus("HOTSPOT", "PW: " + password + " (192.168.122.1)");
                                 startServer();
                                 setAutoPowerOffMode(false); 
@@ -204,36 +234,8 @@ public class ConnectivityManager {
                     context.registerReceiver(groupCreateFailureReceiver, new IntentFilter(DirectManager.GROUP_CREATE_FAILURE_ACTION));
 
                     directManager.setDirectEnabled(true);
-                    return;
-                }
-
-                // --- GEN 3 LOGIC (A7II) FALLBACK ---
-                try {
-                    // Critical: Disconnect regular Wi-Fi before opening Access Point
-                    if (wifiManager.isWifiEnabled()) {
-                        wifiManager.setWifiEnabled(false);
-                    }
-
-                    Method setWifiApEnabled = wifiManager.getClass().getMethod("setWifiApEnabled", WifiConfiguration.class, boolean.class);
-                    boolean success = (Boolean) setWifiApEnabled.invoke(wifiManager, null, true);
-                    
-                    if (success) {
-                        Method getWifiApConfiguration = wifiManager.getClass().getMethod("getWifiApConfiguration");
-                        WifiConfiguration apConfig = (WifiConfiguration) getWifiApConfiguration.invoke(wifiManager);
-                        
-                        if (apConfig != null) {
-                            updateStatus("HOTSPOT", "PW: " + apConfig.preSharedKey + " (192.168.43.1)");
-                        } else {
-                            updateStatus("HOTSPOT", "Connect Phone (192.168.43.1)");
-                        }
-                        startServer();
-                        setAutoPowerOffMode(false); 
-                    } else {
-                        updateStatus("HOTSPOT", "Hardware Unsupported");
-                        isHotspotRunning = false;
-                    }
-                } catch (Exception e) {
-                    updateStatus("HOTSPOT", "Error: " + e.getMessage());
+                } else {
+                    updateStatus("HOTSPOT", "Critical: Service Offline");
                     isHotspotRunning = false;
                 }
             }
@@ -242,11 +244,7 @@ public class ConnectivityManager {
 
     private void unregisterReceiverSafe(BroadcastReceiver receiver) {
         if (receiver != null) {
-            try {
-                context.unregisterReceiver(receiver);
-            } catch (Exception e) {
-                // Ignore if it was never fully registered
-            }
+            try { context.unregisterReceiver(receiver); } catch (Exception e) {}
         }
     }
 
@@ -275,15 +273,11 @@ public class ConnectivityManager {
         
         if (isHotspotRunning) {
             try { if (directManager != null) directManager.setDirectEnabled(false); } catch (Exception e) {}
-            try {
-                Method setWifiApEnabled = wifiManager.getClass().getMethod("setWifiApEnabled", WifiConfiguration.class, boolean.class);
-                setWifiApEnabled.invoke(wifiManager, null, false);
-            } catch (Exception e) {}
-
             isHotspotRunning = false;
         }
         
-        // Turn off antenna to save battery
+        // Physically power down the hardware antenna
+        sleepSonyWifiHardware();
         try { wifiManager.setWifiEnabled(false); } catch (Exception e) {}
 
         updateStatus("WIFI", "Press ENTER to Start");
