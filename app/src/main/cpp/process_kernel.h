@@ -686,9 +686,17 @@ inline void process_row_rgb(
             int formedY = form_grain_luma_core(currRawY, prevRawY, nextRawY, x, abs_y, s_grain, grainSize, scaleDenom, seed);
             if (formedY != currRawY) {
                 int scale256 = (formedY * 256) / (currRawY > 0 ? currRawY : 1);
-                r = CLAMP((r * scale256) >> 8);
-                g = CLAMP((g * scale256) >> 8);
-                b = CLAMP((b * scale256) >> 8);
+                
+                // --- CHROMA EMULSION V6 ---
+                // Generates a micro-variance to simulate misaligned CMY chemical dye layers.
+                // It scales with the amount of grain applied to the pixel.
+                int luma_diff = formedY - currRawY;
+                int variance = (legacy_grain_noise(x, abs_y, 0, seed) * luma_diff) >> 9;
+                
+                // Blue gets the heaviest variance (fastest emulsion layer), Green gets the least.
+                r = CLAMP(((r * scale256) >> 8) + (variance >> 1));
+                g = CLAMP(((g * scale256) >> 8) - (variance >> 2));
+                b = CLAMP(((b * scale256) >> 8) - variance);
             }
         }
 
@@ -775,7 +783,14 @@ inline void process_row_rgb(
             int noise = legacy_grain_noise(x, abs_y, grainSize, seed);
             int mask = (targetY < 128) ? targetY : 255 - targetY;
             if (targetY < 64) mask = (mask * targetY) >> 6;
+            
             int gv = (noise * mask * s_grain) >> 15;
+            
+            // --- SUBTRACTIVE DENSITY ---
+            // Physical film crystals block light. We suppress the "bright" static 
+            // by 50% so the grain acts more like physical texture than digital noise.
+            if (gv > 0) gv = gv >> 1; 
+            
             outR += gv; outG += gv; outB += gv;
         }
 
@@ -870,7 +885,15 @@ inline void process_row_yuv(
             int noise = legacy_grain_noise(x, abs_y, grainSize, seed);
             int mask = (outY < 128) ? outY : 255 - outY;
             if (outY < 64) mask = (mask * outY) >> 6;
-            outY += (noise * mask * s_grain) >> 15;
+            
+            int gv = (noise * mask * s_grain) >> 15;
+            
+            // --- SUBTRACTIVE DENSITY ---
+            // Physical film crystals block light. We suppress the "bright" static 
+            // by 50% so the grain acts more like physical texture than digital noise.
+            if (gv > 0) gv = gv >> 1; 
+            
+            outY += gv;
         }
 
         row[i] = (uint8_t)CLAMP(outY); row[i+1] = (uint8_t)CLAMP(128+cb); row[i+2] = (uint8_t)CLAMP(128+cr);
