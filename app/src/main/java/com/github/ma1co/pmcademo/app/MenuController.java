@@ -457,8 +457,8 @@ public class MenuController {
             else if (sel == 4) p.chromeBlue = Math.max(0, Math.min(2, p.chromeBlue + dir));
             else if (sel == 5) p.halation  = Math.max(0, Math.min(2, p.halation + dir));
             
-            // NEW ROW ADDED HERE: Handles left/right d-pad clicks for Optical Bloom (0, 1, or 2)
-            else if (sel == 6) p.bloom = Math.max(0, Math.min(2, p.bloom + dir));
+            // NEW ROW ADDED HERE: Handles left/right d-pad clicks for Optical Bloom (0, 1, 2, 4, or 4)
+            else if (sel == 6) p.bloom = Math.max(0, Math.min(4, p.bloom + dir));
             
         } else if (currentPage == 6) {
             if      (sel == 0) rm.setQualityIndex(Math.max(0, Math.min(2, rm.getQualityIndex() + dir)));
@@ -571,7 +571,7 @@ public class MenuController {
                 setRow(2, "Edge Shading Editor",  shade);
             } else if (currentPage == 4) {
                 ic = 6;
-                String[] engineLbls = {"LEGACY", "ADVANCED"};
+                String[] engineLbls = {"LEGACY", "EXPERIMENTAL"};
                 setRow(0, "LUT File",    rm.getRecipeNames().get(p.lutIndex));
                 setRow(1, "LUT Opacity", p.opacity + "%");
                 setRow(2, "Grain Amount",amtLbls[Math.max(0,Math.min(5,p.grain))]);
@@ -585,9 +585,7 @@ public class MenuController {
                 setRow(2, "Subtractive Sat",        p.subtractiveSat==0?"OFF":(p.subtractiveSat==1?"WEAK":"HEAVY"));
                 setRow(3, "Color Chrome",           p.colorChrome==0?"OFF":(p.colorChrome==1?"WEAK":"STRONG"));
                 setRow(4, "Chrome Blue",            p.chromeBlue==0?"OFF":(p.chromeBlue==1?"WEAK":"STRONG"));
-                setRow(5, "Halation (Red Glow)",    p.halation==0?"OFF":(p.halation==1?"WEAK":"STRONG"));
-                
-                // NEW ROW ADDED HERE
+                setRow(5, "Halation",    p.halation==0?"OFF":(p.halation==1?"WEAK":"STRONG"));
                 setRow(6, "Diffusion", p.bloom == 0 ? "OFF" : (p.bloom == 1 ? "Local 1/4" : (p.bloom == 2 ? "Full 1/4" : (p.bloom == 3 ? "Local 1/2" : "Full 1/2"))));
             }
         }
