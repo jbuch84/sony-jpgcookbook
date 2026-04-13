@@ -825,19 +825,20 @@ inline void process_row_rgb(
         if (advancedGrainExperimental == 0 && s_grain > 0) {
             int noise = legacy_grain_noise(x, abs_y, grainSize, seed);
             
-            // --- THE PRO FILM CURVE ---
-            // Highlights ( > 128): Fades smoothly to zero.
-            // Midtones (128): Grain hits 100% peak intensity.
-            // Shadows ( < 128): Gently tapers, but maintains a 50% baseline 
-            // in pitch black so shadows stay naturally gritty.
-            int mask = (targetY < 128) ? ((targetY + 128) >> 1) : (255 - targetY);
+            // --- THE CLASSIC BELL CURVE (Clean Shadows & Highlights) ---
+            // High-precision mask: 0 at black, peaks at 128, 0 at white.
+            int mask = (targetY < 128) ? targetY : (255 - targetY);
             
+            // Calculate balanced grain value
             int gv = (noise * mask * s_grain) >> 15;
             
-            // Subtractive Density
-            if (gv > 0) gv = gv >> 1; 
-            
-            outR += gv; outG += gv; outB += gv;
+            // --- BALANCED DENSITY MULTIPLIER ---
+            // Symmetrical but soft impact
+            gv = (gv * 180) >> 8; 
+
+            outR = CLAMP(outR + gv); 
+            outG = CLAMP(outG + gv); 
+            outB = CLAMP(outB + gv);
         }
 
         row[i] = (uint8_t)CLAMP(outR); row[i+1] = (uint8_t)CLAMP(outG); row[i+2] = (uint8_t)CLAMP(outB);
@@ -933,15 +934,18 @@ inline void process_row_yuv(
         if (advancedGrainExperimental == 0 && s_grain > 0) {
             int noise = legacy_grain_noise(x, abs_y, grainSize, seed);
             
-            // --- THE PRO FILM CURVE ---
-            int mask = (outY < 128) ? ((outY + 128) >> 1) : (255 - outY);
+            // --- THE CLASSIC BELL CURVE ---
+            // Use outY for the mask in the YUV path
+            int mask = (outY < 128) ? outY : (255 - outY);
             
+            // Calculate balanced grain value
             int gv = (noise * mask * s_grain) >> 15;
             
-            // Subtractive Density
-            if (gv > 0) gv = gv >> 1; 
+            // Balanced Softening
+            gv = (gv * 180) >> 8; 
             
-            outY += gv;
+            // Apply to Y only and CLAMP
+            outY = CLAMP(outY + gv);
         }
 
         row[i] = (uint8_t)CLAMP(outY); row[i+1] = (uint8_t)CLAMP(128+cb); row[i+2] = (uint8_t)CLAMP(128+cr);
