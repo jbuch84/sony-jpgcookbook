@@ -299,7 +299,7 @@ inline int sample_atlas_template(const std::vector<int8_t>& tpl, int sizeMask, i
     return tpl[((y & sizeMask) * (sizeMask + 1)) + (x & sizeMask)];
 }
 
-// --- NEW: Kills the "Cheetah Print" by smoothly blending grain edges ---
+// --- NEW: Kills the "Cheetah Print" using Hermite Smoothstep ---
 inline int sample_atlas_bilinear(const std::vector<int8_t>& tpl, int sizeMask, int x_fp8, int y_fp8) {
     int cx = (x_fp8 >> 8) & sizeMask;
     int cy = (y_fp8 >> 8) & sizeMask;
@@ -384,20 +384,25 @@ inline const std::vector<int8_t>& atlas_profile_for_index(const BakedGrainAtlas&
     }
 }
 
-// Note the updated parameter names to x_fp8 and y_fp8
-inline int grain_profile_sample(int x_fp8, int y_fp8, int profileIndex, int flatness, int amp, uint32_t seed) {
+// Bypasses the fine-heavy pre-baked composites to manually 
+// mix spatial frequencies based on the chosen Film Stock.
+// --- V11 ANTI-TILING COMPOSITOR ---
+// --- THE TRUE BILINEAR SAMPLER ---
+inline int grain_profile_sample(int sx_fp8, int sy_fp8, int profileIndex, int flatness, int amp, uint32_t seed) {
     if (amp <= 0) return 0;
     const BakedGrainAtlas& atlas = baked_grain_atlas();
     
-    // Coarse warp remains integer
-    int warp = sample_atlas_template(atlas.coarse, atlas.mask, (y_fp8 >> 9), (x_fp8 >> 9)) >> 3;
+    // Engine's built in organic warping
+    int warp = sample_atlas_template(atlas.coarse, atlas.mask, (sy_fp8 >> 17), (sx_fp8 >> 17)) >> 3;
 
-    // Shift phases into Fixed-Point 8
-    int phase0x = (int(seed & (uint32_t)atlas.mask) + warp) << 8;
-    int phase0y = (int((seed >> 8) & (uint32_t)atlas.mask) - warp) << 8;
+    int phase0x = int(seed & (uint32_t)atlas.mask) + warp;
+    int phase0y = int((seed >> 8) & (uint32_t)atlas.mask) - warp;
 
-    // Use smooth bilinear sampling instead of nearest-neighbor block sampling
-    int sample = sample_atlas_bilinear(atlas_profile_for_index(atlas, profileIndex), atlas.mask, x_fp8 + phase0x, y_fp8 + phase0y);
+    int p0x = phase0x << 8;
+    int p0y = phase0y << 8;
+
+    int sample = sample_atlas_bilinear(atlas_profile_for_index(atlas, profileIndex), atlas.mask, sx_fp8 + p0x, sy_fp8 + p0y);
+    
     int gate = 126 + ((flatness * 3) >> 3);
     return (sample * gate * amp + (1 << 15)) >> 16;
 }
@@ -405,23 +410,8 @@ inline int grain_profile_sample(int x_fp8, int y_fp8, int profileIndex, int flat
 inline int form_grain_luma_core(int centerY, int leftY, int rightY, int x, int abs_y, int s_grain, int grainSize, int scaleDenom, uint32_t seed) {
     if (s_grain <= 0) return centerY;
 
-    // --- V9 TRUE OPTICAL SCALING (Bilinear Fractional Math) ---
-    // Shift to Fixed-Point 8 to allow for sub-pixel sampling
     int sx_fp8 = (x * scaleDenom) << 8;
     int sy_fp8 = (abs_y * scaleDenom) << 8;
-
-    // Stretch the fractional canvas to make the grain clumps larger organically
-    if (grainSize == 1) {
-        sx_fp8 = (sx_fp8 * 170) >> 8; // approx 1.5x larger
-        sy_fp8 = (sy_fp8 * 170) >> 8;
-    } else if (grainSize == 2) {
-        sx_fp8 = sx_fp8 >> 1; // Exactly 2.0x larger
-        sy_fp8 = sy_fp8 >> 1;
-    }
-
-    // Extract the strict integers for the mask calculations below
-    int sx = sx_fp8 >> 8;
-    int sy = sy_fp8 >> 8;
 
     int blurY = (leftY + (centerY << 1) + rightY + 2) >> 2;
     int edge = leftY > rightY ? leftY - rightY : rightY - leftY;
@@ -431,42 +421,57 @@ inline int form_grain_luma_core(int centerY, int leftY, int rightY, int x, int a
 
     int densityY = (centerY + blurY * 3 + 2) >> 2;
     int amountY = centerY;
-    if (grainSize >= 2) {
-        int surfaceLift = std::max(0, 144 - densityY);
-        surfaceLift = (surfaceLift * std::max(0, flat - 152) + 128) >> 8;
-        surfaceLift -= std::min(32, edge << 1);
-        if (surfaceLift < 0) surfaceLift = 0;
-        if (surfaceLift > 56) surfaceLift = 56;
-        amountY += surfaceLift;
-        if (amountY > 255) amountY = 255;
-    }
 
     int env = grain_amount_mask(amountY);
     if (env <= 0) return centerY;
-
+    
+    // UNLEASHED: The Amount slider provides 100% of requested power for all sizes
     int rawAmp = (s_grain * env + 128) >> 8;
+    
     int edgeAtten = 256 - std::min(176, edge * 4);
     if (edgeAtten < 84) edgeAtten = 84;
     int amp = (rawAmp * edgeAtten + 128) >> 8;
 
-    if (scaleDenom > 1) {
-        int preserve = grainSize >= 2 ? 96 : 72;
-        int floorScale = scaleDenom == 2 ? 192 : 136;
-        int floorAmp = (rawAmp * preserve * floorScale + 32768) >> 16;
-        if (floorAmp > amp) amp = floorAmp;
-    }
-
     const BakedGrainAtlas& atlas = baked_grain_atlas();
     int profileIndex = (scaleDenom == 1)
-        ? select_profile_full_res(densityY, sx, sy, seed, atlas) // Keep integers here
+        ? select_profile_full_res(densityY, sx_fp8 >> 8, sy_fp8 >> 8, seed, atlas)
         : grain_profile_index(densityY);
 
-    // --- APPLY BILINEAR SAMPLING ---
-    // We pass the new fractional fp8 coordinates into the profile sample
-    // to smoothly blend the edges of the grain clumps.
-    int grainTerm = grain_profile_sample(sx_fp8, sy_fp8, profileIndex, flat, amp, seed);
+    int grainTerm = 0;
 
-    int limit = 64; 
+    // =========================================================
+    // TRUE PHYSICAL FILM EMULSION
+    // =========================================================
+    if (grainSize == 0) {
+        // PORTRA 160: 1:1 scale. Tight, dense, and continuous.
+        grainTerm = grain_profile_sample(sx_fp8, sy_fp8, profileIndex, flat, amp, seed);
+        
+    } else if (grainSize == 1) {
+        // PORTRA 400: 1.5x chunks suspended in fine filler
+        int sx_15 = (sx_fp8 * 170) >> 8; 
+        int sy_15 = (sy_fp8 * 170) >> 8;
+        int chunky = grain_profile_sample(sx_15, sy_15, profileIndex, flat, amp, seed);
+        int filler = grain_profile_sample(sx_fp8, sy_fp8, profileIndex, flat, amp, seed ^ 0x55555555);
+        
+        // Restore chunk contrast and fill the sparse gaps
+        chunky = (chunky * 5) >> 2; 
+        grainTerm = (chunky * 180 + filler * 76) >> 8;
+        
+    } else {
+        // PORTRA 800: Massive 2.0x chunks suspended in heavy filler
+        int sx_20 = sx_fp8 >> 1;
+        int sy_20 = sy_fp8 >> 1;
+        int chunky = grain_profile_sample(sx_20, sy_20, profileIndex, flat, amp, seed);
+        int filler = grain_profile_sample(sx_fp8, sy_fp8, profileIndex, flat, amp, seed ^ 0xAAAAAAAA);
+        
+        // Restore chunk contrast and aggressively fill gaps
+        chunky = (chunky * 3) >> 1;
+        grainTerm = (chunky * 200 + filler * 56) >> 8;
+    }
+
+    // --- DYNAMIC SOFT LIMITER ---
+    // Allows 400 and 800 to bloom and hit harder without punching black holes
+    int limit = (grainSize == 0) ? 50 : ((grainSize == 1) ? 75 : 100); 
     if (grainTerm > limit) {
         grainTerm = limit + ((grainTerm - limit) * 3) / 8;
     } else if (grainTerm < -limit) {
@@ -478,11 +483,15 @@ inline int form_grain_luma_core(int centerY, int leftY, int rightY, int x, int a
     int lateDarkSurfaceBoost = ((darkBase * sceneExposure + 128) >> 8) + (std::max(0, flat - 168) >> 2) - (edge << 1);
     if (lateDarkSurfaceBoost < 0) lateDarkSurfaceBoost = 0;
     if (lateDarkSurfaceBoost > 72) lateDarkSurfaceBoost = 72;
+    
     if (lateDarkSurfaceBoost > 0) {
+        if (grainSize == 2) lateDarkSurfaceBoost = (lateDarkSurfaceBoost * 3) >> 1; 
+        if (grainSize == 0) lateDarkSurfaceBoost = (lateDarkSurfaceBoost * 100) >> 8; 
         grainTerm += (grainTerm * lateDarkSurfaceBoost + 128) >> 8;
     }
 
     int formedY = apply_density_style_grain_y(centerY, grainTerm);
+    
     int softBlend = 8 + (amp >> 4) + std::max(0, flat - 160) / 32;
     if (softBlend > 20) softBlend = 20;
     formedY = ((formedY * (256 - softBlend)) + (centerY * softBlend) + 128) >> 8;
@@ -499,6 +508,7 @@ inline int form_grain_luma_core(int centerY, int leftY, int rightY, int x, int a
 
     return CLAMP(formedY + residual);
 }
+
 inline int row_luma_rgb_at(const uint8_t* row, int width, int x) {
     if (x < 0) x = 0;
     if (x >= width) x = width - 1;
@@ -526,24 +536,33 @@ inline int legacy_grain_noise(int x, int abs_y, int grainSize, uint32_t& seed) {
     int salt = (int)(salt_raw & 0xFF) - 128;
 
     if (grainSize > 0) {
-        // True physical scaling using Bilinear Value Noise
         int scale = (grainSize == 1) ? 2 : 4; 
         int cx = x / scale; int cy = abs_y / scale;
-        int fx = x % scale; int fy = abs_y % scale;
+        
+        // Map fractions back to a 0-255 scale for the Smoothstep math
+        int fx_raw = ((x % scale) * 256) / scale;
+        int fy_raw = ((abs_y % scale) * 256) / scale;
 
-        // Sample the 4 corners of the current "clump"
+        // Smoothstep to kill grid artifacts
+        int fx = (fx_raw * fx_raw * (768 - (fx_raw << 1))) >> 16;
+        int fy = (fy_raw * fy_raw * (768 - (fy_raw << 1))) >> 16;
+
         int c00 = hash_coord(cx, cy, seed);
         int c10 = hash_coord(cx + 1, cy, seed);
         int c01 = hash_coord(cx, cy + 1, seed);
         int c11 = hash_coord(cx + 1, cy + 1, seed);
 
-        // Smoothly interpolate between the corners to remove hard digital edges
-        int nx0 = c00 + ((c10 - c00) * fx) / scale;
-        int nx1 = c01 + ((c11 - c01) * fx) / scale;
-        int clump = nx0 + ((nx1 - nx0) * fy) / scale;
+        int nx0 = c00 + (((c10 - c00) * fx) >> 8);
+        int nx1 = c01 + (((c11 - c01) * fx) >> 8);
+        int clump = nx0 + (((nx1 - nx0) * fy) >> 8);
         
-        // Blend organic clumps with a tiny bit of salt for chemical texture
-        return (salt * 64 + clump * 192) >> 8;
+        // --- THE REVERSE SLIDER FIX ---
+        // Interpolation halves the contrast. We multiply by 1.5x to 2x 
+        // to restore the deep, heavy density of the larger clumps.
+        clump = (clump * ((grainSize == 1) ? 190 : 250)) >> 7; 
+        
+        // Blend clumps with a tiny bit of salt for sharp texture
+        return (salt * 40 + clump * 216) >> 8;
     }
 
     return salt;
