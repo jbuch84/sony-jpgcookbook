@@ -19,6 +19,9 @@
 std::vector<uint8_t> nativeLut;
 int nativeLutSize = 0;
 
+// NEW: Global for our external PNG/JPG grain texture
+std::vector<uint8_t> nativeGrainTexture;
+
 struct my_error_mgr { struct jpeg_error_mgr pub; jmp_buf setjmp_buffer; };
 
 METHODDEF(void) my_error_exit (j_common_ptr cinfo) {
@@ -140,6 +143,36 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_loadLutNative(JNIEnv* env, jobject 
 
     env->ReleaseStringUTFChars(path, file_path);
     return nativeLutSize > 0 ? JNI_TRUE : JNI_FALSE;
+}
+
+// NEW: Load the 512x512 PNG/JPG using stb_image directly in C++
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_github_ma1co_pmcademo_app_LutEngine_loadGrainTextureNative(JNIEnv* env, jobject obj, jstring path) {
+    nativeGrainTexture.clear();
+    if (path == NULL) return JNI_FALSE;
+
+    const char *file_path = env->GetStringUTFChars(path, NULL);
+    int w, h, c;
+    
+    // Force load as 3-channel (RGB)
+    unsigned char *img_data = stbi_load(file_path, &w, &h, &c, 3);
+    env->ReleaseStringUTFChars(path, file_path);
+
+    if (img_data) {
+        if (w == 512 && h == 512) {
+            int total_bytes = w * h * 3;
+            nativeGrainTexture.assign(img_data, img_data + total_bytes);
+            stbi_image_free(img_data);
+            LOGD("SUCCESS: Loaded Grain Texture 512x512");
+            return JNI_TRUE;
+        } else {
+            stbi_image_free(img_data);
+            LOGD("ERROR: Grain Texture must be exactly 512x512");
+            return JNI_FALSE;
+        }
+    }
+    LOGD("ERROR: Failed to load Grain Texture");
+    return JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -299,6 +332,10 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
 
     // --- PRE-LOAD BUFFER (Initialize the 21-row window) ---
     // We want rows[10] to be the "current" row being processed.
+    
+    // NEW: Get pointer to texture if it's loaded
+    const uint8_t* externalTex = nativeGrainTexture.empty() ? NULL : nativeGrainTexture.data();
+
     if (cinfo_d.output_height > 0) {
         row_pointer[0] = rows[10]; 
         jpeg_read_scanlines(&cinfo_d, row_pointer, 1);
@@ -341,7 +378,8 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
                 rows[21], cinfo_d.output_width, abs_y, cx, cy_center, vig_coef,
                 shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, 0, vignette,
                 grain, grainSize, scaleDenom, advancedGrainExperimental, seed,
-                opac_mapped, map, nativeLut.data(), nativeLutSize, lutMax, lutSize2
+                opac_mapped, map, nativeLut.data(), nativeLutSize, lutMax, lutSize2,
+                externalTex // <-- ADDED
             );
         } else {
             // ==========================================
@@ -351,7 +389,8 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
                 rows[21], cinfo_d.output_width, abs_y, cx, cy_center, vig_coef,
                 shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, 0, vignette,
                 grain, grainSize, scaleDenom, advancedGrainExperimental, seed,
-                rolloff_lut
+                rolloff_lut,
+                externalTex // <-- ADDED
             );
         }
 
