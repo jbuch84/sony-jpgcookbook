@@ -966,24 +966,35 @@ inline void process_row_rgb(
 
         // NEW: Engine 2 (Texture Overlay)
         if (advancedGrainExperimental == 2 && externalGrainTexture != NULL && grain > 0) {
-            // Fast 512x512 tiling
-            int tx = (x * scaleDenom) & 511;
-            int ty = (abs_y * scaleDenom) & 511;
-            int tex_idx = (ty * 512 + tx) * 3; 
+            // --- NEW: LUMINANCE MASKING ---
+            // Grab the optical density mask from Engine 1 to protect shadows and highlights
+            int env = grain_amount_mask(targetY);
             
-            uint8_t tr = externalGrainTexture[tex_idx];
-            uint8_t tg = externalGrainTexture[tex_idx + 1];
-            uint8_t tb = externalGrainTexture[tex_idx + 2];
+            // Optimization: If the mask is 0 (pure black or pure white), skip the heavy math!
+            if (env > 0) {
+                // Fast 512x512 tiling
+                int tx = (x * scaleDenom) & 511;
+                int ty = (abs_y * scaleDenom) & 511;
+                int tex_idx = (ty * 512 + tx) * 3; 
+                
+                uint8_t tr = externalGrainTexture[tex_idx];
+                uint8_t tg = externalGrainTexture[tex_idx + 1];
+                uint8_t tb = externalGrainTexture[tex_idx + 2];
 
-            int blendedR = blend_overlay(outR, tr);
-            int blendedG = blend_overlay(outG, tg);
-            int blendedB = blend_overlay(outB, tb);
+                int blendedR = blend_overlay(outR, tr);
+                int blendedG = blend_overlay(outG, tg);
+                int blendedB = blend_overlay(outB, tb);
 
-            // Map the camera's 1-5 grain slider to opacity (5 = 100% texture strength)
-            int mix = (grain >= 5) ? 256 : (grain * 51);
-            outR = outR + (((blendedR - outR) * mix) >> 8);
-            outG = outG + (((blendedG - outG) * mix) >> 8);
-            outB = outB + (((blendedB - outB) * mix) >> 8);
+                // Base UI opacity from the camera dial (1-5)
+                int base_mix = (grain >= 5) ? 256 : (grain * 51);
+                
+                // Final Opacity = (UI Dial) * (Midtone Mask)
+                int mix = (base_mix * env) >> 8;
+
+                outR = outR + (((blendedR - outR) * mix) >> 8);
+                outG = outG + (((blendedG - outG) * mix) >> 8);
+                outB = outB + (((blendedB - outB) * mix) >> 8);
+            }
             
         } else if (advancedGrainExperimental == 0 && s_grain > 0) {
             int noise = legacy_grain_noise(x, abs_y, grainSize, seed);
@@ -1102,28 +1113,36 @@ inline void process_row_yuv(
 
         // NEW: Engine 2 (Texture Overlay)
         if (advancedGrainExperimental == 2 && externalGrainTexture != NULL && grain > 0) {
-            int tx = (x * scaleDenom) & 511;
-            int ty = (abs_y * scaleDenom) & 511;
-            int tex_idx = (ty * 512 + tx) * 3;
-            
-            // Fast YUV to RGB for blending
-            int r = outY + ((cr * 359) >> 8);
-            int g = outY - ((cb * 88 + cr * 183) >> 8);
-            int b = outY + ((cb * 454) >> 8);
+            // --- NEW: LUMINANCE MASKING ---
+            int env = grain_amount_mask(outY);
 
-            int blendedR = blend_overlay(r, externalGrainTexture[tex_idx]);
-            int blendedG = blend_overlay(g, externalGrainTexture[tex_idx + 1]);
-            int blendedB = blend_overlay(b, externalGrainTexture[tex_idx + 2]);
+            if (env > 0) {
+                int tx = (x * scaleDenom) & 511;
+                int ty = (abs_y * scaleDenom) & 511;
+                int tex_idx = (ty * 512 + tx) * 3;
+                
+                // Fast YUV to RGB for blending
+                int r = outY + ((cr * 359) >> 8);
+                int g = outY - ((cb * 88 + cr * 183) >> 8);
+                int b = outY + ((cb * 454) >> 8);
 
-            int mix = (grain >= 5) ? 256 : (grain * 51);
-            r = r + (((blendedR - r) * mix) >> 8);
-            g = g + (((blendedG - g) * mix) >> 8);
-            b = b + (((blendedB - b) * mix) >> 8);
+                int blendedR = blend_overlay(r, externalGrainTexture[tex_idx]);
+                int blendedG = blend_overlay(g, externalGrainTexture[tex_idx + 1]);
+                int blendedB = blend_overlay(b, externalGrainTexture[tex_idx + 2]);
 
-            // Fast RGB back to YUV
-            outY = (r * 77 + g * 150 + b * 29) >> 8;
-            cb = ((-38 * r - 74 * g + 112 * b) >> 8);
-            cr = ((112 * r - 94 * g - 18 * b) >> 8);
+                // Multiply the slider opacity by the luminance mask
+                int base_mix = (grain >= 5) ? 256 : (grain * 51);
+                int mix = (base_mix * env) >> 8;
+                
+                r = r + (((blendedR - r) * mix) >> 8);
+                g = g + (((blendedG - g) * mix) >> 8);
+                b = b + (((blendedB - b) * mix) >> 8);
+
+                // Fast RGB back to YUV
+                outY = (r * 77 + g * 150 + b * 29) >> 8;
+                cb = ((-38 * r - 74 * g + 112 * b) >> 8);
+                cr = ((112 * r - 94 * g - 18 * b) >> 8);
+            }
             
         } else if (advancedGrainExperimental == 0 && s_grain > 0) {
             int noise = legacy_grain_noise(x, abs_y, grainSize, seed);
