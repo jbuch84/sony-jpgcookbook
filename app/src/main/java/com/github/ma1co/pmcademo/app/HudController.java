@@ -496,7 +496,11 @@ public class HudController {
             }
             if(tvTop!=null){
                 if(mc.isNamingMode()){StringBuilder sb=new StringBuilder("NAME: ");char[] buf=mc.getNameBuffer();int pos=mc.getNameCursorPos();for(int i=0;i<buf.length;i++){if(i==pos)sb.append("[").append(buf[i]).append("]");else sb.append(buf[i]);}tvTop.setText(sb.toString());tvTop.setTextColor(Color.YELLOW);}
-                else{tvTop.setText("RECIPE MANAGER - SLOT "+(host.getRecipeManager().getCurrentSlot()+1));tvTop.setTextColor(Color.WHITE);}
+                else{
+                    // <--- CHANGED: Added the [MENU = BACK] safe escape hint
+                    tvTop.setText("RECIPE MANAGER - SLOT "+(host.getRecipeManager().getCurrentSlot()+1) + "  [MENU = BACK]");
+                    tvTop.setTextColor(Color.WHITE);
+                }
                 tvTop.setVisibility(View.VISIBLE);
             }
         }

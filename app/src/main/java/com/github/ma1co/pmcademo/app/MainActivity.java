@@ -144,6 +144,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     public static final int DIAL_MODE_FOCUS = 7;
     
     private int mDialMode = DIAL_MODE_RTL;
+    private boolean isDialLocked = true; // <--- NEW: Defaults to locked
 
 // --- MATRIX PRESET DATA ---
     private final String[] MATRIX_PRESET_NAMES = {"STANDARD", "GOLDEN HOUR", "PNW GREEN", "CINEMATIC", "BLEACH BYPASS", "AEROCHROME", "CUSTOM"};
@@ -268,7 +269,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         SharedPreferences prefs = getSharedPreferences("JPEG.CAM_Prefs", MODE_PRIVATE);
         prefShowFocusMeter = prefs.getBoolean("focusMeter", true);
         prefShowCinemaMattes = prefs.getBoolean("cinemaMattes", false);
-        prefShowGridLines = prefs.getBoolean("gridLines", false);
+        prefShowGridLines = prefs.getBoolean("gridLines", true);
         prefJpegQuality = prefs.getInt("jpegQuality", 95);
         
         cameraManager = new SonyCameraManager(this);
@@ -444,8 +445,25 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     public void onMenuPressed() {
         if (playbackController.isActive()) { playbackController.exit(); return; }
         if (isProcessing) return;
-        if (menuController.isOpen()) menuController.close();
-        else menuController.open();
+        
+        // 1. Contextual Back: If a HUD (like Recipe Vault) is open, close it and reveal the Menu
+        if (hudController.isActive()) {
+            menuController.setNamingMode(false);
+            menuController.setConfirmingDelete(false);
+            hudController.close();
+            return;
+        }
+        
+        // 2. Contextual Back: If editing a value, cancel the edit. Otherwise, close the Menu.
+        if (menuController.isOpen()) {
+            if (menuController.cancelAction()) {
+                return; // Successfully backed out of an edit state
+            }
+            menuController.close();
+        } else {
+            // 3. Normal Open
+            menuController.open();
+        }
     }
 
     private Runnable hudUpdateRunnable = new Runnable() {
@@ -558,8 +576,8 @@ public void onEnterPressed() {
                 setHUDVisibility(View.GONE);
                 if (focusMeter != null) focusMeter.setVisibility(View.VISIBLE);
             } else {
-                displayState = (displayState == 0) ? 1 : 0;
-                mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE);
+                // <--- CHANGED: Replaced HUD hiding with Dial Lock toggle
+                isDialLocked = !isDialLocked;
                 updateMainHUD();
             }
         } else {
@@ -727,6 +745,7 @@ public void onEnterPressed() {
     }
 
     private void navigateHomeSpatial(int keyCode) {
+        isDialLocked = true; // <--- NEW: Always auto-lock when moving the cursor
         switch (mDialMode) {
             case DIAL_MODE_SHUTTER:
                 if (keyCode == ScalarInput.ISV_KEY_RIGHT) mDialMode = DIAL_MODE_APERTURE;
@@ -823,10 +842,11 @@ public void onEnterPressed() {
 
     private void handleHardwareInput(int d) {
         if (calibController.handleDial(d)) return;
+        if (isDialLocked) return; // <--- NEW: Block the dial from changing values
 
         if (cameraManager == null || cameraManager.getCamera() == null || cameraManager.getCameraEx() == null) return;
         
-        Camera c = cameraManager.getCamera(); 
+        Camera c = cameraManager.getCamera();
         CameraEx cx = cameraManager.getCameraEx();
         Camera.Parameters p = c.getParameters(); 
         CameraEx.ParametersModifier pm = cx.createParametersModifier(p);
@@ -1358,7 +1378,7 @@ public void onEnterPressed() {
             tvTopStatus.setText("SLOT " + slotNum + ": " + customName + "\n" + (isReady ? "READY" : "LOADING.."));
             
             if (mDialMode == DIAL_MODE_RTL) {
-                tvTopStatus.setTextColor(Color.WHITE); 
+                tvTopStatus.setTextColor(selectedColor); // <--- UPDATED
             } else if (isReady) {
                 tvTopStatus.setTextColor(Color.rgb(0, 230, 118)); 
             } else {
@@ -1396,11 +1416,14 @@ public void onEnterPressed() {
             tvReview.setTextColor(mDialMode == DIAL_MODE_REVIEW ? Color.BLACK : Color.rgb(227, 69, 20));
         }
 
-        if (tvValShutter != null) tvValShutter.setTextColor(mDialMode == DIAL_MODE_SHUTTER ? Color.WHITE : Color.rgb(227, 69, 20));
-        if (tvValAperture != null) tvValAperture.setTextColor(mDialMode == DIAL_MODE_APERTURE ? Color.WHITE : Color.rgb(227, 69, 20));
-        if (tvValIso != null) tvValIso.setTextColor(mDialMode == DIAL_MODE_ISO ? Color.WHITE : Color.rgb(227, 69, 20));
-        if (tvValEv != null) tvValEv.setTextColor(mDialMode == DIAL_MODE_EXPOSURE ? Color.WHITE : Color.rgb(227, 69, 20));
-        if (tvMode != null) tvMode.setTextColor(mDialMode == DIAL_MODE_PASM ? Color.WHITE : Color.rgb(227, 69, 20));
+        // <--- NEW: Yellow when Armed, White when Locked
+        int selectedColor = isDialLocked ? Color.WHITE : Color.YELLOW;
+
+        if (tvValShutter != null) tvValShutter.setTextColor(mDialMode == DIAL_MODE_SHUTTER ? selectedColor : Color.rgb(227, 69, 20));
+        if (tvValAperture != null) tvValAperture.setTextColor(mDialMode == DIAL_MODE_APERTURE ? selectedColor : Color.rgb(227, 69, 20));
+        if (tvValIso != null) tvValIso.setTextColor(mDialMode == DIAL_MODE_ISO ? selectedColor : Color.rgb(227, 69, 20));
+        if (tvValEv != null) tvValEv.setTextColor(mDialMode == DIAL_MODE_EXPOSURE ? selectedColor : Color.rgb(227, 69, 20));
+        if (tvMode != null) tvMode.setTextColor(mDialMode == DIAL_MODE_PASM ? selectedColor : Color.rgb(227, 69, 20));
         
         String fm = p.getFocusMode();
         cachedIsManualFocus = "manual".equals(fm);
@@ -1415,7 +1438,7 @@ public void onEnterPressed() {
             else if ("continuous-video".equals(fm) || "continuous-picture".equals(fm)) tvFocusMode.setText("AF-C"); 
             else tvFocusMode.setText(fm != null ? fm.toUpperCase() : "AF");
             
-            tvFocusMode.setTextColor(mDialMode == DIAL_MODE_FOCUS ? Color.WHITE : Color.rgb(227, 69, 20));
+            tvFocusMode.setTextColor(mDialMode == DIAL_MODE_FOCUS ? selectedColor : Color.rgb(227, 69, 20)); // <--- UPDATED
         }
         
         // --- 4. UPDATE FOCUS METER ---

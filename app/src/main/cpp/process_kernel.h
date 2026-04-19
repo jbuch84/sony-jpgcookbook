@@ -35,7 +35,7 @@ inline int blend_overlay(int base, int blend) {
 // vignette, 0, 5
 // grain, 0, 5
 // grainSize, 0, 2
-// bloom, 0, 4
+// bloom, 0, 6
 // === END_METADATA ===
 
 inline long long get_vig_coef(int vignette, long long max_dist_sq) {
@@ -674,16 +674,22 @@ inline void apply_bloom_halation(
     // 1. Resolution-Aware Alphas & Intensities
     int alpha, b_mix;
     
-    if (bloom == 1) {        // Local 1/4 (Tight radius, subtle mix)
+    if (bloom == 1) {        // Local 1/8 (Tight radius, extremely subtle mix)
+        alpha = (scaleDenom == 4) ? 180 : ((scaleDenom == 2) ? 210 : 230);
+        b_mix = 45;
+    } else if (bloom == 2) { // Full 1/8 (Wide radius, extremely subtle mix)
+        alpha = (scaleDenom == 4) ? 230 : ((scaleDenom == 2) ? 245 : 252);
+        b_mix = 45;
+    } else if (bloom == 3) { // Local 1/4 (Tight radius, subtle mix)
         alpha = (scaleDenom == 4) ? 180 : ((scaleDenom == 2) ? 210 : 230);
         b_mix = 90;
-    } else if (bloom == 2) { // Full 1/4 (Wide radius, subtle mix)
+    } else if (bloom == 4) { // Full 1/4 (Wide radius, subtle mix)
         alpha = (scaleDenom == 4) ? 230 : ((scaleDenom == 2) ? 245 : 252);
         b_mix = 90;
-    } else if (bloom == 3) { // Local 1/2 (Tight radius, heavy mix)
+    } else if (bloom == 5) { // Local 1/2 (Tight radius, heavy mix)
         alpha = (scaleDenom == 4) ? 180 : ((scaleDenom == 2) ? 210 : 230);
         b_mix = 160;
-    } else if (bloom == 4) { // Full 1/2 (Wide radius, heavy mix)
+    } else if (bloom == 6) { // Full 1/2 (Wide radius, heavy mix)
         alpha = (scaleDenom == 4) ? 230 : ((scaleDenom == 2) ? 245 : 252);
         b_mix = 160;
     } else {
@@ -712,8 +718,8 @@ inline void apply_bloom_halation(
             // --- V6 "SMART" LUMINANCE-DEPENDENT BLOOM EMISSION ---
             int bloom_emission;
             
-            if (bloom == 2 || bloom == 4) {
-                // FULL BLOOM: Leaves shadows linear to maintain global image softening, 
+            if (bloom > 0 && bloom % 2 == 0) {
+                // FULL BLOOM (Evens: 2, 4, 6): Leaves shadows linear to maintain global image softening, 
                 // but violently boosts highlights into the HDR range.
                 if (lum < 128) {
                     bloom_emission = lum; 
@@ -721,7 +727,7 @@ inline void apply_bloom_halation(
                     bloom_emission = lum + (((lum - 128) * (lum - 128)) >> 6); 
                 }
             } else {
-                // LOCAL BLOOM: Crushes shadow emission geometrically for deep contrast, 
+                // LOCAL BLOOM (Odds: 1, 3, 5): Crushes shadow emission geometrically for deep contrast, 
                 // only glowing from bright practical light sources.
                 if (lum < 128) {
                     bloom_emission = (lum * lum) >> 7; 
@@ -730,7 +736,7 @@ inline void apply_bloom_halation(
                 }
             }
 
-            s0 += bloom_emission * w; 
+            s0 += bloom_emission * w;
             
             // Halation remains untouched (it only pulls from extreme highlights)
             if (lum > 210) {

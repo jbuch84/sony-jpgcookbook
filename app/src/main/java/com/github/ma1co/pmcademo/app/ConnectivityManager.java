@@ -233,7 +233,8 @@ public class ConnectivityManager {
                             }
                         } catch (Exception e) {}
                     }
-                    updateStatus("HOTSPOT", "PW: " + password + " (192.168.122.1)");
+                    // <--- CHANGED: Stacked the text using \n
+                    updateStatus("HOTSPOT", "PW: " + password + "\nIP: 192.168.122.1");
                     setAutoPowerOffMode(false);
                 }
             }
@@ -295,8 +296,8 @@ public class ConnectivityManager {
                                                         Method getPassphrase = group.getClass().getMethod("getPassphrase");
                                                         String pass = (String) getPassphrase.invoke(group);
                                                         
-                                                        // Android P2P framework defaults to 192.168.49.1
-                                                        updateStatus("HOTSPOT", "PW: " + pass + " (192.168.49.1)");
+                                                        // <--- CHANGED: Stacked the text using \n
+                                                        updateStatus("HOTSPOT", "PW: " + pass + "\nIP: 192.168.49.1");
                                                         setAutoPowerOffMode(false);
                                                     } else {
                                                         updateStatus("HOTSPOT", "Error: No Group Info");

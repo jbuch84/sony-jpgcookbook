@@ -253,6 +253,18 @@ public class MenuController {
     /** Re-render the menu (e.g. after returning from a HUD overlay). */
     public void refreshDisplay()               { render(); }
 
+    /** Contextual Back: Cancels any active editing state and returns true if successful. */
+    public boolean cancelAction() {
+        if (isEditing || isNaming || isConfirmingDelete) {
+            isEditing = false;
+            isNaming = false;
+            isConfirmingDelete = false;
+            render();
+            return true;
+        }
+        return false;
+    }
+
     // -----------------------------------------------------------------------
     // Lifecycle
     // -----------------------------------------------------------------------
@@ -477,15 +489,7 @@ public class MenuController {
             if (sel == 0) { if (dir > 0 && p.lutIndex < rm.getRecipeNames().size()-1) p.lutIndex++; else if (dir < 0 && p.lutIndex > 0) p.lutIndex--; }
             else if (sel == 1 && p.lutIndex > 0) p.opacity = Math.max(10, Math.min(100, p.opacity + dir * 10));
             else if (sel == 2) p.grain = Math.max(0, Math.min(5, p.grain + dir));
-            else if (sel == 3 && p.grain > 0) p.grainSize = Math.max(0, Math.min(2, p.grainSize + dir));
-            
-            // CHANGED: Use the dynamic array length instead of locking to 1
-            else if (sel == 4 && p.grain > 0) {
-                int maxEngineIndex = getGrainEngineOptions().length - 1;
-                p.advancedGrainExperimental = Math.max(0, Math.min(maxEngineIndex, p.advancedGrainExperimental + dir));
-            }
-            
-            else if (sel == 5) p.vignette = Math.max(0, Math.min(5, p.vignette + dir));
+            else if (sel == 3) p.vignette = Math.max(0, Math.min(5, p.vignette + dir));
         } else if (currentPage == 5) {
             if (sel == 0) p.rollOff        = Math.max(0, Math.min(5, p.rollOff + dir));
             else if (sel == 1) p.shadowToe = Math.max(0, Math.min(2, p.shadowToe + dir));
@@ -494,8 +498,8 @@ public class MenuController {
             else if (sel == 4) p.chromeBlue = Math.max(0, Math.min(2, p.chromeBlue + dir));
             else if (sel == 5) p.halation  = Math.max(0, Math.min(2, p.halation + dir));
             
-            // NEW ROW ADDED HERE: Handles left/right d-pad clicks for Optical Bloom (0, 1, 2, 4, or 4)
-            else if (sel == 6) p.bloom = Math.max(0, Math.min(4, p.bloom + dir));
+            // NEW ROW ADDED HERE: Handles left/right d-pad clicks for Optical Bloom
+            else if (sel == 6) p.bloom = Math.max(0, Math.min(6, p.bloom + dir)); // <--- CHANGED max to 6
             
         } else if (currentPage == 6) {
             if      (sel == 0) rm.setQualityIndex(Math.max(0, Math.min(2, rm.getQualityIndex() + dir)));
@@ -547,7 +551,11 @@ public class MenuController {
         // Subtitle
         tvSubtitle.setBackgroundColor(selection == -1 ? orange : Color.TRANSPARENT);
         String[] subtitles = {"","1. Recipe Identity & Base [HW]","2. Advanced Color Engine [HW]","3. Effects & Shading [HW]","4. LUTs & Textures [SW] - ADDS PROCESSING TIME","5. Analog Physics [SW] - ADDS PROCESSING TIME","Global Settings","Web Dashboard Server","Resources & Community"};
-        if (currentPage >= 1 && currentPage <= 8) tvSubtitle.setText(subtitles[currentPage]);
+        if (currentPage >= 1 && currentPage <= 8) {
+            String subText = subtitles[currentPage];
+            if (isEditing || isNaming) subText += "  [ MENU = BACK ]"; // <--- NEW: UI Hint
+            tvSubtitle.setText(subText);
+        }
 
         for (int i = 0; i < 8; i++) rows[i].setVisibility(View.GONE);
         supportContainer.setVisibility(View.GONE);
@@ -607,18 +615,11 @@ public class MenuController {
                 setRow(1, "Effect Tweaker",       param);
                 setRow(2, "Edge Shading Editor",  shade);
             } else if (currentPage == 4) {
-                ic = 6;
-                
-                // CHANGED: Load dynamic labels and calculate the safe index
-                String[] engineLbls = getGrainEngineOptions();
-                int safeEngineIdx = Math.max(0, Math.min(engineLbls.length - 1, p.advancedGrainExperimental));
-
+                ic = 4;
                 setRow(0, "LUT File",    rm.getRecipeNames().get(p.lutIndex));
                 setRow(1, "LUT Opacity", p.opacity + "%");
                 setRow(2, "Grain Amount",amtLbls[Math.max(0,Math.min(5,p.grain))]);
-                setRow(3, "Grain Size",  sizeLbls[Math.max(0,Math.min(2,p.grainSize))]);
-                setRow(4, "Grain Engine",engineLbls[safeEngineIdx]); // CHANGED
-                setRow(5, "Vignette",    amtLbls[Math.max(0,Math.min(5,p.vignette))]);
+                setRow(3, "Vignette",    amtLbls[Math.max(0,Math.min(5,p.vignette))]);
             } else if (currentPage == 5) {
                 ic = 7; // CHANGED TO 7
                 setRow(0, "Highlight Roll-Off",    amtLbls[Math.max(0,Math.min(5,p.rollOff))]);
@@ -627,7 +628,9 @@ public class MenuController {
                 setRow(3, "Color Chrome",           p.colorChrome==0?"OFF":(p.colorChrome==1?"WEAK":"STRONG"));
                 setRow(4, "Chrome Blue",            p.chromeBlue==0?"OFF":(p.chromeBlue==1?"WEAK":"STRONG"));
                 setRow(5, "Halation",    p.halation==0?"OFF":(p.halation==1?"WEAK":"STRONG"));
-                setRow(6, "Diffusion", p.bloom == 0 ? "OFF" : (p.bloom == 1 ? "Local 1/4" : (p.bloom == 2 ? "Full 1/4" : (p.bloom == 3 ? "Local 1/2" : "Full 1/2"))));
+                
+                String[] bloomLbls = {"OFF", "Local 1/8", "Full 1/8", "Local 1/4", "Full 1/4", "Local 1/2", "Full 1/2"};
+                setRow(6, "Diffusion", bloomLbls[Math.max(0, Math.min(6, p.bloom))]);
             }
         }
         if (currentPage == 6) {
@@ -679,7 +682,6 @@ public class MenuController {
         }
         if (currentMainTab == 0 && currentPage == 4) {
             if (i == 1) return p.lutIndex > 0;
-            if (i == 3 || i == 4) return p.grain > 0;
         }
         return true;
     }

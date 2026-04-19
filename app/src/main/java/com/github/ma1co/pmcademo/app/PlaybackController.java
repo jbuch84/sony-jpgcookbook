@@ -182,14 +182,16 @@ public class PlaybackController {
                     speedStr = (s < 1.0) ? "1/" + Math.round(1.0 / s) + "s" : Math.round(s) + "s";
                 } catch (Exception ignored) {}
             }
+            // <--- CHANGED: Appended LOW RES PREVIEW disclaimer to the metadata block
             infoText.setText(
                 (idx + 1) + " / " + files.size() + "\n"
                 + file.getName() + "\n"
                 + (fnum != null ? "f/" + fnum : "f/--")
                 + " | " + speedStr
-                + " | " + (iso != null ? "ISO " + iso : "ISO --"));
+                + " | " + (iso != null ? "ISO " + iso : "ISO --")
+                + "\n\n* LOW-RES PREVIEW *");
 
-            // Memory-safe decode — 800×600 uses 40% less RAM than 1024×768 on BIONZ hardware
+            // Memory-safe decode — 800x600 uses 40% less RAM than 1024x768 on BIONZ hardware
             BitmapFactory.Options opts = new BitmapFactory.Options();
             opts.inJustDecodeBounds = true;
             BitmapFactory.decodeFile(path, opts);
