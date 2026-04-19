@@ -88,14 +88,13 @@ public class SonyFileScanner {
     public static String getGrainTitle(File file) {
         String name = file.getName();
         String lowerName = name.toLowerCase();
+        String titleFallback = null; // <--- ADDED: Declaration for the fallback
         
-        // Accept PNGs, or TXT files (which might be disguised PNGs)
         if (lowerName.endsWith(".png") || lowerName.endsWith(".txt")) {
             try {
                 java.io.FileInputStream fis = new java.io.FileInputStream(file);
                 byte[] header = new byte[8];
                 
-                // Read the first 8 bytes and check the PNG Magic Signature
                 if (fis.read(header) == 8 && header[0] == (byte)137 && header[1] == 80 && header[2] == 78 && header[3] == 71) {
                     while (true) {
                         byte[] lenBuf = new byte[4];
@@ -103,7 +102,6 @@ public class SonyFileScanner {
                         int len = ((lenBuf[0] & 0xFF) << 24) | ((lenBuf[1] & 0xFF) << 16) | 
                                   ((lenBuf[2] & 0xFF) << 8) | (lenBuf[3] & 0xFF);
                         
-                        // Prevent OOM from corrupted chunks
                         if (len < 0 || len > 10000) { fis.skip(len + 4); continue; }
                         
                         byte[] typeBuf = new byte[4];
@@ -112,13 +110,18 @@ public class SonyFileScanner {
 
                         if (type.equals("IDAT") || type.equals("IEND")) break; 
 
-                        if (type.equals("tEXt")) {
+                        if (type.equals("tEXt")) { // <--- FIXED: 'iif' typo removed
                             byte[] data = new byte[len];
                             fis.read(data);
                             String textChunk = new String(data, "ISO-8859-1");
+                            
                             if (textChunk.startsWith("Title\0")) {
                                 fis.close();
                                 return textChunk.substring(6); 
+                            }
+                            
+                            if (textChunk.startsWith("Description\0")) {
+                                titleFallback = textChunk.substring(12); // <--- Use declared variable
                             }
                         } else {
                             fis.skip(len); 
@@ -127,12 +130,14 @@ public class SonyFileScanner {
                     }
                 }
                 fis.close();
-            } catch (Exception e) {
-                // Silently fallback on failure
-            }
+            } catch (Exception e) {}
         }
         
-        // Fallback: Return the filename minus the extension (.png / .jpg / .txt)
+        // <--- NEW: Return Description if found, otherwise filename fallback
+        if (titleFallback != null && !titleFallback.trim().isEmpty()) {
+            return titleFallback;
+        }
+
         int dot = name.lastIndexOf('.');
         return dot > 0 ? name.substring(0, dot) : name;
     }

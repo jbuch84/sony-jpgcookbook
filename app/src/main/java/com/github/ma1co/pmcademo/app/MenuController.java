@@ -39,8 +39,7 @@ public class MenuController {
 
     public static String[] getGrainEngineOptions() {
         java.util.List<String> options = new java.util.ArrayList<String>();
-        options.add("LEGACY");
-        options.add("EXPERIMENTAL");
+        // <--- DELETED: Hardcoded legacy options
 
         grainTextureFiles.clear();
         File dir = Filepaths.getGrainDir();
@@ -59,6 +58,10 @@ public class MenuController {
                 }
             }
         }
+        
+        // <--- NEW: Fallback if the user hasn't dropped any files on the SD card yet
+        if (options.isEmpty()) options.add("NO FILES FOUND");
+        
         return options.toArray(new String[0]);
     }
     // --- END NEW ---
@@ -490,8 +493,11 @@ public class MenuController {
             else if (sel == 1 && p.lutIndex > 0) p.opacity = Math.max(10, Math.min(100, p.opacity + dir * 10));
             else if (sel == 2) p.grain = Math.max(0, Math.min(5, p.grain + dir));
             
-            // <--- RESTORED: Grain Type (Uses the 0-2 grainSize variable to swap Portra profiles)
-            else if (sel == 3 && p.grain > 0) p.grainSize = Math.max(0, Math.min(2, p.grainSize + dir));
+            // <--- CHANGED: Dynamically bounds the D-Pad to the number of physical files found
+            else if (sel == 3 && p.grain > 0) {
+                int maxIdx = Math.max(0, grainTextureFiles.size() - 1);
+                p.grainSize = Math.max(0, Math.min(maxIdx, p.grainSize + dir));
+            }
             
             else if (sel == 4) p.vignette = Math.max(0, Math.min(5, p.vignette + dir));
         } else if (currentPage == 5) {
@@ -617,14 +623,15 @@ public class MenuController {
                 setRow(1, "Effect Tweaker",       param);
                 setRow(2, "Edge Shading Editor",  shade);
             } else if (currentPage == 4) {
-                ic = 5; // <--- RESTORED to 5 rows
+                ic = 5; 
                 setRow(0, "LUT File",    rm.getRecipeNames().get(p.lutIndex));
                 setRow(1, "LUT Opacity", p.opacity + "%");
                 setRow(2, "Grain Amount",amtLbls[Math.max(0,Math.min(5,p.grain))]);
                 
-                // <--- RESTORED & RENAMED: Maps to the C++ Portra templates
-                String[] typeLbls = {"Portra 160", "Portra 400", "Portra 800"}; 
-                setRow(3, "Grain Type",  typeLbls[Math.max(0,Math.min(2,p.grainSize))]);
+                // <--- CHANGED: Dynamically fetches titles (metadata or filename) from SD card
+                String[] typeLbls = getGrainEngineOptions(); 
+                int safeIdx = Math.max(0, Math.min(typeLbls.length - 1, p.grainSize));
+                setRow(3, "Grain Type",  typeLbls[safeIdx]);
                 
                 setRow(4, "Vignette",    amtLbls[Math.max(0,Math.min(5,p.vignette))]);
             } else if (currentPage == 5) {
