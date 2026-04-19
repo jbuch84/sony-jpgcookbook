@@ -241,6 +241,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
+        // <--- NEW: Force the Android Window to 32-bit true color
+        getWindow().setFormat(android.graphics.PixelFormat.RGBA_8888);
+
         // --- AUTOMATIC HARDWARE SCANNER ---
         // --- UNIVERSAL FEATURE DETECTION ---
         // Legacy cameras (API 10) will crash with a Dalvik "VerifyError" before the app opens 
@@ -1344,7 +1347,7 @@ public void onEnterPressed() {
     private void updateMainHUD() {
         // <--- MOVED TO TOP: Declare this before any UI elements try to use it!
         int selectedColor = isDialLocked ? Color.WHITE : Color.YELLOW;
-        
+
         if (cameraManager == null || cameraManager.getCamera() == null) return;
         
         // --- 1. CLEAN DISPLAY CHECK ---

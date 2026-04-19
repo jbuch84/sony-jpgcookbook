@@ -489,7 +489,11 @@ public class MenuController {
             if (sel == 0) { if (dir > 0 && p.lutIndex < rm.getRecipeNames().size()-1) p.lutIndex++; else if (dir < 0 && p.lutIndex > 0) p.lutIndex--; }
             else if (sel == 1 && p.lutIndex > 0) p.opacity = Math.max(10, Math.min(100, p.opacity + dir * 10));
             else if (sel == 2) p.grain = Math.max(0, Math.min(5, p.grain + dir));
-            else if (sel == 3) p.vignette = Math.max(0, Math.min(5, p.vignette + dir));
+            
+            // <--- RESTORED: Grain Type (Uses the 0-2 grainSize variable to swap Portra profiles)
+            else if (sel == 3 && p.grain > 0) p.grainSize = Math.max(0, Math.min(2, p.grainSize + dir));
+            
+            else if (sel == 4) p.vignette = Math.max(0, Math.min(5, p.vignette + dir));
         } else if (currentPage == 5) {
             if (sel == 0) p.rollOff        = Math.max(0, Math.min(5, p.rollOff + dir));
             else if (sel == 1) p.shadowToe = Math.max(0, Math.min(2, p.shadowToe + dir));
@@ -552,9 +556,7 @@ public class MenuController {
         tvSubtitle.setBackgroundColor(selection == -1 ? orange : Color.TRANSPARENT);
         String[] subtitles = {"","1. Recipe Identity & Base [HW]","2. Advanced Color Engine [HW]","3. Effects & Shading [HW]","4. LUTs & Textures [SW] - ADDS PROCESSING TIME","5. Analog Physics [SW] - ADDS PROCESSING TIME","Global Settings","Web Dashboard Server","Resources & Community"};
         if (currentPage >= 1 && currentPage <= 8) {
-            String subText = subtitles[currentPage];
-            if (isEditing || isNaming) subText += "  [ MENU = BACK ]"; // <--- NEW: UI Hint
-            tvSubtitle.setText(subText);
+            tvSubtitle.setText(subtitles[currentPage]); // <--- REVERTED: Removed the [MENU = BACK] text
         }
 
         for (int i = 0; i < 8; i++) rows[i].setVisibility(View.GONE);
@@ -615,11 +617,16 @@ public class MenuController {
                 setRow(1, "Effect Tweaker",       param);
                 setRow(2, "Edge Shading Editor",  shade);
             } else if (currentPage == 4) {
-                ic = 4;
+                ic = 5; // <--- RESTORED to 5 rows
                 setRow(0, "LUT File",    rm.getRecipeNames().get(p.lutIndex));
                 setRow(1, "LUT Opacity", p.opacity + "%");
                 setRow(2, "Grain Amount",amtLbls[Math.max(0,Math.min(5,p.grain))]);
-                setRow(3, "Vignette",    amtLbls[Math.max(0,Math.min(5,p.vignette))]);
+                
+                // <--- RESTORED & RENAMED: Maps to the C++ Portra templates
+                String[] typeLbls = {"Portra 160", "Portra 400", "Portra 800"}; 
+                setRow(3, "Grain Type",  typeLbls[Math.max(0,Math.min(2,p.grainSize))]);
+                
+                setRow(4, "Vignette",    amtLbls[Math.max(0,Math.min(5,p.vignette))]);
             } else if (currentPage == 5) {
                 ic = 7; // CHANGED TO 7
                 setRow(0, "Highlight Roll-Off",    amtLbls[Math.max(0,Math.min(5,p.rollOff))]);
@@ -682,6 +689,7 @@ public class MenuController {
         }
         if (currentMainTab == 0 && currentPage == 4) {
             if (i == 1) return p.lutIndex > 0;
+            if (i == 3) return p.grain > 0; // <--- RESTORED: Grays out Type if Amount is OFF
         }
         return true;
     }

@@ -207,15 +207,11 @@ public class PlaybackController {
             opts.inJustDecodeBounds = false;
             opts.inSampleSize       = inSampleSize;
             
-            // <--- CHANGED: Restored True Color. 
-            // 16-bit + Dithering on film grain causes the "watercolor" smear.
-            // Since we clamped the resolution to 800x600, ARGB_8888 is memory-safe (~1.5MB).
             opts.inPreferredConfig  = Bitmap.Config.ARGB_8888; 
             opts.inDither           = false; 
-            opts.inPreferQualityOverSpeed = true; // Forces a cleaner downsample
+            opts.inPreferQualityOverSpeed = true; 
             
-            opts.inPurgeable        = true;
-            opts.inInputShareable   = true;
+            // <--- DELETED: inPurgeable and inInputShareable 
 
             Bitmap raw = BitmapFactory.decodeFile(path, opts);
             if (raw == null) {
