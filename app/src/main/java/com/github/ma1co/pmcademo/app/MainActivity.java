@@ -1342,6 +1342,9 @@ public void onEnterPressed() {
     }
 
     private void updateMainHUD() {
+        // <--- MOVED TO TOP: Declare this before any UI elements try to use it!
+        int selectedColor = isDialLocked ? Color.WHITE : Color.YELLOW;
+        
         if (cameraManager == null || cameraManager.getCamera() == null) return;
         
         // --- 1. CLEAN DISPLAY CHECK ---
@@ -1415,9 +1418,6 @@ public void onEnterPressed() {
             tvReview.setBackgroundColor(mDialMode == DIAL_MODE_REVIEW ? Color.WHITE : Color.argb(140, 40, 40, 40));
             tvReview.setTextColor(mDialMode == DIAL_MODE_REVIEW ? Color.BLACK : Color.rgb(227, 69, 20));
         }
-
-        // <--- NEW: Yellow when Armed, White when Locked
-        int selectedColor = isDialLocked ? Color.WHITE : Color.YELLOW;
 
         if (tvValShutter != null) tvValShutter.setTextColor(mDialMode == DIAL_MODE_SHUTTER ? selectedColor : Color.rgb(227, 69, 20));
         if (tvValAperture != null) tvValAperture.setTextColor(mDialMode == DIAL_MODE_APERTURE ? selectedColor : Color.rgb(227, 69, 20));
