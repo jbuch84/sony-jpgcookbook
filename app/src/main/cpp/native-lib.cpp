@@ -159,15 +159,16 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_loadGrainTextureNative(JNIEnv* env,
     env->ReleaseStringUTFChars(path, file_path);
 
     if (img_data) {
-        if (w == 512 && h == 512) {
+        // --- NEW: Accept BOTH 512x512 and 1024x1024 ---
+        if ((w == 512 && h == 512) || (w == 1024 && h == 1024)) {
             int total_bytes = w * h * 3;
             nativeGrainTexture.assign(img_data, img_data + total_bytes);
             stbi_image_free(img_data);
-            LOGD("SUCCESS: Loaded Grain Texture 512x512");
+            LOGD("SUCCESS: Loaded Grain Texture %dx%d", w, h);
             return JNI_TRUE;
         } else {
             stbi_image_free(img_data);
-            LOGD("ERROR: Grain Texture must be exactly 512x512");
+            LOGD("ERROR: Grain Texture must be 512x512 or 1024x1024");
             return JNI_FALSE;
         }
     }
