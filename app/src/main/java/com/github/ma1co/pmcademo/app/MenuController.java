@@ -73,18 +73,20 @@ public class MenuController {
         RecipeManager      getRecipeManager();
         ConnectivityManager getConnectivityManager();
         MatrixManager      getMatrixManager();
-        Camera             getCamera();          // may be null if camera not open
+        Camera             getCamera();
         String             getAppVersion();
 
         // Preferences — read
         boolean isPrefFocusMeter();
         boolean isPrefCinemaMattes();
+        boolean isPrefDiptych(); // <--- ADDED
         boolean isPrefGridLines();
         int     getPrefJpegQuality();
 
         // Preferences — write
         void setPrefFocusMeter(boolean v);
         void setPrefCinemaMattes(boolean v);
+        void setPrefDiptych(boolean v); // <--- ADDED
         void setPrefGridLines(boolean v);
         void setPrefJpegQuality(int v);
 
@@ -557,8 +559,9 @@ public class MenuController {
             if      (sel == 0) rm.setQualityIndex(Math.max(0, Math.min(2, rm.getQualityIndex() + dir)));
             else if (sel == 2) host.setPrefFocusMeter(!host.isPrefFocusMeter());
             else if (sel == 3) host.setPrefCinemaMattes(!host.isPrefCinemaMattes());
-            else if (sel == 4) host.setPrefGridLines(!host.isPrefGridLines());
-            else if (sel == 5) host.setPrefJpegQuality(Math.max(60, Math.min(100, host.getPrefJpegQuality() + dir * 5)));
+            else if (sel == 4) host.setPrefDiptych(!host.isPrefDiptych()); // <--- ADDED
+            else if (sel == 5) host.setPrefGridLines(!host.isPrefGridLines());
+            else if (sel == 6) host.setPrefJpegQuality(Math.max(60, Math.min(100, host.getPrefJpegQuality() + dir * 5)));
         } else if (currentPage == 7) {
             if      (sel == 0) rm.setPrefC1(Math.max(0, Math.min(5, rm.getPrefC1() + dir)));
             else if (sel == 1) rm.setPrefC2(Math.max(0, Math.min(5, rm.getPrefC2() + dir)));
@@ -696,14 +699,15 @@ public class MenuController {
             }
         }
         if (currentPage == 6) {
-            ic = 6;
+            ic = 7; // Increment count from 6 to 7
             String[] qLbls = {"1/4 RES","HALF RES","FULL RES"};
             setRow(0, "SW Global Resolution", qLbls[rm.getQualityIndex()]);
             setRow(1, "Base Scene",            scn);
             setRow(2, "Manual Focus Meter",    host.isPrefFocusMeter()   ? "ON" : "OFF");
-            setRow(3, "XPan Crop",       host.isPrefCinemaMattes() ? "ON" : "OFF");
-            setRow(4, "Rule of Thirds Grid",   host.isPrefGridLines()    ? "ON" : "OFF");
-            setRow(5, "SW JPEG Quality",       String.valueOf(host.getPrefJpegQuality()));
+            setRow(3, "XPan Crop",             host.isPrefCinemaMattes() ? "ON" : "OFF");
+            setRow(4, "Diptych Mode",          host.isPrefDiptych()      ? "ON" : "OFF"); // <--- ADDED
+            setRow(5, "Rule of Thirds Grid",   host.isPrefGridLines()    ? "ON" : "OFF");
+            setRow(6, "SW JPEG Quality",       String.valueOf(host.getPrefJpegQuality()));
         } else if (currentPage == 7) {
             ic = 5;
             String[] btnLbls = {"OFF", "ISO MENU", "FOCUS MAGNIFIER", "TOGGLE FOCUS METER", "TOGGLE CINEMA MATTES", "TOGGLE GRID LINES"};
