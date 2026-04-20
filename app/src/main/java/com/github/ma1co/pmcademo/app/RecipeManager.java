@@ -18,6 +18,10 @@ public class RecipeManager {
     private int currentSlot = 0;
 
     private int qualityIndex = 1;
+    private int prefC1 = 0;
+    private int prefC2 = 0;
+    private int prefAel = 0;
+    private int prefFn = 0;
     private ArrayList<String> recipePaths = new ArrayList<String>();
     private ArrayList<String> recipeNames = new ArrayList<String>();
 
@@ -43,6 +47,15 @@ public class RecipeManager {
         this.qualityIndex = (index + 3) % 3;
         savePreferences();
     }
+
+    public int getPrefC1() { return prefC1; }
+    public void setPrefC1(int v) { prefC1 = v; savePreferences(); }
+    public int getPrefC2() { return prefC2; }
+    public void setPrefC2(int v) { prefC2 = v; savePreferences(); }
+    public int getPrefAel() { return prefAel; }
+    public void setPrefAel(int v) { prefAel = v; savePreferences(); }
+    public int getPrefFn() { return prefFn; }
+    public void setPrefFn(int v) { prefFn = v; savePreferences(); }
 
     public RTLProfile getCurrentProfile() { return loadedProfiles[currentSlot]; }
     public RTLProfile getProfile(int index) { return loadedProfiles[index]; }
@@ -250,6 +263,10 @@ public class RecipeManager {
                 while ((line = br.readLine()) != null) {
                     if (line.startsWith("quality=")) qualityIndex = Integer.parseInt(line.split("=")[1]);
                     else if (line.startsWith("slot=")) currentSlot = Integer.parseInt(line.split("=")[1]);
+                    else if (line.startsWith("c1=")) prefC1 = Integer.parseInt(line.split("=")[1]);
+                    else if (line.startsWith("c2=")) prefC2 = Integer.parseInt(line.split("=")[1]);
+                    else if (line.startsWith("ael=")) prefAel = Integer.parseInt(line.split("=")[1]);
+                    else if (line.startsWith("fn=")) prefFn = Integer.parseInt(line.split("=")[1]);
                 }
                 br.close();
             } catch (Exception e) {}
@@ -260,7 +277,10 @@ public class RecipeManager {
         try {
             File prefsFile = new File(recipeDir, "PREFS.TXT");
             FileOutputStream fos = new FileOutputStream(prefsFile);
-            fos.write(("quality=" + qualityIndex + "\nslot=" + currentSlot + "\n").getBytes());
+            String prefsData = "quality=" + qualityIndex + "\nslot=" + currentSlot + "\n" +
+                               "c1=" + prefC1 + "\nc2=" + prefC2 + "\n" +
+                               "ael=" + prefAel + "\nfn=" + prefFn + "\n";
+            fos.write(prefsData.getBytes());
             fos.close();
 
             if (loadedProfiles[currentSlot] != null) {
