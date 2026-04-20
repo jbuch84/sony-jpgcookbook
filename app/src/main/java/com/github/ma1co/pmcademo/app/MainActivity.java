@@ -432,59 +432,61 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 @Override
                 public void run() {
                     try {
-                        // 1. Determine safe proxy resolution to prevent OOM
-                        int qIdx = recipeManager.getQualityIndex();
-                        int sampleSize = (qIdx == 0) ? 4 : (qIdx == 1) ? 2 : 1;
-                        if (sampleSize == 1) sampleSize = 2; // Hard override: Never stitch 24MP natively in Java
-
                         BitmapFactory.Options opts = new BitmapFactory.Options();
-                        opts.inSampleSize = sampleSize;
-                        opts.inPreferredConfig = Bitmap.Config.ARGB_8888;
                         
-                        // 2. Decode bounds to get final dimensions
+                        // 1. Get exact bounds of the raw image without loading it
                         opts.inJustDecodeBounds = true;
                         BitmapFactory.decodeFile(leftPath, opts);
+                        int fullW = opts.outWidth;
+                        int fullH = opts.outHeight;
+                        int midW = fullW / 2;
+                        
+                        // 2. Set strict memory-saving rules
                         opts.inJustDecodeBounds = false;
+                        opts.inPreferredConfig = Bitmap.Config.RGB_565; // <--- CRITICAL: Cuts memory by 50%
+                        opts.inSampleSize = 4; // <--- CRITICAL: Forces 1/4 resolution (approx 1500x1000)
                         
-                        int w = opts.outWidth;
-                        int h = opts.outHeight;
-                        int mid = w / 2;
+                        // Calculate final proxy dimensions
+                        int compW = fullW / opts.inSampleSize;
+                        int compH = fullH / opts.inSampleSize;
                         
-                        // 3. Create proxy workspace
-                        Bitmap composite = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+                        // 3. Create the tiny 3MB workspace
+                        Bitmap composite = Bitmap.createBitmap(compW, compH, Bitmap.Config.RGB_565);
                         android.graphics.Canvas canvas = new android.graphics.Canvas(composite);
                         
-                        // 4. Load Left, draw Left half, RECYCLE IMMEDIATELY
-                        Bitmap leftBmp = BitmapFactory.decodeFile(leftPath, opts);
+                        // 4. Decode ONLY the Left half of the Left Image
+                        android.graphics.BitmapRegionDecoder decoderLeft = android.graphics.BitmapRegionDecoder.newInstance(leftPath, false);
+                        android.graphics.Rect rectLeft = new android.graphics.Rect(0, 0, midW, fullH);
+                        Bitmap leftBmp = decoderLeft.decodeRegion(rectLeft, opts);
                         if (leftBmp != null) {
-                            android.graphics.Rect leftSrc = new android.graphics.Rect(0, 0, mid, h);
-                            android.graphics.Rect leftDst = new android.graphics.Rect(0, 0, mid, h);
-                            canvas.drawBitmap(leftBmp, leftSrc, leftDst, null);
+                            canvas.drawBitmap(leftBmp, 0, 0, null);
                             leftBmp.recycle(); 
                         }
+                        decoderLeft.recycle();
                         
-                        // 5. Load Right, draw Right half, RECYCLE IMMEDIATELY
-                        Bitmap rightBmp = BitmapFactory.decodeFile(rightPath, opts);
+                        // 5. Decode ONLY the Right half of the Right Image
+                        android.graphics.BitmapRegionDecoder decoderRight = android.graphics.BitmapRegionDecoder.newInstance(rightPath, false);
+                        android.graphics.Rect rectRight = new android.graphics.Rect(midW, 0, fullW, fullH);
+                        Bitmap rightBmp = decoderRight.decodeRegion(rectRight, opts);
                         if (rightBmp != null) {
-                            android.graphics.Rect rightSrc = new android.graphics.Rect(mid, 0, w, h);
-                            android.graphics.Rect rightDst = new android.graphics.Rect(mid, 0, w, h);
-                            canvas.drawBitmap(rightBmp, rightSrc, rightDst, null);
+                            canvas.drawBitmap(rightBmp, compW / 2, 0, null);
                             rightBmp.recycle();
                         }
+                        decoderRight.recycle();
                         
-                        // 6. Save composite to a temporary file
+                        // 6. Save the optimized composite to SD card
                         File tempFile = new File(Environment.getExternalStorageDirectory(), "DCIM/DIPTYCH_TEMP.JPG");
                         java.io.FileOutputStream out = new java.io.FileOutputStream(tempFile);
                         composite.compress(Bitmap.CompressFormat.JPEG, 95, out);
                         out.close();
-                        composite.recycle(); 
+                        composite.recycle(); // Free the workspace!
                         
-                        // 7. Send the stitched file through the standard Recipe/LUT pipeline!
+                        // 7. Send the tiny stitched file through your standard Recipe pipeline
                         File outDir = Filepaths.getGradedDir();
                         mProcessor.processJpeg(tempFile.getAbsolutePath(), outDir.getAbsolutePath(), 
-                                               recipeManager.getQualityIndex(), prefJpegQuality, 
+                                               0, prefJpegQuality,   // Force QualityIndex 0 (Proxy)
                                                recipeManager.getCurrentProfile(), prefShowCinemaMattes);
-                        
+                                               
                     } catch (Exception e) {
                         e.printStackTrace();
                         isProcessing = false;
