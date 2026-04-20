@@ -103,6 +103,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private boolean prefShowCinemaMattes = false;
     private boolean prefShowGridLines = false;
     private int prefJpegQuality = 95;
+    private boolean prefShowDiptych = false; // <--- ADDED
+    private int diptychState = 0;            // <--- ADDED (0 = left, 1 = right)
 
     private LensProfileManager lensManager;
     private List<String> availableLenses = new ArrayList<String>();
@@ -129,6 +131,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     
     private GridLinesView gridLines;
     private CinemaMatteView cinemaMattes;
+    private DiptychOverlayView diptychOverlayView;
     private AdvancedFocusMeterView focusMeter;
     private ProReticleView afOverlay;
     
@@ -1106,6 +1109,9 @@ public void onEnterPressed() {
         cinemaMattes = new CinemaMatteView(this); 
         mainUIContainer.addView(cinemaMattes, new FrameLayout.LayoutParams(-1, -1));
         
+        diptychOverlay = new DiptychOverlayView(this); // <--- ADDED
+        mainUIContainer.addView(diptychOverlay, new FrameLayout.LayoutParams(-1, -1)); // <--- ADDED
+        
         tvTopStatus = new TextView(this); 
         tvTopStatus.setTextColor(Color.WHITE); 
         tvTopStatus.setTextSize(20); 
@@ -1558,6 +1564,18 @@ public void onEnterPressed() {
         if (gridLines != null) gridLines.setVisibility(prefShowGridLines ? View.VISIBLE : View.GONE); 
         if (cinemaMattes != null) cinemaMattes.setVisibility(prefShowCinemaMattes ? View.VISIBLE : View.GONE);
 
+        if (diptychOverlay != null) {
+            if (prefShowDiptych) {
+                diptychOverlay.setVisibility(View.VISIBLE);
+                diptychOverlay.setState(diptychState);
+                // Force conflicting UI elements off while Diptych is active
+                if (cinemaMattes != null) cinemaMattes.setVisibility(View.GONE);
+                if (gridLines != null) gridLines.setVisibility(View.GONE);
+            } else {
+                diptychOverlay.setVisibility(View.GONE);
+            }
+        }
+
         // --- 5. CALIBRATION OVERRIDES ---
         // Overrides the "Normal State" visibility if we are currently mapping a lens.
         if (calibController.isActive()) {
@@ -1757,10 +1775,13 @@ public void onEnterPressed() {
     @Override public boolean isPrefCinemaMattes() { return prefShowCinemaMattes; }
     @Override public boolean isPrefGridLines()    { return prefShowGridLines; }
     @Override public int     getPrefJpegQuality() { return prefJpegQuality; }
+    @Override public boolean isPrefDiptych()      { return prefShowDiptych; } // <--- ADDED
     @Override public void    setPrefFocusMeter(boolean v)   { prefShowFocusMeter   = v; }
     @Override public void    setPrefCinemaMattes(boolean v) { prefShowCinemaMattes = v; }
     @Override public void    setPrefGridLines(boolean v)    { prefShowGridLines    = v; }
     @Override public void    setPrefJpegQuality(int v)      { prefJpegQuality      = v; }
+    @Override public void    setPrefDiptych(boolean v)      { prefShowDiptych = v; updateMainHUD(); } // <--- ADDED
+    
 
     @Override public void closeHud() { hudController.reset(); }
 
