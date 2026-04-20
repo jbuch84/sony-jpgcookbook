@@ -710,15 +710,13 @@ public void onEnterPressed() {
         else if (keyId.equals("AEL")) action = recipeManager.getPrefAel();
         else if (keyId.equals("FN")) action = recipeManager.getPrefFn();
 
-        if (action == 0) return false; // OFF (Let Sony OS handle natively)
-        if (action == 2) return false; // FOCUS MAGNIFIER: Let the native OS see the button release to complete the click!
+        if (action == 0) return false; // OFF
 
-        return true; // We handled the other actions natively in our app, safely swallow the release!
+        return true; // We handled the action in our app, safely swallow the release!
     }
     
     @Override
     public boolean onCustomButtonPressed(String keyId) {
-        // Do nothing if we are in a menu, looking at photos, or processing
         if (playbackController.isActive() || menuController.isOpen() || isProcessing || calibController.isCalibrating()) {
             return false; 
         }
@@ -736,9 +734,12 @@ public void onEnterPressed() {
             mDialMode = DIAL_MODE_ISO;
             updateMainHUD();
             return true;
-        } else if (action == 2) { // FOCUS MAGNIFIER (D-Pad Unlocker)
-            isMagnifierActive = !isMagnifierActive;
-            return false; // Return false so the Sony OS actually triggers its hardware zoom natively!
+        } else if (action == 2) { // FOCUS MAGNIFIER (API Trigger & D-Pad Unlocker)
+            if (cameraManager != null && cameraManager.getCameraEx() != null) {
+                cameraManager.getCameraEx().setAutoPreviewMagnification();
+                isMagnifierActive = true; 
+            }
+            return true; // Swallow the hardware click since we fired the API!
         } else if (action == 3) { // TOGGLE FOCUS METER
             setPrefFocusMeter(!isPrefFocusMeter());
             updateMainHUD();
