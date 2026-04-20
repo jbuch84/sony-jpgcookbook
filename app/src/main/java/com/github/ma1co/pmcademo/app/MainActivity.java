@@ -698,6 +698,25 @@ public void onEnterPressed() {
     }
 
     @Override
+    public boolean onCustomButtonReleased(String keyId) {
+        if (playbackController.isActive() || menuController.isOpen() || isProcessing || calibController.isCalibrating()) {
+            return false; 
+        }
+
+        int action = 0;
+        if (keyId.equals("C1")) action = recipeManager.getPrefC1();
+        else if (keyId.equals("C2")) action = recipeManager.getPrefC2();
+        else if (keyId.equals("C3")) action = recipeManager.getPrefC3();
+        else if (keyId.equals("AEL")) action = recipeManager.getPrefAel();
+        else if (keyId.equals("FN")) action = recipeManager.getPrefFn();
+
+        if (action == 0) return false; // OFF (Let Sony OS handle natively)
+        if (action == 2) return false; // FOCUS MAGNIFIER: Let the native OS see the button release to complete the click!
+
+        return true; // We handled the other actions natively in our app, safely swallow the release!
+    }
+    
+    @Override
     public boolean onCustomButtonPressed(String keyId) {
         // Do nothing if we are in a menu, looking at photos, or processing
         if (playbackController.isActive() || menuController.isOpen() || isProcessing || calibController.isCalibrating()) {

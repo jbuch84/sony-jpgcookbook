@@ -451,27 +451,35 @@ public class MenuController {
     private String[] getSupportedColorModes() {
         if (cachedColorModes != null) return cachedColorModes;
         
+        // This is the hardcoded list you were seeing!
         String[] fallback = {"Standard","Vivid","Neutral","Clear","Deep","Light","Portrait","Landscape","Sunset","Night Scene","Autumn Leaves","Mono","Sepia"};
         
         Camera cam = host.getCamera();
         if (cam != null) {
             try {
                 Camera.Parameters p = cam.getParameters();
-                String vals = p.get("color-mode-values");
-                if (vals == null) vals = p.get("sony-st-color-mode-values");
-                if (vals == null) vals = p.get("sony-colormode-values");
+                
+                // Aggressively hunt for the list of supported values across all Sony models
+                String vals = p.get("creative-style-values"); // <-- Added for A7 series
+                if (vals == null || vals.isEmpty()) vals = p.get("color-mode-values"); // <-- Used by APS-C
+                if (vals == null || vals.isEmpty()) vals = p.get("sony-creative-style-values");
+                if (vals == null || vals.isEmpty()) vals = p.get("sony-st-color-mode-values");
+                if (vals == null || vals.isEmpty()) vals = p.get("sony-colormode-values");
                 
                 if (vals != null && !vals.isEmpty()) {
                     String[] split = vals.split(",");
                     for (int i = 0; i < split.length; i++) {
                         String s = split[i].trim();
-                        if (s.length() > 0) split[i] = s.substring(0, 1).toUpperCase() + s.substring(1).toLowerCase();
+                        if (s.length() > 0) {
+                            // Capitalize the first letter so it looks nice in the menu
+                            split[i] = s.substring(0, 1).toUpperCase() + s.substring(1).toLowerCase();
+                        }
                     }
                     cachedColorModes = split;
                     return cachedColorModes;
                 }
             } catch (Exception e) {
-                // Ignore and use fallback
+                // If the camera is busy and throws an error, ignore it and use fallback
             }
         }
         return fallback;

@@ -19,7 +19,8 @@ public class InputManager {
         boolean onDownPressed();
         boolean onLeftPressed();
         boolean onRightPressed();
-        boolean onCustomButtonPressed(String keyId);
+        boolean onCustomButtonPressed(String keyId); 
+        boolean onCustomButtonReleased(String keyId); // <-- NEW
         
         // --- 3-DIAL SETUP RESTORED ---
         void onFrontDialRotated(int direction);
@@ -125,11 +126,12 @@ public class InputManager {
             return false; // <-- CHANGED: Let the Sony OS know the shutter was released
         }
 
-        // Swallow custom button releases so the Sony OS ignores them
-        if (sc == ScalarInput.ISV_KEY_CUSTOM1 || sc == ScalarInput.ISV_KEY_CUSTOM2 || 
-            sc == ScalarInput.ISV_KEY_CUSTOM3 || sc == ScalarInput.ISV_KEY_AEL || sc == ScalarInput.ISV_KEY_FN) {
-            return true; 
-        }
+        // Ask the Execution Router if we should swallow the release
+        if (sc == ScalarInput.ISV_KEY_CUSTOM1) return listener.onCustomButtonReleased("C1");
+        if (sc == ScalarInput.ISV_KEY_CUSTOM2) return listener.onCustomButtonReleased("C2");
+        if (sc == ScalarInput.ISV_KEY_CUSTOM3) return listener.onCustomButtonReleased("C3");
+        if (sc == ScalarInput.ISV_KEY_AEL)     return listener.onCustomButtonReleased("AEL");
+        if (sc == ScalarInput.ISV_KEY_FN)      return listener.onCustomButtonReleased("FN");
         
         // Ensure Mode Dial releases are also swallowed safely
         if (sc == ScalarInput.ISV_KEY_MODE_DIAL || 
