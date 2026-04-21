@@ -432,66 +432,66 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 @Override
                 public void run() {
                     try {
+                        // 1. THE EXIF HACK: Bypass the 24MP decoder bug completely.
+                        // Rip the embedded 1616x1080 proxy directly from the EXIF header.
+                        android.media.ExifInterface leftExif = new android.media.ExifInterface(leftPath);
+                        byte[] leftThumb = leftExif.getThumbnail();
+                        if (leftThumb == null) throw new Exception("No EXIF thumbnail found in Left image.");
+
+                        // 2. Decode the tiny byte array (Extremely memory safe)
                         BitmapFactory.Options opts = new BitmapFactory.Options();
-                        
-                        // 1. Force hardware downscaling during the read!
-                        // inSampleSize skips pixels during decode, so the massive 24MP image never hits RAM.
-                        opts.inPreferredConfig = Bitmap.Config.RGB_565; // 50% memory savings
-                        
-                        // Force a safe proxy size (4 = 1/4th resolution, approx 1500x1000)
-                        opts.inSampleSize = 4; 
-                        
-                        // 2. Decode the ALREADY SCALED Left Image
-                        Bitmap leftBmp = BitmapFactory.decodeFile(leftPath, opts);
-                        if (leftBmp == null) throw new Exception("Failed to decode left image");
-                        
+                        opts.inPreferredConfig = Bitmap.Config.RGB_565;
+                        Bitmap leftBmp = BitmapFactory.decodeByteArray(leftThumb, 0, leftThumb.length, opts);
+
                         int w = leftBmp.getWidth();
                         int h = leftBmp.getHeight();
                         int midW = w / 2;
-                        
-                        // 3. Create the tiny 3MB proxy workspace
+
+                        // 3. Create the proxy workspace
                         Bitmap composite = Bitmap.createBitmap(w, h, Bitmap.Config.RGB_565);
                         android.graphics.Canvas canvas = new android.graphics.Canvas(composite);
-                        
-                        // 4. Crop and paint the Left Half, then NUKE it from RAM
+
+                        // 4. Paint Left Half and Destroy
                         android.graphics.Rect srcLeft = new android.graphics.Rect(0, 0, midW, h);
                         android.graphics.Rect dstLeft = new android.graphics.Rect(0, 0, midW, h);
                         canvas.drawBitmap(leftBmp, srcLeft, dstLeft, null);
                         
-                        leftBmp.recycle();
+                        leftBmp.recycle(); 
                         leftBmp = null;
-                        System.gc(); // Explicitly command the camera to take out the trash NOW
+                        System.gc(); // Clean the tiny footprint
+
+                        // 5. Rip the Right proxy from EXIF
+                        android.media.ExifInterface rightExif = new android.media.ExifInterface(rightPath);
+                        byte[] rightThumb = rightExif.getThumbnail();
+                        if (rightThumb == null) throw new Exception("No EXIF thumbnail found in Right image.");
+
+                        Bitmap rightBmp = BitmapFactory.decodeByteArray(rightThumb, 0, rightThumb.length, opts);
+
+                        // 6. Paint Right Half and Destroy
+                        android.graphics.Rect srcRight = new android.graphics.Rect(midW, 0, w, h);
+                        android.graphics.Rect dstRight = new android.graphics.Rect(midW, 0, w, h);
+                        canvas.drawBitmap(rightBmp, srcRight, dstRight, null);
                         
-                        // 5. Decode the ALREADY SCALED Right Image
-                        Bitmap rightBmp = BitmapFactory.decodeFile(rightPath, opts);
-                        if (rightBmp != null) {
-                            // Crop and paint the Right Half, then NUKE it
-                            android.graphics.Rect srcRight = new android.graphics.Rect(midW, 0, w, h);
-                            android.graphics.Rect dstRight = new android.graphics.Rect(midW, 0, w, h);
-                            canvas.drawBitmap(rightBmp, srcRight, dstRight, null);
-                            
-                            rightBmp.recycle();
-                            rightBmp = null;
-                            System.gc(); 
-                        }
-                        
-                        // 6. Save the perfectly stitched proxy to the SD card
+                        rightBmp.recycle(); 
+                        rightBmp = null;
+                        System.gc();
+
+                        // 7. Save the EXIF-stitched composite to the SD card
                         File tempFile = new File(Environment.getExternalStorageDirectory(), "DCIM/DIPTYCH_TEMP.JPG");
                         java.io.FileOutputStream out = new java.io.FileOutputStream(tempFile);
                         composite.compress(Bitmap.CompressFormat.JPEG, 95, out);
                         out.close();
                         
-                        // Destroy the workspace before calling the C++ processor
                         composite.recycle(); 
                         composite = null;
                         System.gc();
-                        
-                        // 7. Send the tiny stitched file through your Recipe pipeline
+
+                        // 8. Hand the safe, stitched file to your C++ Recipe Engine!
                         File outDir = Filepaths.getGradedDir();
                         mProcessor.processJpeg(tempFile.getAbsolutePath(), outDir.getAbsolutePath(), 
                                                0, prefJpegQuality,   // Force QualityIndex 0 (Proxy)
                                                recipeManager.getCurrentProfile(), prefShowCinemaMattes);
-                                               
+
                     } catch (Exception e) {
                         e.printStackTrace();
                         isProcessing = false;
