@@ -432,68 +432,76 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 @Override
                 public void run() {
                     try {
-                        // 1. THE C++ WORKAROUND:
-                        // Create a hidden workspace directory for our temporary proxies
-                        File tempDir = new File(Environment.getExternalStorageDirectory(), "DCIM/DIPTYCH_WORKSPACE");
-                        if (!tempDir.exists()) tempDir.mkdirs();
-                        
-                        // 2. Create an empty recipe profile (all 0's) so the C++ engine just shrinks the image without applying LUTs yet
-                        RTLProfile blankProfile = new RTLProfile();
-                        
-                        // 3. Command C++ to safely downscale the massive Left image into the workspace
-                        mProcessor.processJpeg(leftPath, tempDir.getAbsolutePath(), 0, 100, blankProfile, false);
-                        File leftProxy = new File(tempDir, new File(leftPath).getName());
-                        if (!leftProxy.exists()) throw new Exception("Left proxy failed to generate");
-                        
-                        // 4. Command C++ to safely downscale the massive Right image
-                        mProcessor.processJpeg(rightPath, tempDir.getAbsolutePath(), 0, 100, blankProfile, false);
-                        File rightProxy = new File(tempDir, new File(rightPath).getName());
-                        if (!rightProxy.exists()) throw new Exception("Right proxy failed to generate");
-
-                        // 5. Now it's 100% safe to load them into Java RAM! (They are tiny ~1MB files now)
+                        // 1. THE JAVA STITCHER:
+                        // Bypass the async C++ workaround entirely to prevent race conditions.
                         BitmapFactory.Options opts = new BitmapFactory.Options();
-                        opts.inPreferredConfig = Bitmap.Config.RGB_565;
+                        opts.inPreferredConfig = Bitmap.Config.RGB_565; // Save 50% RAM
+                        opts.inJustDecodeBounds = true;
+                        BitmapFactory.decodeFile(leftPath, opts);
+
+                        // BIONZ X has very limited RAM. 24MP = 48MB in RGB_565 (Guaranteed OOM).
+                        // Downscale by at least 2 (3000x2000 = 12MB). Fallback to 4 if needed.
+                        int sampleSize = 2;
+                        Bitmap composite = null;
+                        boolean stitched = false;
+
+                        while (sampleSize <= 4 && !stitched) {
+                            try {
+                                opts.inJustDecodeBounds = false;
+                                opts.inSampleSize = sampleSize;
+
+                                Bitmap leftBmp = BitmapFactory.decodeFile(leftPath, opts);
+                                if (leftBmp == null) throw new Exception("Failed to decode left image");
+
+                                int w = leftBmp.getWidth();
+                                int h = leftBmp.getHeight();
+                                int midW = w / 2;
+
+                                composite = Bitmap.createBitmap(w, h, Bitmap.Config.RGB_565);
+                                android.graphics.Canvas canvas = new android.graphics.Canvas(composite);
+
+                                android.graphics.Rect srcLeft = new android.graphics.Rect(0, 0, midW, h);
+                                canvas.drawBitmap(leftBmp, srcLeft, srcLeft, null);
+                                
+                                // Free Left RAM immediately to keep memory usage low
+                                leftBmp.recycle();
+                                leftBmp = null;
+
+                                Bitmap rightBmp = BitmapFactory.decodeFile(rightPath, opts);
+                                if (rightBmp == null) throw new Exception("Failed to decode right image");
+
+                                android.graphics.Rect srcRight = new android.graphics.Rect(midW, 0, w, h);
+                                canvas.drawBitmap(rightBmp, srcRight, srcRight, null);
+                                
+                                // Free Right RAM
+                                rightBmp.recycle();
+                                rightBmp = null;
+
+                                java.io.FileOutputStream out = new java.io.FileOutputStream(rightPath);
+                                composite.compress(Bitmap.CompressFormat.JPEG, 95, out);
+                                out.close();
+
+                                stitched = true;
+                            } catch (OutOfMemoryError oom) {
+                                android.util.Log.e("JPEG.CAM", "OOM during stitch at 1/" + sampleSize + " res. Retrying smaller...");
+                                if (composite != null && !composite.isRecycled()) composite.recycle();
+                                composite = null;
+                                System.gc(); // Force garbage collection before retry
+                                sampleSize *= 2; 
+                            }
+                        }
+
+                        if (!stitched) throw new Exception("Failed to stitch diptych (OOM).");
+
+                        // Delete the original Left image as it is now stitched
+                        new File(leftPath).delete();
+                        if (composite != null && !composite.isRecycled()) composite.recycle();
                         
-                        Bitmap leftBmp = BitmapFactory.decodeFile(leftProxy.getAbsolutePath(), opts);
-                        int w = leftBmp.getWidth();
-                        int h = leftBmp.getHeight();
-                        int midW = w / 2;
-                        
-                        Bitmap composite = Bitmap.createBitmap(w, h, Bitmap.Config.RGB_565);
-                        android.graphics.Canvas canvas = new android.graphics.Canvas(composite);
-                        
-                        // Paint Left
-                        android.graphics.Rect srcLeft = new android.graphics.Rect(0, 0, midW, h);
-                        android.graphics.Rect dstLeft = new android.graphics.Rect(0, 0, midW, h);
-                        canvas.drawBitmap(leftBmp, srcLeft, dstLeft, null);
-                        leftBmp.recycle(); 
-                        
-                        // Paint Right
-                        Bitmap rightBmp = BitmapFactory.decodeFile(rightProxy.getAbsolutePath(), opts);
-                        android.graphics.Rect srcRight = new android.graphics.Rect(midW, 0, w, h);
-                        android.graphics.Rect dstRight = new android.graphics.Rect(midW, 0, w, h);
-                        canvas.drawBitmap(rightBmp, srcRight, dstRight, null);
-                        rightBmp.recycle(); 
-                        
-                        // 6. Save the final stitch OVERWRITING the right proxy.
-                        // This forces the stitch to inherit the native DSC00XX filename for the gallery!
-                        java.io.FileOutputStream out = new java.io.FileOutputStream(rightProxy);
-                        composite.compress(Bitmap.CompressFormat.JPEG, 100, out);
-                        out.close();
-                        composite.recycle();
-                        
-                        // Clean up the left proxy immediately
-                        leftProxy.delete();
-                        
-                        // 7. Send the stitched master through your standard Recipe pipeline!
+                        // Send the stitched master through your standard Recipe pipeline!
                         File outDir = Filepaths.getGradedDir();
-                        mProcessor.processJpeg(rightProxy.getAbsolutePath(), outDir.getAbsolutePath(), 
-                                               0, prefJpegQuality,   
+                        mProcessor.processJpeg(rightPath, outDir.getAbsolutePath(), 
+                                               recipeManager.getQualityIndex(), prefJpegQuality,   
                                                recipeManager.getCurrentProfile(), prefShowCinemaMattes);
-                                               
-                        // Clean up the workspace
-                        rightProxy.delete();
-                        tempDir.delete();
                                                
                     } catch (Exception e) {
                         e.printStackTrace();
