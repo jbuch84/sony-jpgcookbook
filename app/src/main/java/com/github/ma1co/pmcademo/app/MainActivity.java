@@ -482,7 +482,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
                         // 2. Use C++ to safely downscale the massive 24MP images to 6MP proxies 
                         // with Opacity=0 to bypass grading. This yields beautiful, sharp ~2MB JPEGs!
-                        File tempDir = new File(Environment.getExternalStorageDirectory(), "DCIM/DIPTYCH_WORKSPACE");
+                        
+                        // FIX: Environment.getExternalStorageDirectory() is often read-only or invalid 
+                        // on Sony cameras. We must use our Filepaths utility to target the actual SD card.
+                        File tempDir = new File(Filepaths.getAppDir(), "DIPTYCH_WORKSPACE");
                         if (!tempDir.exists()) tempDir.mkdirs();
                         
                         File proxyL = new File(tempDir, "left.jpg");
@@ -490,8 +493,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
                         LutEngine engine = new LutEngine();
                         boolean lOk = engine.applyLutToJpeg(pathLeftHalf, proxyL.getAbsolutePath(), 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 100, false);
+                        if (!lOk) throw new Exception("C++ failed to generate left proxy.");
+                        
                         boolean rOk = engine.applyLutToJpeg(pathRightHalf, proxyR.getAbsolutePath(), 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 100, false);
-                        if (!lOk || !rOk) throw new Exception("C++ failed to generate clean proxies.");
+                        if (!rOk) throw new Exception("C++ failed to generate right proxy.");
 
                         // 3. STITCH THE HALVES IN JAVA
                         BitmapFactory.Options opts = new BitmapFactory.Options();
