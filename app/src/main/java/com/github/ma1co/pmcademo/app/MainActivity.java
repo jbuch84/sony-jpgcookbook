@@ -96,6 +96,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private PlaybackController playbackController;
     private MenuController menuController;
     private boolean isProcessing = false;
+
+    public void setProcessing(boolean v) {
+        this.isProcessing = v;
+    }
+
     private boolean isReady = false;
     private int displayState = 0; 
     
@@ -103,24 +108,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private boolean prefShowCinemaMattes = false;
     private boolean prefShowGridLines = false;
     private int prefJpegQuality = 95;
-    private boolean prefShowDiptych = false; 
-    private int diptychState = 0;            
-    private String diptychLeftFilename = null;
-    private String diptychRightFilename = null;
-
-    private Bitmap getDiptychThumbnail(String path) {
-        try {
-            BitmapFactory.Options opts = new BitmapFactory.Options();
-            // Safely downscale 24MP by 8x (approx 750px wide) for the UI Overlay
-            opts.inSampleSize = 8; 
-            opts.inPreferredConfig = Bitmap.Config.RGB_565;
-            opts.inPurgeable = true;
-            opts.inInputShareable = true;
-            return BitmapFactory.decodeFile(path, opts);
-        } catch (Throwable t) {
-            return null;
-        }
-    }
+    private DiptychManager diptychManager;
 
     private LensProfileManager lensManager;
     private List<String> availableLenses = new ArrayList<String>();
@@ -147,7 +135,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     
     private GridLinesView gridLines;
     private CinemaMatteView cinemaMattes;
-    private DiptychOverlayView diptychOverlay;
     private AdvancedFocusMeterView focusMeter;
     private ProReticleView afOverlay;
     
@@ -331,63 +318,20 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             @Override public void onPreloadFinished(boolean success) { isReady = true; runOnUiThread(new Runnable() { public void run() { updateMainHUD(); } }); }
             @Override public void onProcessStarted() { runOnUiThread(new Runnable() { public void run() { if (tvTopStatus != null) { tvTopStatus.setText("PROCESSING..."); tvTopStatus.setTextColor(Color.YELLOW); } } }); }
         @Override public void onProcessFinished(String res) { 
-            if (prefShowDiptych) {
+            if (diptychManager != null && diptychManager.isEnabled()) {
                 if (res != null && !res.toUpperCase().contains("ERROR")) {
-                    if (diptychState == 1) {
-                        final String gradedLeft = new File(Filepaths.getGradedDir(), diptychLeftFilename).getAbsolutePath();
-                        new Thread(new Runnable() {
-                            public void run() {
-                                final Bitmap thumb = getDiptychThumbnail(gradedLeft);
-                                runOnUiThread(new Runnable() {
-                                    public void run() {
-                                        isProcessing = false;
-                                        if (tvTopStatus != null) {
-                                            tvTopStatus.setText("SHOT 1 SAVED. [L/R] TO SWAP.");
-                                            tvTopStatus.setTextColor(Color.GREEN);
-                                        }
-                                        if (diptychOverlay != null) {
-                                            diptychOverlay.setThumbnail(thumb);
-                                            diptychOverlay.setState(1);
-                                        }
-                                        updateMainHUD();
-                                    }
-                                });
-                            }
-                        }).start();
+                    if (diptychManager.getState() == 1) {
+                        final String gradedLeft = new File(Filepaths.getGradedDir(), diptychManager.getLeftFilename()).getAbsolutePath();
+                        diptychManager.processFirstShot(gradedLeft);
                         return;
-                    } else if (diptychState == 2) {
-                        final String gradedLeft = new File(Filepaths.getGradedDir(), diptychLeftFilename).getAbsolutePath();
-                        final String gradedRight = new File(Filepaths.getGradedDir(), diptychRightFilename).getAbsolutePath();
-                        
-                        diptychState = 0;
-                        runOnUiThread(new Runnable() {
-                            public void run() {
-                                if (diptychOverlay != null) diptychOverlay.setState(0);
-                                if (tvTopStatus != null) {
-                                    tvTopStatus.setText("STITCHING DIPTYCH...");
-                                    tvTopStatus.setTextColor(Color.YELLOW);
-                                }
-                                updateMainHUD();
-                            }
-                        });
-                        
-                        final boolean firstShotLeft = diptychOverlay != null && diptychOverlay.isThumbOnLeft();
-                        new Thread(new Runnable() {
-                            public void run() {
-                                performDiptychStitch(gradedLeft, gradedRight, firstShotLeft);
-                            }
-                        }).start();
+                    } else if (diptychManager.getState() == 2) {
+                        final String gradedLeft = new File(Filepaths.getGradedDir(), diptychManager.getLeftFilename()).getAbsolutePath();
+                        final String gradedRight = new File(Filepaths.getGradedDir(), diptychManager.getRightFilename()).getAbsolutePath();
+                        diptychManager.processSecondShot(gradedLeft, gradedRight);
                         return;
                     }
                 } else {
-                    diptychState = 0;
-                    diptychLeftFilename = null;
-                    diptychRightFilename = null;
-                    runOnUiThread(new Runnable() {
-                        public void run() {
-                            if (diptychOverlay != null) diptychOverlay.setState(0);
-                        }
-                    });
+                    diptychManager.reset();
                 }
             }
             isProcessing = false; 
@@ -400,7 +344,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             public boolean isReadyToProcess() { 
                 RTLProfile p = recipeManager.getCurrentProfile();
                 return isReady && !isProcessing && !calibController.isCalibrating() &&
-                       (prefShowDiptych || p.lutIndex != 0 || p.grain != 0 || p.vignette != 0 ||
+                       ((diptychManager != null && diptychManager.isEnabled()) || p.lutIndex != 0 || p.grain != 0 || p.vignette != 0 ||
                         p.rollOff != 0 || p.colorChrome != 0 || p.chromeBlue != 0 ||
                         p.shadowToe != 0 || p.subtractiveSat != 0 || p.halation != 0 ||
                         p.bloom != 0);
@@ -449,18 +393,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 long currentSize = f.length();
                 if (currentSize > 0 && currentSize == lastSize[0]) {
                     // --- DIPTYCH INTERCEPT ---
-                    if (prefShowDiptych) {
-                    if (diptychState == 0) {
-                        diptychLeftFilename = f.getName();
-                        diptychState = 1;
+                    if (diptychManager != null && diptychManager.interceptNewFile(f.getName(), path)) {
                         File outDir = Filepaths.getGradedDir();
                         mProcessor.processJpeg(path, outDir.getAbsolutePath(), recipeManager.getQualityIndex(), prefJpegQuality, recipeManager.getCurrentProfile(), false, true);
-                    } else if (diptychState == 1) {
-                        diptychRightFilename = f.getName();
-                        diptychState = 2; // Stitching
-                        File outDir = Filepaths.getGradedDir();
-                        mProcessor.processJpeg(path, outDir.getAbsolutePath(), recipeManager.getQualityIndex(), prefJpegQuality, recipeManager.getCurrentProfile(), false, true);
-                    }
                     } else {
                         File outDir = Filepaths.getGradedDir();
                         mProcessor.processJpeg(path, outDir.getAbsolutePath(), recipeManager.getQualityIndex(), prefJpegQuality, recipeManager.getCurrentProfile(), prefShowCinemaMattes, false);
@@ -477,93 +412,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         };
         
         uiHandler.postDelayed(checker, 200);
-    }
-
-    private void performDiptychStitch(String leftPath, String rightPath, boolean firstShotLeft) {
-        try {
-            System.gc(); // Force memory cleanup after heavy C++ pass
-            String pathL = firstShotLeft ? leftPath : rightPath;
-            String pathR = firstShotLeft ? rightPath : leftPath;
-            
-            BitmapFactory.Options opts = new BitmapFactory.Options();
-            opts.inPreferredConfig = Bitmap.Config.RGB_565;
-            opts.inPurgeable = true;
-            opts.inInputShareable = true;
-            
-            android.graphics.BitmapRegionDecoder decoderL = android.graphics.BitmapRegionDecoder.newInstance(pathL, false);
-            android.graphics.BitmapRegionDecoder decoderR = android.graphics.BitmapRegionDecoder.newInstance(pathR, false);
-            if (decoderL == null || decoderR == null) throw new Exception("Failed to initialize Region Decoders.");
-            
-            int lW = decoderL.getWidth();
-            int lH = decoderL.getHeight();
-            int lMid = lW / 2;
-            
-            int rW = decoderR.getWidth();
-            int rH = decoderR.getHeight();
-            int rMid = rW / 2;
-            
-            int finalW = lMid + (rW - rMid);
-            int finalH = Math.min(lH, rH);
-            
-            Bitmap composite = Bitmap.createBitmap(finalW, finalH, Bitmap.Config.RGB_565);
-            android.graphics.Canvas canvas = new android.graphics.Canvas(composite);
-            
-            android.graphics.Rect srcL = new android.graphics.Rect(0, 0, lMid, lH);
-            Bitmap bmpL = decoderL.decodeRegion(srcL, opts);
-            decoderL.recycle();
-            if (bmpL != null) {
-                canvas.drawBitmap(bmpL, 0, 0, null);
-                bmpL.recycle(); bmpL = null;
-            }
-            
-            android.graphics.Rect srcR = new android.graphics.Rect(rMid, 0, rW, rH);
-            Bitmap bmpR = decoderR.decodeRegion(srcR, opts);
-            decoderR.recycle();
-            if (bmpR != null) {
-                canvas.drawBitmap(bmpR, lMid, 0, null);
-                bmpR.recycle(); bmpR = null;
-            }
-            
-            // Draw analog center divider
-            android.graphics.Paint dividerPaint = new android.graphics.Paint();
-            dividerPaint.setColor(android.graphics.Color.BLACK);
-            dividerPaint.setStrokeWidth(Math.max(4, finalW / 400));
-            canvas.drawLine(lMid, 0, lMid, finalH, dividerPaint);
-            
-            File finalOut = new File(Filepaths.getGradedDir(), "DIPTYCH_" + new File(rightPath).getName());
-            java.io.FileOutputStream out = new java.io.FileOutputStream(finalOut);
-            composite.compress(Bitmap.CompressFormat.JPEG, prefJpegQuality, out);
-            out.close();
-            composite.recycle(); composite = null;
-            
-            // Delete the individual graded halves to keep the folder clean
-            new File(leftPath).delete();
-            new File(rightPath).delete();
-            
-            runOnUiThread(new Runnable() {
-                @Override
-                public void run() {
-                    isProcessing = false;
-                    if (tvTopStatus != null) {
-                        tvTopStatus.setText("DIPTYCH SAVED");
-                        tvTopStatus.setTextColor(Color.WHITE);
-                    }
-                    updateMainHUD();
-                }
-            });
-        } catch (final Exception e) {
-            e.printStackTrace();
-            runOnUiThread(new Runnable() {
-                public void run() {
-                    isProcessing = false;
-                    if (tvTopStatus != null) {
-                        tvTopStatus.setText("STITCH FAILED");
-                        tvTopStatus.setTextColor(Color.RED);
-                    }
-                    updateMainHUD();
-                }
-            });
-        }
     }
 
     private void triggerLutPreload() {
@@ -852,8 +700,8 @@ public void onEnterPressed() {
             return true;
         }
         
-        if (prefShowDiptych && diptychState == 1) {
-            if (diptychOverlay != null) diptychOverlay.setThumbOnLeft(true);
+        if (diptychManager != null && diptychManager.isEnabled() && diptychManager.getState() == 1) {
+            diptychManager.setThumbOnLeft(true);
             return true;
         }
         
@@ -887,8 +735,8 @@ public void onEnterPressed() {
             return true;
         }
         
-        if (prefShowDiptych && diptychState == 1) {
-            if (diptychOverlay != null) diptychOverlay.setThumbOnLeft(false);
+        if (diptychManager != null && diptychManager.isEnabled() && diptychManager.getState() == 1) {
+            diptychManager.setThumbOnLeft(false);
             return true;
         }
         
@@ -1298,9 +1146,6 @@ public void onEnterPressed() {
         cinemaMattes = new CinemaMatteView(this); 
         mainUIContainer.addView(cinemaMattes, new FrameLayout.LayoutParams(-1, -1));
         
-        diptychOverlay = new DiptychOverlayView(this); // <--- ADDED
-        mainUIContainer.addView(diptychOverlay, new FrameLayout.LayoutParams(-1, -1)); // <--- ADDED
-        
         tvTopStatus = new TextView(this); 
         tvTopStatus.setTextColor(Color.WHITE); 
         tvTopStatus.setTextSize(20); 
@@ -1403,6 +1248,8 @@ public void onEnterPressed() {
 
         // HUD controller — builds and owns its overlay views
         hudController = new HudController(this, mainUIContainer, this);
+        
+        diptychManager = new DiptychManager(this, mainUIContainer, tvTopStatus);
     }
 
 
@@ -1670,7 +1517,7 @@ public void onEnterPressed() {
         
         // --- 3. UPDATE TEXT FIELDS ---
         if (!isProcessing && tvTopStatus != null) {
-            if (prefShowDiptych && diptychState == 1) {
+            if (diptychManager != null && diptychManager.isEnabled() && diptychManager.getState() == 1) {
                 tvTopStatus.setText("SHOT 1 SAVED. [L/R] TO SWAP SIDE.");
                 tvTopStatus.setTextColor(Color.GREEN);
             } else {
@@ -1757,15 +1604,11 @@ public void onEnterPressed() {
         if (gridLines != null) gridLines.setVisibility(prefShowGridLines ? View.VISIBLE : View.GONE); 
         if (cinemaMattes != null) cinemaMattes.setVisibility(prefShowCinemaMattes ? View.VISIBLE : View.GONE);
 
-        if (diptychOverlay != null) {
-            if (prefShowDiptych) {
-                diptychOverlay.setVisibility(View.VISIBLE);
-                diptychOverlay.setState(diptychState);
+        if (diptychManager != null) {
+            if (diptychManager.isEnabled()) {
                 // Force conflicting UI elements off while Diptych is active
                 if (cinemaMattes != null) cinemaMattes.setVisibility(View.GONE);
                 if (gridLines != null) gridLines.setVisibility(View.GONE);
-            } else {
-                diptychOverlay.setVisibility(View.GONE);
             }
         }
 
@@ -1968,19 +1811,90 @@ public void onEnterPressed() {
     @Override public boolean isPrefCinemaMattes() { return prefShowCinemaMattes; }
     @Override public boolean isPrefGridLines()    { return prefShowGridLines; }
     @Override public int     getPrefJpegQuality() { return prefJpegQuality; }
-    @Override public boolean isPrefDiptych()      { return prefShowDiptych; } // <--- ADDED
+    @Override public boolean isPrefDiptych()      { return diptychManager != null && diptychManager.isEnabled(); } // <--- ADDED
     @Override public void    setPrefFocusMeter(boolean v)   { prefShowFocusMeter   = v; }
     @Override public void    setPrefCinemaMattes(boolean v) { prefShowCinemaMattes = v; }
     @Override public void    setPrefGridLines(boolean v)    { prefShowGridLines    = v; }
     @Override public void    setPrefJpegQuality(int v)      { prefJpegQuality      = v; }
     @Override public void    setPrefDiptych(boolean v)      { 
-        prefShowDiptych = v; 
-        if (!v) {
-            diptychState = 0;
-            diptychLeftFilename = null;
-            diptychRightFilename = null;
-            if (diptychOverlay != null) diptychOverlay.setState(0);
+        if (diptychManager != null) diptychManager.setEnabled(v);
+        updateMainHUD(); 
+    }
+    
+
+    @Override public void closeHud() { hudController.reset(); }
+
+    @Override public void onMenuOpened()  { refreshRecipes(); }
+
+    @Override public void onMenuClosed() {
+        recipeManager.savePreferences();
+        SharedPreferences.Editor ed = getSharedPreferences("JPEG.CAM_Prefs", MODE_PRIVATE).edit();
+        ed.putBoolean("focusMeter",    prefShowFocusMeter);
+        ed.putBoolean("cinemaMattes",  prefShowCinemaMattes);
+        ed.putBoolean("gridLines",     prefShowGridLines);
+        ed.putInt("jpegQuality",       prefJpegQuality);
+        ed.apply();
+        triggerLutPreload();
+        applyHardwareRecipe();
+        syncHardwareState();
+        updateMainHUD();
+    }
+
+    @Override public void onLutPreloadNeeded()    { triggerLutPreload(); }
+    @Override public void scheduleHardwareApply() {
+        uiHandler.removeCallbacks(applySettingsRunnable);
+        uiHandler.postDelayed(applySettingsRunnable, 150);
+    }
+    @Override public void onHudModeRequested(int mode) { launchHudMode(mode); }
+    @Override public void onSetAutoPowerOffMode(boolean on) { setAutoPowerOffMode(on); }
+
+    @Override public void restoreFocusMode(String savedMode) {
+        if (savedMode != null && cameraManager != null && cameraManager.getCamera() != null) {
+            try {
+                Camera.Parameters p = cameraManager.getCamera().getParameters();
+                p.setFocusMode(savedMode);
+                cameraManager.getCamera().setParameters(p);
+            } catch (Exception ignored) {}
         }
+    }
+
+    // --- HudController.HostCallback ---
+    @Override public TextView  getTvTopStatus()   { return tvTopStatus; }
+    @Override public Typeface  getDigitalFont()   { return digitalFont; }
+    @Override public Handler   getUiHandler()     { return uiHandler; }
+    @Override public MenuController getMenuController() { return menuController; }
+    @Override public void applyHardwareRecipeNow() { applyHardwareRecipe(); }
+    @Override public void onHudClosed() {
+        mainUIContainer.setVisibility(View.GONE);
+        menuController.getContainer().setVisibility(View.VISIBLE);
+        menuController.refreshDisplay();
+    }
+
+    private void syncHardwareState() {
+        if (cameraManager == null || cameraManager.getCamera() == null) return;
+        Camera c = cameraManager.getCamera();
+        String fMode = c.getParameters().getFocusMode();
+        cachedIsManualFocus = "manual".equals(fMode);
+    }
+
+    @Override public Camera getCamera() { return cameraManager != null ? cameraManager.getCamera() : null; }
+    @Override public String getAppVersion() { return getPackageManager() != null ? tryGetVersion() : "?"; }
+
+    private String tryGetVersion() {
+        try { return getPackageManager().getPackageInfo(getPackageName(), 0).versionName; } catch (Exception e) { return "?"; }
+    }
+
+    @Override public boolean isPrefFocusMeter()   { return prefShowFocusMeter; }
+    @Override public boolean isPrefCinemaMattes() { return prefShowCinemaMattes; }
+    @Override public boolean isPrefGridLines()    { return prefShowGridLines; }
+    @Override public int     getPrefJpegQuality() { return prefJpegQuality; }
+    @Override public boolean isPrefDiptych()      { return diptychManager != null && diptychManager.isEnabled(); } // <--- ADDED
+    @Override public void    setPrefFocusMeter(boolean v)   { prefShowFocusMeter   = v; }
+    @Override public void    setPrefCinemaMattes(boolean v) { prefShowCinemaMattes = v; }
+    @Override public void    setPrefGridLines(boolean v)    { prefShowGridLines    = v; }
+    @Override public void    setPrefJpegQuality(int v)      { prefJpegQuality      = v; }
+    @Override public void    setPrefDiptych(boolean v)      { 
+        if (diptychManager != null) diptychManager.setEnabled(v);
         updateMainHUD(); 
     }
     
