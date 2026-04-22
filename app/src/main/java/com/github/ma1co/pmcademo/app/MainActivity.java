@@ -458,7 +458,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                         final String pathLeftHalf = firstShotLeft ? leftPath : rightPath;
                         final String pathRightHalf = firstShotLeft ? rightPath : leftPath;
 
-                        // 2. Use C++ to safely downscale the massive 24MP images to smaller proxies 
+                        // 2. Use C++ to safely downscale the massive 24MP images to 6MP proxies 
                         // We use the known-good GRADED directory to guarantee write permissions.
                         File safeDir = Filepaths.getGradedDir();
                         File proxyL = new File(safeDir, "PROXY_L.JPG");
@@ -471,20 +471,26 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                         try { new java.io.FileOutputStream(proxyR).close(); } catch (Exception e) { throw new Exception("Exception on write proxyR"); }
 
                         LutEngine engine = new LutEngine();
-                        // Increased downscale factor from 2 to 4 for better memory efficiency
-                        // This creates ~1.5MP proxies instead of ~6MP
-                        boolean lOk = engine.applyLutToJpeg(pathLeftHalf, proxyL.getAbsolutePath(), 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 100, false);
+                        // Apply the current recipe to both halves during downscaling
+                        RTLProfile currentProfile = recipeManager.getCurrentProfile();
+                        boolean lOk = engine.applyLutToJpeg(pathLeftHalf, proxyL.getAbsolutePath(), 2, 
+                            currentProfile.grain, currentProfile.vignette, currentProfile.rollOff,
+                            currentProfile.colorChrome, currentProfile.chromeBlue, currentProfile.shadowToe,
+                            currentProfile.subtractiveSat, currentProfile.halation, currentProfile.bloom,
+                            currentProfile.lutIndex, currentProfile.matrixIndex, 100, false);
                         if (!lOk) throw new Exception("C++ failed to generate left proxy.");
                         
-                        boolean rOk = engine.applyLutToJpeg(pathRightHalf, proxyR.getAbsolutePath(), 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 100, false);
+                        boolean rOk = engine.applyLutToJpeg(pathRightHalf, proxyR.getAbsolutePath(), 2, 
+                            currentProfile.grain, currentProfile.vignette, currentProfile.rollOff,
+                            currentProfile.colorChrome, currentProfile.chromeBlue, currentProfile.shadowToe,
+                            currentProfile.subtractiveSat, currentProfile.halation, currentProfile.bloom,
+                            currentProfile.lutIndex, currentProfile.matrixIndex, 100, false);
                         if (!rOk) throw new Exception("C++ failed to generate right proxy.");
 
-                        // 3. STITCH THE HALVES IN JAVA - MORE MEMORY EFFICIENT
+                        // 3. STITCH THE HALVES IN JAVA - MINIMAL PROCESSING
                         BitmapFactory.Options opts = new BitmapFactory.Options();
                         opts.inPreferredConfig = Bitmap.Config.RGB_565;
-
-                        // Decode with inSampleSize to reduce memory usage
-                        opts.inSampleSize = 2; // Further reduce by 2x for stitching (total 8x from original)
+                        // No additional downsampling - rely on C++ downscaling to 6MP
                         Bitmap bmpL = BitmapFactory.decodeFile(proxyL.getAbsolutePath(), opts);
                         Bitmap bmpR = BitmapFactory.decodeFile(proxyR.getAbsolutePath(), opts);
 
@@ -538,7 +544,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                                 // The ImageProcessor's isDiptych=true flag will automatically 
                                 // step down the bloom and grain sizes to perfectly match this canvas!
                                 mProcessor.processJpeg(rightPath, outDir.getAbsolutePath(), 
-                                                       2, prefJpegQuality,   
+                                                       recipeManager.getQualityIndex(), prefJpegQuality,   
                                                        recipeManager.getCurrentProfile(), prefShowCinemaMattes, true);
                             }
                         });
