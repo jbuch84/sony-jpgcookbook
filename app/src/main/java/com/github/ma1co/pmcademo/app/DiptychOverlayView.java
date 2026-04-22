@@ -4,26 +4,52 @@ import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
+import android.graphics.Bitmap;
+import android.graphics.Rect;
 import android.view.View;
 
 public class DiptychOverlayView extends View {
-    private Paint maskPaint;
     private Paint linePaint;
-    private int state = 0; // 0: Need Left, 1: Need Right
+    private Paint thumbPaint;
+    private Bitmap thumbnail;
+    private boolean thumbOnLeft = true;
+    private int state = 0; // 0: Need Shot 1, 1: Need Shot 2
 
     public DiptychOverlayView(Context context) {
         super(context);
-        maskPaint = new Paint();
-        maskPaint.setColor(Color.argb(180, 0, 0, 0)); // Semi-transparent black
         
         linePaint = new Paint();
         linePaint.setColor(Color.WHITE);
         linePaint.setStrokeWidth(2);
+        
+        thumbPaint = new Paint();
+        thumbPaint.setAlpha(140); // ~55% opacity so you can still see through it
     }
 
     public void setState(int state) {
         this.state = state;
-        invalidate(); // Redraw
+        if (state == 0) {
+            if (thumbnail != null && !thumbnail.isRecycled()) {
+                thumbnail.recycle();
+            }
+            thumbnail = null;
+            thumbOnLeft = true;
+        }
+        invalidate();
+    }
+
+    public void setThumbnail(Bitmap thumb) {
+        this.thumbnail = thumb;
+        invalidate();
+    }
+
+    public void setThumbOnLeft(boolean onLeft) {
+        this.thumbOnLeft = onLeft;
+        invalidate();
+    }
+
+    public boolean isThumbOnLeft() {
+        return thumbOnLeft;
     }
 
     @Override
@@ -33,15 +59,26 @@ public class DiptychOverlayView extends View {
         int h = getHeight();
         int mid = w / 2;
 
-        if (state == 0) {
-            // Mask the Right side while framing Left
-            canvas.drawRect(mid, 0, w, h, maskPaint);
-        } else {
-            // Mask the Left side (or leave clear) while framing Right
-            canvas.drawRect(0, 0, mid, h, maskPaint);
+        if (state == 1 && thumbnail != null && !thumbnail.isRecycled()) {
+            int tW = thumbnail.getWidth();
+            int tH = thumbnail.getHeight();
+            int tMid = tW / 2;
+            
+            Rect srcRect;
+            Rect dstRect;
+            
+            if (thumbOnLeft) {
+                srcRect = new Rect(0, 0, tMid, tH);
+                dstRect = new Rect(0, 0, mid, h);
+            } else {
+                srcRect = new Rect(tMid, 0, tW, tH);
+                dstRect = new Rect(mid, 0, w, h);
+            }
+            
+            canvas.drawBitmap(thumbnail, srcRect, dstRect, thumbPaint);
         }
         
-        // Draw the center split line
+        // Always draw the center framing line
         canvas.drawLine(mid, 0, mid, h, linePaint);
     }
 }

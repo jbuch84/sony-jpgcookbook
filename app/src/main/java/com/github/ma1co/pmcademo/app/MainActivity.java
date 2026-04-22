@@ -107,6 +107,49 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private int diptychState = 0;            
     private String diptychLeftPath = null;   // <--- ADDED
 
+    // --- NEW: SONY MPF (Multi-Picture Format) EXTRACTOR ---
+    // Sony natively embeds a beautiful 1616x1080 preview deep inside the main JPEG.
+    // By hunting for the secondary SOI (0xFFD8) and SOF0 (0xFFC0) markers, we can 
+    // extract it instantly into RAM, completely bypassing the massive 24MP image!
+    private Bitmap extractSonyLargeThumbnail(String path) {
+        try {
+            java.io.RandomAccessFile raf = new java.io.RandomAccessFile(path, "r");
+            byte[] header = new byte[1048576]; // Read first 1MB
+            int readLen = raf.read(header);
+            
+            int targetOffset = -1;
+            for (int i = 1000; i < readLen - 10; i++) {
+                if ((header[i] & 0xFF) == 0xFF && (header[i+1] & 0xFF) == 0xD8) {
+                    for (int j = i + 2; j < i + 65536 && j < readLen - 10; j++) {
+                        if ((header[j] & 0xFF) == 0xFF && (header[j+1] & 0xFF) == 0xC0) {
+                            int width = ((header[j+7] & 0xFF) << 8) | (header[j+8] & 0xFF);
+                            if (width >= 1000 && width <= 2500) {
+                                targetOffset = i;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (targetOffset != -1) break;
+            }
+            
+            if (targetOffset != -1) {
+                raf.seek(targetOffset);
+                byte[] thumbData = new byte[1048576]; // Read up to 1MB
+                int tLen = raf.read(thumbData);
+                raf.close();
+                
+                BitmapFactory.Options opts = new BitmapFactory.Options();
+                opts.inPreferredConfig = Bitmap.Config.RGB_565; // Massive RAM savings
+                return BitmapFactory.decodeByteArray(thumbData, 0, tLen, opts);
+            }
+            raf.close();
+        } catch (Exception e) {
+            android.util.Log.e("JPEG.CAM", "MPF Extractor failed: " + e.getMessage());
+        }
+        return null;
+    }
+
     private LensProfileManager lensManager;
     private List<String> availableLenses = new ArrayList<String>();
     private int currentLensIndex = 0;
@@ -394,24 +437,31 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     private void handleDiptychCapture(final String newPath) {
         if (diptychState == 0) {
-            // SHOT 1: Save the path and update the UI to frame the right side
+            // SHOT 1: Save the path and extract the thumbnail for the UI overlay
             diptychLeftPath = newPath;
             diptychState = 1;
             isProcessing = false; // Free the scanner for the next shot
             
+            final Bitmap thumb = extractSonyLargeThumbnail(newPath);
+            
             runOnUiThread(new Runnable() {
                 public void run() {
+                    if (diptychOverlay != null) {
+                        diptychOverlay.setThumbnail(thumb);
+                        diptychOverlay.setState(1);
+                    }
                     if (tvTopStatus != null) {
-                        tvTopStatus.setText("LEFT SAVED. SHOOT RIGHT.");
+                        tvTopStatus.setText("SHOT 1 SAVED. [L/R] TO SWAP SIDE.");
                         tvTopStatus.setTextColor(Color.GREEN);
                     }
                     updateMainHUD();
                 }
             });
         } else {
-            // SHOT 2: We have both halves! 
+            // SHOT 2: We have both halves!
             final String rightPath = newPath;
             final String leftPath = diptychLeftPath;
+            final boolean firstShotLeft = diptychOverlay != null && diptychOverlay.isThumbOnLeft();
             
             // Reset state machine for the next pair
             diptychState = 0;
@@ -419,8 +469,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             
             runOnUiThread(new Runnable() {
                 public void run() {
+                    if (diptychOverlay != null) diptychOverlay.setState(0);
                     if (tvTopStatus != null) {
-                        tvTopStatus.setText("STITCHING DIPTYCH...");
+                        tvTopStatus.setText("STITCHING HIGH-RES DIPTYCH...");
                         tvTopStatus.setTextColor(Color.YELLOW);
                     }
                     updateMainHUD();
@@ -432,90 +483,61 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 @Override
                 public void run() {
                     try {
-                        // 1. THE JAVA STITCHER:
-                        // Bypass the async C++ workaround entirely to prevent race conditions.
-                        BitmapFactory.Options opts = new BitmapFactory.Options();
-                        opts.inPreferredConfig = Bitmap.Config.RGB_565; // Save 50% RAM
+                        // 1. Assign which file goes on which side based on the user's overlay placement
+                        final String pathLeftHalf = firstShotLeft ? leftPath : rightPath;
+                        final String pathRightHalf = firstShotLeft ? rightPath : leftPath;
 
-                        // By using BitmapRegionDecoder, we only load the exact 50% slice we need into memory.
-                        // This prevents the OOM crash and guarantees we can use a high-res sampleSize (like 2)
-                        // instead of falling back to tiny thumbnails.
-                        int sampleSize = 2; // High-res 6 Megapixel proxy output (approx 3000x2000)
-                        Bitmap composite = null;
-                        boolean stitched = false;
-
-                        while (sampleSize <= 8 && !stitched) {
-                            try {
-                                opts.inSampleSize = sampleSize;
-
-                                // 1. Decode ONLY the Left Half 
-                                android.graphics.BitmapRegionDecoder leftDecoder = android.graphics.BitmapRegionDecoder.newInstance(leftPath, false);
-                                int fullW = leftDecoder.getWidth();
-                                int fullH = leftDecoder.getHeight();
-                                
-                                android.graphics.Rect rectLeft = new android.graphics.Rect(0, 0, fullW / 2, fullH);
-                                Bitmap leftBmp = leftDecoder.decodeRegion(rectLeft, opts);
-                                leftDecoder.recycle();
-                                
-                                if (leftBmp == null) throw new Exception("Failed to decode left region");
-
-                                // Create composite canvas based on the exact downscaled dimensions
-                                int compW = fullW / sampleSize;
-                                int compH = fullH / sampleSize;
-                                int compMid = compW / 2;
-
-                                composite = Bitmap.createBitmap(compW, compH, Bitmap.Config.RGB_565);
-                                android.graphics.Canvas canvas = new android.graphics.Canvas(composite);
-
-                                // Paste Left Half
-                                canvas.drawBitmap(leftBmp, 0, 0, null);
-                                
-                                leftBmp.recycle();
-                                leftBmp = null;
-
-                                // 2. Decode ONLY the Right Half
-                                android.graphics.BitmapRegionDecoder rightDecoder = android.graphics.BitmapRegionDecoder.newInstance(rightPath, false);
-                                int rightFullW = rightDecoder.getWidth();
-                                int rightFullH = rightDecoder.getHeight();
-                                
-                                android.graphics.Rect rectRight = new android.graphics.Rect(rightFullW / 2, 0, rightFullW, rightFullH);
-                                Bitmap rightBmp = rightDecoder.decodeRegion(rectRight, opts);
-                                rightDecoder.recycle();
-                                
-                                if (rightBmp == null) throw new Exception("Failed to decode right region");
-
-                                // Paste Right Half
-                                canvas.drawBitmap(rightBmp, compMid, 0, null);
-                                rightBmp.recycle();
-                                rightBmp = null;
-
-                                // Add a clean black divider down the middle for a true analog film strip look
-                                android.graphics.Paint dividerPaint = new android.graphics.Paint();
-                                dividerPaint.setColor(android.graphics.Color.BLACK);
-                                dividerPaint.setStrokeWidth(Math.max(4, compW / 400));
-                                canvas.drawLine(compMid, 0, compMid, compH, dividerPaint);
-
-                                java.io.FileOutputStream out = new java.io.FileOutputStream(rightPath);
-                                composite.compress(Bitmap.CompressFormat.JPEG, 95, out);
-                                out.close();
-
-                                stitched = true;
-                            } catch (OutOfMemoryError oom) {
-                                android.util.Log.e("JPEG.CAM", "OOM during stitch at 1/" + sampleSize + " res. Retrying smaller...");
-                                if (composite != null && !composite.isRecycled()) composite.recycle();
-                                composite = null;
-                                System.gc(); // Force garbage collection before retry
-                                sampleSize *= 2; 
-                            }
-                        }
-
-                        if (!stitched) throw new Exception("Failed to stitch diptych (OOM).");
-
-                        // Delete the original Left image as it is now stitched
-                        new File(leftPath).delete();
-                        if (composite != null && !composite.isRecycled()) composite.recycle();
+                        // 2. Use C++ to safely downscale the massive 24MP images to 6MP proxies 
+                        // with Opacity=0 to bypass grading. This yields beautiful, sharp ~2MB JPEGs!
+                        File tempDir = new File(Environment.getExternalStorageDirectory(), "DCIM/DIPTYCH_WORKSPACE");
+                        if (!tempDir.exists()) tempDir.mkdirs();
                         
-                        // CRITICAL FIX: AsyncTask (.execute) MUST be called from the main UI thread!
+                        File proxyL = new File(tempDir, "left.jpg");
+                        File proxyR = new File(tempDir, "right.jpg");
+
+                        LutEngine engine = new LutEngine();
+                        boolean lOk = engine.applyLutToJpeg(pathLeftHalf, proxyL.getAbsolutePath(), 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 100, false);
+                        boolean rOk = engine.applyLutToJpeg(pathRightHalf, proxyR.getAbsolutePath(), 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 100, false);
+                        if (!lOk || !rOk) throw new Exception("C++ failed to generate clean proxies.");
+
+                        // 3. STITCH THE HALVES IN JAVA
+                        BitmapFactory.Options opts = new BitmapFactory.Options();
+                        opts.inPreferredConfig = Bitmap.Config.RGB_565;
+
+                        android.graphics.BitmapRegionDecoder lDecoder = android.graphics.BitmapRegionDecoder.newInstance(proxyL.getAbsolutePath(), false);
+                        int lW = lDecoder.getWidth(); int lH = lDecoder.getHeight(); int lMid = lW / 2;
+                        
+                        Bitmap composite = Bitmap.createBitmap(lW, lH, Bitmap.Config.RGB_565);
+                        android.graphics.Canvas canvas = new android.graphics.Canvas(composite);
+
+                        android.graphics.Rect rL = new android.graphics.Rect(0, 0, lMid, lH);
+                        Bitmap bmpL = lDecoder.decodeRegion(rL, opts); lDecoder.recycle();
+                        canvas.drawBitmap(bmpL, 0, 0, null); bmpL.recycle(); bmpL = null;
+
+                        android.graphics.BitmapRegionDecoder rDecoder = android.graphics.BitmapRegionDecoder.newInstance(proxyR.getAbsolutePath(), false);
+                        int rW = rDecoder.getWidth(); int rH = rDecoder.getHeight(); int rMid = rW / 2;
+
+                        android.graphics.Rect rR = new android.graphics.Rect(rMid, 0, rW, rH);
+                        Bitmap bmpR = rDecoder.decodeRegion(rR, opts); rDecoder.recycle();
+                        android.graphics.Rect destR = new android.graphics.Rect(lMid, 0, lMid + (rW - rMid), Math.min(lH, rH));
+                        canvas.drawBitmap(bmpR, null, destR, null); bmpR.recycle(); bmpR = null;
+
+                        // Draw analog center divider
+                        android.graphics.Paint dividerPaint = new android.graphics.Paint();
+                        dividerPaint.setColor(android.graphics.Color.BLACK);
+                        dividerPaint.setStrokeWidth(Math.max(4, lW / 400));
+                        canvas.drawLine(lMid, 0, lMid, lH, dividerPaint);
+
+                        java.io.FileOutputStream out = new java.io.FileOutputStream(rightPath);
+                        composite.compress(Bitmap.CompressFormat.JPEG, 95, out);
+                        out.close();
+                        composite.recycle(); composite = null;
+
+                        // Cleanup workspace
+                        proxyL.delete(); proxyR.delete(); tempDir.delete();
+                        new File(leftPath).delete();
+                        
+                        // 4. Send the stitched proxy through the standard Recipe pipeline
                         final File outDir = Filepaths.getGradedDir();
                         runOnUiThread(new Runnable() {
                             @Override
@@ -830,6 +852,11 @@ public void onEnterPressed() {
             return true;
         }
         
+        if (prefShowDiptych && diptychState == 1) {
+            if (diptychOverlay != null) diptychOverlay.setThumbOnLeft(true);
+            return true;
+        }
+        
         if (hudController.isActive() && (hudController.getMode() == 0 || hudController.getMode() == 10) && menuController.isNamingMode()) {
             menuController.advanceNameCursor(-1);
             hudController.update();
@@ -857,6 +884,11 @@ public void onEnterPressed() {
         if (cameraManager != null && cameraManager.isPreviewMagnificationActive()
                 && !playbackController.isActive() && !menuController.isOpen() && !hudController.isActive()) {
             cameraManager.movePreviewMagnification(1, 0);
+            return true;
+        }
+        
+        if (prefShowDiptych && diptychState == 1) {
+            if (diptychOverlay != null) diptychOverlay.setThumbOnLeft(false);
             return true;
         }
         
