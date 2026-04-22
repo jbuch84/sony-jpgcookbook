@@ -483,8 +483,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                         // 2. Use C++ to safely downscale the massive 24MP images to 6MP proxies 
                         // We use the known-good GRADED directory to guarantee write permissions.
                         File safeDir = Filepaths.getGradedDir();
-                        File proxyL = new File(safeDir, ".proxyL.jpg");
-                        File proxyR = new File(safeDir, ".proxyR.jpg");
+                        File proxyL = new File(safeDir, "PROXY_L.JPG");
+                        File proxyR = new File(safeDir, "PROXY_R.JPG");
 
                         // Pre-flight checks to provide clear errors if something is locked
                         if (!new File(pathLeftHalf).exists()) throw new Exception("Missing L input: " + pathLeftHalf);
