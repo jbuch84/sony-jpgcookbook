@@ -520,8 +520,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                         runOnUiThread(new Runnable() {
                             @Override
                             public void run() {
+                                // Pass '2' (Full Res) as the qualityIndex. The Java stitcher 
+                                // already safely shrunk the image to 6MP to survive the RAM limits.
+                                // This prevents the C++ engine from shrinking it a second time!
                                 mProcessor.processJpeg(rightPath, outDir.getAbsolutePath(), 
-                                                       recipeManager.getQualityIndex(), prefJpegQuality,   
+                                                       2, prefJpegQuality,   
                                                        recipeManager.getCurrentProfile(), prefShowCinemaMattes);
                             }
                         });
