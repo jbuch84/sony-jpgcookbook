@@ -376,7 +376,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                         handleDiptychCapture(path);
                     } else {
                         File outDir = Filepaths.getGradedDir();
-                        mProcessor.processJpeg(path, outDir.getAbsolutePath(), recipeManager.getQualityIndex(), prefJpegQuality, recipeManager.getCurrentProfile(), prefShowCinemaMattes);
+                        mProcessor.processJpeg(path, outDir.getAbsolutePath(), recipeManager.getQualityIndex(), prefJpegQuality, recipeManager.getCurrentProfile(), prefShowCinemaMattes, false);
                     }
                 } else if (retries[0] < 30) {
                     lastSize[0] = currentSize;
@@ -520,12 +520,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                         runOnUiThread(new Runnable() {
                             @Override
                             public void run() {
-                                // Pass '2' (Full Res) as the qualityIndex. The Java stitcher 
-                                // already safely shrunk the image to 6MP to survive the RAM limits.
-                                // This prevents the C++ engine from shrinking it a second time!
                                 mProcessor.processJpeg(rightPath, outDir.getAbsolutePath(), 
                                                        2, prefJpegQuality,   
-                                                       recipeManager.getCurrentProfile(), prefShowCinemaMattes);
+                                                       recipeManager.getCurrentProfile(), prefShowCinemaMattes, true);
                             }
                         });
                                                

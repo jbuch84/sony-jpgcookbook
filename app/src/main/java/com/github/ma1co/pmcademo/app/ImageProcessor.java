@@ -30,8 +30,8 @@ public class ImageProcessor {
         new PreloadLutTask().execute(lutPath, lutName);
     }
 
-    public void processJpeg(String originalPath, String outDirPath, int qualityIndex, int jpegQuality, RTLProfile p, boolean applyCrop) {
-        new ProcessTask(qualityIndex, jpegQuality, p, outDirPath, applyCrop).execute(originalPath);
+    public void processJpeg(String originalPath, String outDirPath, int qualityIndex, int jpegQuality, RTLProfile p, boolean applyCrop, boolean isDiptych) {
+        new ProcessTask(qualityIndex, jpegQuality, p, outDirPath, applyCrop, isDiptych).execute(originalPath);
     }
 
     private class PreloadLutTask extends AsyncTask<String, Void, Boolean> {
@@ -48,13 +48,15 @@ public class ImageProcessor {
         private RTLProfile p;
         private String outDir;
         private boolean applyCrop; // <-- NEW
+        private boolean isDiptych;
 
-        public ProcessTask(int q, int jpegQuality, RTLProfile p, String out, boolean crop) {
+        public ProcessTask(int q, int jpegQuality, RTLProfile p, String out, boolean crop, boolean isDiptych) {
             this.qualityIdx  = q;
             this.jpegQuality = jpegQuality;
             this.p           = p;
             this.outDir      = out;
             this.applyCrop   = crop; // <-- NEW
+            this.isDiptych   = isDiptych;
         }
 
         @Override protected void onPreExecute() { mCallback.onProcessStarted(); }
@@ -97,12 +99,28 @@ public class ImageProcessor {
                     File texFile = MenuController.grainTextureFiles.get(p.grainSize);
                     mEngine.loadGrainTexture(texFile); // Load into C++ Global RAM
                 }
+                
+                // --- DIPTYCH COMPENSATOR ---
+                // Safely steps down physical effects to account for the smaller 6MP canvas
+                int finalGrainSize = p.grainSize;
+                int finalBloom = p.bloom;
+                
+                if (isDiptych) {
+                    finalGrainSize = Math.max(0, p.grainSize - 1);
+                    
+                    int[] bloomMap = {0, 5, 6, 1, 2, 3, 4};
+                    int currentBloomIdx = 0;
+                    for (int i = 0; i < bloomMap.length; i++) {
+                        if (bloomMap[i] == p.bloom) currentBloomIdx = i;
+                    }
+                    finalBloom = bloomMap[Math.max(0, currentBloomIdx - 1)];
+                }
 
                 if (mEngine.applyLutToJpeg(
                     original.getAbsolutePath(), outFile.getAbsolutePath(),
-                    scale, p.opacity, p.grain, p.grainSize, p.vignette, p.rollOff,
+                    scale, p.opacity, p.grain, finalGrainSize, p.vignette, p.rollOff,
                     p.colorChrome, p.chromeBlue, p.shadowToe, p.subtractiveSat,
-                    p.halation, p.bloom, 
+                    p.halation, finalBloom, 
                     finalJpegQuality, 
                     applyCrop)) {  // <--- ADDED HERE
                 return "SAVED";
