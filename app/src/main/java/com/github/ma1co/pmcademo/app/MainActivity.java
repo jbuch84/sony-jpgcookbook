@@ -458,6 +458,20 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         // mDialMode = DIAL_MODE_RTL; <-- DELETED. Cursor memory is now permanent!
         
         if (displayState == 0 && !menuController.isOpen()) setHUDVisibility(View.GONE);
+        // Diptych mode: shift AF bracket to the active (open) side before focusing
+        if (afOverlay != null && diptychManager != null && diptychManager.isEnabled()) {
+            int dipW = afOverlay.getWidth();
+            if (diptychManager.getState() == 1) {
+                // Shot 2: active side is opposite to the shot-1 thumbnail
+                boolean tLeft = diptychManager.isThumbOnLeft();
+                afOverlay.setDiptychCenterX(tLeft ? dipW * 3 / 4 : dipW / 4);
+            } else {
+                // Shot 1 (state 0): active half is the left
+                afOverlay.setDiptychCenterX(dipW / 4);
+            }
+        } else if (afOverlay != null) {
+            afOverlay.setDiptychCenterX(-1);
+        }
         if (cameraManager != null && cameraManager.getCamera() != null && !cachedIsManualFocus) {
             if (afOverlay != null) afOverlay.startFocus(cameraManager.getCamera()); 
         }
