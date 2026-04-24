@@ -52,7 +52,7 @@ public class DiptychManager {
         if (overlayView != null) overlayView.setState(STATE_NEED_FIRST);
         if (activity != null) {
             activity.updateDiptychPreviewWindow();
-            activity.updateDiptychFocusArea();
+            activity.updateDiptychFocusArea(false); // Reset hardware to center
         }
     }
 
@@ -62,7 +62,7 @@ public class DiptychManager {
         if (overlayView != null) overlayView.setThumbOnLeft(left);
         if (activity != null) {
             activity.updateDiptychPreviewWindow();
-            activity.updateDiptychFocusArea();
+            activity.updateDiptychFocusArea(false); // Ensure idle is always center
         }
     }
 

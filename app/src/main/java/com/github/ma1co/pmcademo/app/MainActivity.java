@@ -502,7 +502,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         // --- NEW: FORCED HARDWARE SYNC ---
         // Ensure the Sony AF sensor target is moved BEFORE the AF trigger fires
         if (diptychManager != null && diptychManager.isEnabled()) {
-            updateDiptychFocusArea();
+            updateDiptychFocusArea(true);
         }
 
         // Diptych mode: shift AF bracket to the active (open) side before focusing
@@ -1913,21 +1913,45 @@ public void onEnterPressed() {
     @Override public void    setPrefJpegQuality(int v)      { prefJpegQuality      = v; }
     @Override public void    setPrefDiptych(boolean v)      { 
         if (diptychManager != null) diptychManager.setEnabled(v);
-        updateDiptychFocusArea();
+        updateDiptychFocusArea(false); // Clean reset
         updateMainHUD(); 
     }
 
-    public void updateDiptychFocusArea() {
+    public void updateDiptychFocusArea(boolean shift) {
         if (cameraManager == null || cameraManager.getCamera() == null) return;
         try {
             Camera c = cameraManager.getCamera();
             Camera.Parameters p = c.getParameters();
             
-            // Standard Android AF coordinates are -1000 to +1000
-            // Center is (0,0). Width=2000.
-            if (diptychManager != null && diptychManager.isEnabled()) {
+            // Momentary Shift: Only shift if 'shift' is true AND Diptych is enabled.
+            if (shift && diptychManager != null && diptychManager.isEnabled()) {
                 if (p.getMaxNumFocusAreas() > 0) {
                     java.util.List<Camera.Area> areas = new java.util.ArrayList<Camera.Area>();
+                    boolean targetRight = diptychManager.isThumbOnLeft();
+                    int centerX = targetRight ? 500 : -500;
+                    
+                    Rect rect = new Rect(centerX - 150, -200, centerX + 150, 200);
+                    areas.add(new Camera.Area(rect, 1000));
+                    p.setFocusAreas(areas);
+                    
+                    if (p.get("sony-focus-area") != null) {
+                        p.set("sony-focus-area", "flexible-spot");
+                        int sonyX = (centerX + 1000) / 20;
+                        int sonyY = 50; 
+                        p.set("sony-focus-area-rect", sonyX + "," + sonyY + ",15,20");
+                        p.set("sony-focus-area-point", sonyX + "," + sonyY);
+                    }
+                }
+            } else {
+                // Restore center/wide focus immediately
+                if (p.getMaxNumFocusAreas() > 0) p.setFocusAreas(null);
+                if (p.get("sony-focus-area") != null) p.set("sony-focus-area", "wide");
+            }
+            c.setParameters(p);
+        } catch (Exception e) {
+            android.util.Log.e("JPEG.CAM", "Hardware focus sync failed: " + e.getMessage());
+        }
+    }
                     
                     // We want to focus on the center of the active diptych half.
                     // If thumb is on Left, active area is RIGHT half.
@@ -1944,7 +1968,6 @@ public void onEnterPressed() {
                     if (p.get("sony-focus-area") != null) {
                         p.set("sony-focus-area", "flexible-spot");
                         // Format: x,y,w,h where x,y is center in 0-100 scale
-                        // centerX -500 -> 25, 500 -> 75
                         int sonyX = (centerX + 1000) / 20;
                         int sonyY = 50; // Middle vertically
                         p.set("sony-focus-area-rect", sonyX + "," + sonyY + ",15,20");
@@ -1952,7 +1975,7 @@ public void onEnterPressed() {
                     }
                 }
             } else {
-                // Restore center/wide focus
+                // Restore center/wide focus immediately
                 if (p.getMaxNumFocusAreas() > 0) p.setFocusAreas(null);
                 if (p.get("sony-focus-area") != null) p.set("sony-focus-area", "wide");
             }
