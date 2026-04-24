@@ -349,34 +349,37 @@ inline void process_row_rgb(
     for (int x = 0; x < width; x++) {
         int i = x * 3;
         int r = row[i], g = row[i+1], b = row[i+2];
+        int outR = r, outG = g, outB = b;
 
         // --- LUT CALCS ---
-        int fX = map[r], fY = map[g], fZ = map[b];
-        int x0 = fX >> 7, y0 = fY >> 7, z0 = fZ >> 7;
-        int x1 = (x0 < lutMax) ? x0 + 1 : lutMax;
-        int y1 = (y0 < lutMax) ? y0 + 1 : lutMax;
-        int z1 = (z0 < lutMax) ? z0 + 1 : lutMax;
-        int dx = fX & 0x7F, dy_l = fY & 0x7F, dz = fZ & 0x7F;
-        int v1, v2, w0, w1, w2, w3;
+        if (nativeLutSize > 0 && opac_mapped > 0) {
+            int fX = map[r], fY = map[g], fZ = map[b];
+            int x0 = fX >> 7, y0 = fY >> 7, z0 = fZ >> 7;
+            int x1 = (x0 < lutMax) ? x0 + 1 : lutMax;
+            int y1 = (y0 < lutMax) ? y0 + 1 : lutMax;
+            int z1 = (z0 < lutMax) ? z0 + 1 : lutMax;
+            int dx = fX & 0x7F, dy_l = fY & 0x7F, dz = fZ & 0x7F;
+            int v1, v2, w0, w1, w2, w3;
 
-        if (dx >= dy_l) {
-            if (dy_l >= dz) { v1=x1+y0*nativeLutSize+z0*lutSize2; v2=x1+y1*nativeLutSize+z0*lutSize2; w0=128-dx; w1=dx-dy_l; w2=dy_l-dz; w3=dz; }
-            else if (dx >= dz) { v1=x1+y0*nativeLutSize+z0*lutSize2; v2=x1+y0*nativeLutSize+z1*lutSize2; w0=128-dx; w1=dx-dz; w2=dz-dy_l; w3=dy_l; }
-            else { v1=x0+y0*nativeLutSize+z1*lutSize2; v2=x1+y0*nativeLutSize+z1*lutSize2; w0=128-dz; w1=dz-dx; w2=dx-dy_l; w3=dy_l; }
-        } else {
-            if (dz >= dy_l) { v1=x0+y0*nativeLutSize+z1*lutSize2; v2=x0+y1*nativeLutSize+z1*lutSize2; w0=128-dz; w1=dz-dy_l; w2=dy_l-dx; w3=dx; }
-            else if (dz >= dx) { v1=x0+y1*nativeLutSize+z0*lutSize2; v2=x0+y1*nativeLutSize+z1*lutSize2; w0=128-dy_l; w1=dy_l-dz; w2=dz-dx; w3=dx; }
-            else { v1=x0+y1*nativeLutSize+z0*lutSize2; v2=x1+y1*nativeLutSize+z0*lutSize2; w0=128-dy_l; w1=dy_l-dx; w2=dx-dz; w3=dz; }
+            if (dx >= dy_l) {
+                if (dy_l >= dz) { v1=x1+y0*nativeLutSize+z0*lutSize2; v2=x1+y1*nativeLutSize+z0*lutSize2; w0=128-dx; w1=dx-dy_l; w2=dy_l-dz; w3=dz; }
+                else if (dx >= dz) { v1=x1+y0*nativeLutSize+z0*lutSize2; v2=x1+y0*nativeLutSize+z1*lutSize2; w0=128-dx; w1=dx-dz; w2=dz-dy_l; w3=dy_l; }
+                else { v1=x0+y0*nativeLutSize+z1*lutSize2; v2=x1+y0*nativeLutSize+z1*lutSize2; w0=128-dz; w1=dz-dx; w2=dx-dy_l; w3=dy_l; }
+            } else {
+                if (dz >= dy_l) { v1=x0+y0*nativeLutSize+z1*lutSize2; v2=x0+y1*nativeLutSize+z1*lutSize2; w0=128-dz; w1=dz-dy_l; w2=dy_l-dx; w3=dx; }
+                else if (dz >= dx) { v1=x0+y1*nativeLutSize+z0*lutSize2; v2=x0+y1*nativeLutSize+z1*lutSize2; w0=128-dy_l; w1=dy_l-dz; w2=dz-dx; w3=dx; }
+                else { v1=x0+y1*nativeLutSize+z0*lutSize2; v2=x1+y1*nativeLutSize+z0*lutSize2; w0=128-dy_l; w1=dy_l-dx; w2=dx-dz; w3=dz; }
+            }
+
+            const uint8_t* p = &nativeLut[(x0 + y0*nativeLutSize + z0*lutSize2)*3];
+            const uint8_t* p1_v = &nativeLut[v1*3];
+            const uint8_t* p2_v = &nativeLut[v2*3];
+            const uint8_t* p3_v = &nativeLut[(x1 + y1*nativeLutSize + z1*lutSize2)*3];
+
+            outR = r + ((((p[0]*w0 + p1_v[0]*w1 + p2_v[0]*w2 + p3_v[0]*w3) >> 7) - r) * opac_mapped >> 8);
+            outG = g + ((((p[1]*w0 + p1_v[1]*w1 + p2_v[1]*w2 + p3_v[1]*w3) >> 7) - g) * opac_mapped >> 8);
+            outB = b + ((((p[2]*w0 + p1_v[2]*w1 + p2_v[2]*w2 + p3_v[2]*w3) >> 7) - b) * opac_mapped >> 8);
         }
-
-        const uint8_t* p = &nativeLut[(x0 + y0*nativeLutSize + z0*lutSize2)*3];
-        const uint8_t* p1_v = &nativeLut[v1*3];
-        const uint8_t* p2_v = &nativeLut[v2*3];
-        const uint8_t* p3_v = &nativeLut[(x1 + y1*nativeLutSize + z1*lutSize2)*3];
-
-        int outR = r + ((((p[0]*w0 + p1_v[0]*w1 + p2_v[0]*w2 + p3_v[0]*w3) >> 7) - r) * opac_mapped >> 8);
-        int outG = g + ((((p[1]*w0 + p1_v[1]*w1 + p2_v[1]*w2 + p3_v[1]*w3) >> 7) - g) * opac_mapped >> 8);
-        int outB = b + ((((p[2]*w0 + p1_v[2]*w1 + p2_v[2]*w2 + p3_v[2]*w3) >> 7) - b) * opac_mapped >> 8);
 
         int currentY = (outR*77 + outG*150 + outB*29) >> 8;
         int targetY = currentY;

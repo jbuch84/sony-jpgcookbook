@@ -43,7 +43,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
             stbi_image_free(id);
         }
     } else if (ex==".cube"||ex==".cub") {
-        FILE *f = fopen(fp, "r"); if(f){ char l[256]; while(fgets(l, 256, f)){ if(strncmp(l,"LUT_3D_SIZE",11)==0){ sscanf(l,"LUT_3D_SIZE %d",&nativeLutSize); nativeLut.resize(nativeLutSize*nativeLutSize*nativeLutSize*3); continue; } float r,g,b; if(nativeLutSize>0 && sscanf(l,"%f %f %f",&r,&g,&b)==3){ static size_t c=0; if(c+2<nativeLut.size()){ nativeLut[c++]=(uint8_t)(r*255); nativeLut[c++]=(uint8_t)(g*255); nativeLut[c++]=(uint8_t)(b*255); } } } fclose(f); }
+        FILE *f = fopen(fp, "r"); if(f){ char l[256]; size_t c=0; while(fgets(l, 256, f)){ if(strncmp(l,"LUT_3D_SIZE",11)==0){ sscanf(l,"LUT_3D_SIZE %d",&nativeLutSize); nativeLut.resize(nativeLutSize*nativeLutSize*nativeLutSize*3); continue; } float r,g,b; if(nativeLutSize>0 && sscanf(l,"%f %f %f",&r,&g,&b)==3){ if(c+2<nativeLut.size()){ nativeLut[c++]=(uint8_t)(r*255); nativeLut[c++]=(uint8_t)(g*255); nativeLut[c++]=(uint8_t)(b*255); } } } fclose(f); }
     }
     env->ReleaseStringUTFChars(path, fp); return nativeLutSize>0 ? JNI_TRUE : JNI_FALSE;
 }
@@ -142,7 +142,6 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
     if(cd.output_height>0){ rpx[0]=r[10]; jpeg_read_scanlines(&cd,rpx,1); for(int i=0; i<10; i++) memcpy(r[i],r[10],rs); }
     for(int i=11; i<BUF; i++){ if(cd.output_scanline < cd.output_height){ rpx[0]=r[i]; jpeg_read_scanlines(&cd,rpx,1); } else memcpy(r[i],r[i-1],rs); }
 
-    bool use_rgb = (nativeLutSize > 0 && opacity > 0);
     int opac_m = (opacity * 256) / 100;
     long long cx = cd.output_width / 2;
     long long cy_center = cd.output_height / 2;
@@ -163,21 +162,15 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
                 memcpy(orw[i], win[10], cd.output_width * 3);
                 
                 if (bloom > 0 || halation > 0) {
-                    apply_bloom_halation(win, orw[i], cd.output_width, ay, !use_rgb, bloom, halation,
+                    apply_bloom_halation(win, orw[i], cd.output_width, ay, false, bloom, halation,
                         work_0, work_1, work_2, work_h, h_line, scaleDenom);
                 }
                 
-                if (use_rgb) {
-                    process_row_rgb(orw[i], cd.output_width, ay, cx, cy_center, vig_coef,
-                        shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, halation, vignette,
-                        grain, grainSize, scaleDenom, opac_m, map, nativeLut.data(),
-                        nativeLutSize, nativeLutSize - 1, nativeLutSize * nativeLutSize,
-                        inv_y, tex, is1k, tx_base, ty_base);
-                } else {
-                    process_row_yuv(orw[i], cd.output_width, ay, cx, cy_center, vig_coef,
-                        shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, halation, vignette,
-                        grain, grainSize, scaleDenom, roll, inv_y, tex, is1k, tx_base, ty_base);
-                }
+                process_row_rgb(orw[i], cd.output_width, ay, cx, cy_center, vig_coef,
+                    shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, halation, vignette,
+                    grain, grainSize, scaleDenom, opac_m, map, nativeLut.data(),
+                    nativeLutSize, nativeLutSize - 1, nativeLutSize * nativeLutSize,
+                    inv_y, tex, is1k, tx_base, ty_base);
             }
         }
         for(int i=0; i<rtp; i++){ int ay=pr+i; if(!applyCrop||(ay>=sk && ay<sk+fh)){ rpx[0]=orw[i]; jpeg_write_scanlines(&cc,rpx,1); } }
