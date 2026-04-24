@@ -218,6 +218,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_Diptych
     
     jpeg_create_decompress(&c1); jpeg_stdio_src(&c1, f1); jpeg_read_header(&c1, TRUE);
     jpeg_create_decompress(&c2); jpeg_stdio_src(&c2, f2); jpeg_read_header(&c2, TRUE);
+    LOGD("Diptych headers read: %dx%d and %dx%d", c1.image_width, c1.image_height, c2.image_width, c2.image_height);
     
     c1.scale_denom = (c1.image_width > 3000) ? 2 : 1;
     c2.scale_denom = (c2.image_width > 3000) ? 2 : 1;
@@ -257,7 +258,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_Diptych
     unsigned char *row2 = (unsigned char*)malloc(w2 * 3);
     unsigned char *combined = (unsigned char*)malloc(finalW * 3);
     if (!row1 || !row2 || !combined) {
-        LOGD("Diptych malloc failed");
+        LOGD("Diptych malloc failed: r1=%p r2=%p c=%p", row1, row2, combined);
         if (row1) free(row1);
         if (row2) free(row2);
         if (combined) free(combined);
@@ -268,6 +269,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_Diptych
         env->ReleaseStringUTFChars(path1, p1); env->ReleaseStringUTFChars(path2, p2); env->ReleaseStringUTFChars(outPath, po);
         return JNI_FALSE;
     }
+    LOGD("Diptych buffers allocated. Starting loop.");
     JSAMPROW rp1[1], rp2[1], rpo[1]; rp1[0] = row1; rp2[0] = row2; rpo[0] = combined;
     
     for (int y = 0; y < finalH; y++) {
@@ -289,8 +291,10 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_Diptych
             }
         }
         jpeg_write_scanlines(&co, rpo, 1);
+        if (y % 500 == 0) LOGD("Diptych progress: %d/%d", y, finalH);
     }
     
+    LOGD("Diptych loop finished. Cleaning up.");
     free(row1); free(row2); free(combined);
     jpeg_finish_compress(&co); jpeg_destroy_compress(&co);
     
@@ -298,7 +302,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_Diptych
     jpeg_destroy_decompress(&c1);
     jpeg_destroy_decompress(&c2);
     
-    LOGD("Diptych saved: %s", po);
+    LOGD("Diptych SUCCESS: %s", po);
     fclose(f1); fclose(f2); fclose(fo);
     env->ReleaseStringUTFChars(path1, p1); env->ReleaseStringUTFChars(path2, p2); env->ReleaseStringUTFChars(outPath, po);
     return JNI_TRUE;

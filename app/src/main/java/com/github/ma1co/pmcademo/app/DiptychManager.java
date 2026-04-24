@@ -172,15 +172,29 @@ public class DiptychManager {
     private void performDiptychStitch(String leftPath, String rightPath, boolean firstShotLeft) {
         try {
             System.gc();
-            File finalOut = new File(Filepaths.getGradedDir(), "DIPTYCH_" + new File(rightPath).getName());
+            File fL = new File(leftPath);
+            File fR = new File(rightPath);
+            File finalOut = new File(Filepaths.getGradedDir(), "DIPTYCH_" + fR.getName());
 
-            Log.d("JPEG.CAM", "Diptych stitch start: left=" + leftPath + " right=" + rightPath + " out=" + finalOut.getAbsolutePath());
+            Log.d("JPEG.CAM", "DIPTYCH STITCH ATTEMPT:");
+            Log.d("JPEG.CAM", "  - Left Path (" + fL.exists() + "): " + leftPath + " size: " + fL.length());
+            Log.d("JPEG.CAM", "  - Right Path (" + fR.exists() + "): " + rightPath + " size: " + fR.length());
+            Log.d("JPEG.CAM", "  - Output Path: " + finalOut.getAbsolutePath());
+
+            if (!fL.exists() || !fR.exists()) {
+                Log.e("JPEG.CAM", "STITCH ABORTED: Source files missing!");
+                throw new Exception("Source files missing");
+            }
+
             final boolean success = stitchDiptychNative(leftPath, rightPath, finalOut.getAbsolutePath(), firstShotLeft, activity.getPrefJpegQuality());
-            Log.d("JPEG.CAM", "Diptych stitch result: " + success);
+            Log.d("JPEG.CAM", "Diptych native result: " + success);
 
-            if (success) {
-                new File(leftPath).delete();
-                new File(rightPath).delete();
+            if (success && finalOut.exists()) {
+                Log.d("JPEG.CAM", "Stitch SUCCESS. Final size: " + finalOut.length());
+                fL.delete();
+                fR.delete();
+            } else {
+                Log.e("JPEG.CAM", "Stitch FAILED or output file not created!");
             }
 
             activity.runOnUiThread(new Runnable() {
