@@ -114,8 +114,12 @@ public class DiptychOverlayView extends View {
             if (thumbnail != null && !thumbnail.isRecycled()) {
                 int tW = thumbnail.getWidth();
                 int tH = thumbnail.getHeight();
+                
+                // --- ALIGNED SLICE LOGIC ---
+                // Match C++: Take the exact center 50% of the width.
+                int sliceWidth = tW / 2;
                 int srcLeft = tW / 4;
-                int srcRight = srcLeft + (tW / 2);
+                int srcRight = srcLeft + sliceWidth;
 
                 Rect srcRect = new Rect(srcLeft, 0, srcRight, tH);
                 Rect dstRect = thumbOnLeft ? new Rect(0, 0, mid, h) : new Rect(mid, 0, w, h);

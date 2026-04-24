@@ -278,12 +278,14 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_Diptych
     }
     jpeg_create_compress(&co); jpeg_stdio_dest(&co, fo);
     
-    int w1 = c1.output_width, h1 = c1.output_height;
-    int w2 = c2.output_width, h2 = c2.output_height;
+    // Calculate framing: We take the center-half of each image.
+    // If w1=3000, half=1500. We want to take from 750 to 2250.
     int half1 = w1 / 2, half2 = w2 / 2;
-    int q1 = w1 / 4, q2 = w2 / 4;
+    int start1 = w1 / 4, start2 = w2 / 4;
     int finalW = half1 + half2, finalH = std::min(h1, h2);
     
+    LOGD("Diptych framing: img1_start=%d len=%d | img2_start=%d len=%d", start1, half1, start2, half2);
+
     co.image_width = finalW; co.image_height = finalH; co.input_components = 3; co.in_color_space = JCS_RGB;
     jpeg_set_defaults(&co); jpeg_set_quality(&co, quality, TRUE); jpeg_start_compress(&co, TRUE);
     
@@ -307,24 +309,28 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_Diptych
     
     for (int y = 0; y < finalH; y++) {
         jpeg_read_scanlines(&c1, rp1, 1); jpeg_read_scanlines(&c2, rp2, 1);
+        
+        // Surgical Slice: Extract exact center 50%
         if (firstShotLeft) {
-            memcpy(combined, row1 + q1 * 3, half1 * 3);
-            memcpy(combined + half1 * 3, row2 + q2 * 3, half2 * 3);
+            memcpy(combined, row1 + start1 * 3, half1 * 3);
+            memcpy(combined + half1 * 3, row2 + start2 * 3, half2 * 3);
         } else {
-            memcpy(combined, row2 + q2 * 3, half2 * 3);
-            memcpy(combined + half2 * 3, row1 + q1 * 3, half1 * 3);
+            memcpy(combined, row2 + start2 * 3, half2 * 3);
+            memcpy(combined + half2 * 3, row1 + start1 * 3, half1 * 3);
         }
-        // Draw Divider
+        
+        // Draw the black divider line (3 pixels wide for a clean look)
         int dividerX = firstShotLeft ? half1 : half2;
         for(int d=-1; d<=1; d++) {
             int dx = dividerX + d;
             if (dx >= 0 && dx < finalW) {
                 int di = dx * 3;
-                combined[di]=combined[di+1]=combined[di+2]=0;
+                combined[di] = combined[di+1] = combined[di+2] = 0;
             }
         }
+        
         jpeg_write_scanlines(&co, rpo, 1);
-        if (y % 500 == 0) LOGD("Diptych progress: %d/%d", y, finalH);
+        if (y % 1000 == 0) LOGD("Diptych progress: %d/%d", y, finalH);
     }
     
     LOGD("Diptych loop finished. Cleaning up.");
