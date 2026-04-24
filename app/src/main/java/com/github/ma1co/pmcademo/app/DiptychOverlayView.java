@@ -104,7 +104,7 @@ public class DiptychOverlayView extends View {
 
             canvas.drawLine(mid - crossLen, cy, mid + crossLen, cy, framePaint);
             canvas.drawLine(mid, cy - crossLen, mid, cy + crossLen, framePaint);
-        } else if (state == DiptychManager.STATE_NEED_SECOND || state == DiptychManager.STATE_STITCHING) {
+        } else if (state == DiptychManager.STATE_NEED_SECOND || state == DiptychManager.STATE_STITCHING || state == DiptychManager.STATE_PROCESSING_FIRST) {
             if (thumbOnLeft) {
                 canvas.drawRect(0, 0, mid, h, darkPaint);
             } else {

@@ -158,8 +158,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(width, -1);
         int offset = 0;
-        if (!isProcessing && diptychManager != null && diptychManager.isEnabled()
-                && diptychManager.getState() == DiptychManager.STATE_NEED_SECOND) {
+        // REMOVED: !isProcessing guard. We want the preview to stay shifted while the 2nd photo is being developed.
+        if (diptychManager != null && diptychManager.isEnabled()
+                && (diptychManager.getState() == DiptychManager.STATE_NEED_SECOND || diptychManager.getState() == DiptychManager.STATE_STITCHING)) {
             offset = diptychManager.isThumbOnLeft() ? width / 4 : -(width / 4);
         }
         params.leftMargin = offset;
@@ -353,8 +354,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             @Override public void onPreloadFinished(boolean success) { isReady = true; runOnUiThread(new Runnable() { public void run() { updateMainHUD(); } }); }
             @Override public void onProcessStarted() { runOnUiThread(new Runnable() { public void run() { if (tvTopStatus != null) { tvTopStatus.setText("PROCESSING..."); tvTopStatus.setTextColor(Color.YELLOW); } } }); }
         @Override public void onProcessFinished(String res) { 
+            boolean success = (res != null && res.equals("SAVED"));
             if (diptychManager != null && diptychManager.isEnabled()) {
-                if (res != null && !res.toUpperCase().contains("ERROR")) {
+                if (success) {
                     if (diptychManager.getState() == DiptychManager.STATE_PROCESSING_FIRST) {
                         final String gradedLeft = new File(Filepaths.getGradedDir(), diptychManager.getLeftFilename()).getAbsolutePath();
                         diptychManager.processFirstShot(gradedLeft);
@@ -366,6 +368,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                         return;
                     }
                 } else {
+                    // Any failure in Diptych mode must reset the whole chain to avoid getting stuck in a shifted/half-baked UI
                     diptychManager.reset();
                 }
             }
@@ -430,7 +433,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     // --- DIPTYCH INTERCEPT ---
                     if (diptychManager != null && diptychManager.interceptNewFile(f.getName(), path)) {
                         File outDir = Filepaths.getGradedDir();
-                        mProcessor.processJpeg(path, outDir.getAbsolutePath(), recipeManager.getQualityIndex(), prefJpegQuality, recipeManager.getCurrentProfile(), false, true);
+                        // Cap at HIGH (6MP) for Diptych to ensure native stability on legacy hardware
+                        int diptychQuality = Math.min(1, recipeManager.getQualityIndex()); 
+                        mProcessor.processJpeg(path, outDir.getAbsolutePath(), diptychQuality, prefJpegQuality, recipeManager.getCurrentProfile(), false, true);
                     } else {
                         File outDir = Filepaths.getGradedDir();
                         mProcessor.processJpeg(path, outDir.getAbsolutePath(), recipeManager.getQualityIndex(), prefJpegQuality, recipeManager.getCurrentProfile(), prefShowCinemaMattes, false);

@@ -72,13 +72,37 @@ public class DiptychManager {
             leftFilename = filename;
             rightFilename = null;
             state = STATE_PROCESSING_FIRST;
+            
+            // --- INSTANT PREVIEW ---
+            // Decode the original photo immediately so the user sees something while processing
+            final Bitmap thumb = getDiptychThumbnail(originalPath);
+            activity.runOnUiThread(new Runnable() {
+                public void run() {
+                    if (overlayView != null) {
+                        overlayView.setThumbnail(thumb);
+                        overlayView.setState(STATE_PROCESSING_FIRST);
+                    }
+                }
+            });
+
             if (activity != null) activity.updateDiptychPreviewWindow();
             return true;
         } else if (state == STATE_NEED_SECOND) {
             rightFilename = filename;
             state = STATE_STITCHING;
-            if (overlayView != null) overlayView.setState(STATE_STITCHING);
-            if (activity != null) activity.updateDiptychPreviewWindow();
+            
+            // --- RAM OPTIMIZATION ---
+            // Clear the reference thumbnail immediately. This frees up memory 
+            // for the upcoming grading of the 2nd shot AND the final stitch.
+            activity.runOnUiThread(new Runnable() {
+                public void run() {
+                    if (overlayView != null) {
+                        overlayView.clearThumbnail();
+                        overlayView.setState(STATE_STITCHING);
+                    }
+                    if (activity != null) activity.updateDiptychPreviewWindow();
+                }
+            });
             return true;
         }
         return false;
@@ -86,6 +110,7 @@ public class DiptychManager {
 
     public void processFirstShot(final String gradedPath) {
         state = STATE_NEED_SECOND;
+        // Optionally update the thumbnail with the graded version (higher quality/correct colors)
         final Bitmap thumb = getDiptychThumbnail(gradedPath);
         activity.runOnUiThread(new Runnable() {
             public void run() {
@@ -107,6 +132,7 @@ public class DiptychManager {
     public void processSecondShot(final String gradedLeftPath, final String gradedRightPath) {
         activity.runOnUiThread(new Runnable() {
             public void run() {
+                state = STATE_STITCHING; // Re-enforce
                 if (overlayView != null) {
                     // Immediately purge the thumbnail to give the C++ stitcher max breathing room
                     overlayView.clearThumbnail(); 
@@ -123,8 +149,8 @@ public class DiptychManager {
         new Thread(new Runnable() {
             public void run() {
                 try {
-                    // Guarantee the UI thread has time to execute the thumbnail purge before C++ asks for RAM
-                    Thread.sleep(150); 
+                    // Increased wait time: Ensure OS file system handles and UI thread cleanup are fully settled
+                    Thread.sleep(500); 
                 } catch (Exception ignored) {}
                 
                 performDiptychStitch(gradedLeftPath, gradedRightPath, firstShotLeft);
