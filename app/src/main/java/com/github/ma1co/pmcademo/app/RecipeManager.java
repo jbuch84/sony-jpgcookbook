@@ -160,7 +160,7 @@ public class RecipeManager {
             p.halation        = json.optInt("halation", 0);
             p.vignette        = json.optInt("vignette", 0);
             p.grain           = json.optInt("grain", 0);
-
+            
             String loadedGrainName = json.optString("grainName", "NONE");
             List<String> grainOptions = java.util.Arrays.asList(MenuController.getGrainEngineOptions());
 
@@ -389,4 +389,7 @@ public class RecipeManager {
 
         RTLProfile p = loadedProfiles[currentSlot];
         p.profileName = newPrettyName;
-        saveProf
+        saveProfileToFile(new File(recipeDir, targetFile), p);
+        scanVault();
+    }
+}

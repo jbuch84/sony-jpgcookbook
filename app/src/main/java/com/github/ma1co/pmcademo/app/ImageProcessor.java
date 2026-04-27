@@ -59,7 +59,7 @@ public class ImageProcessor {
         private int jpegQuality;
         private RTLProfile p;
         private String outDir;
-        private boolean applyCrop;
+        private boolean applyCrop; // <-- NEW
         private boolean isDiptych;
         private String lutPath;
         private String lutName;
@@ -72,7 +72,7 @@ public class ImageProcessor {
             this.jpegQuality = jpegQuality;
             this.p           = p;
             this.outDir      = out;
-            this.applyCrop   = crop;
+            this.applyCrop   = crop; // <-- NEW
             this.isDiptych   = isDiptych;
             this.lutPath     = lutPath;
             this.lutName     = lutName;
@@ -120,10 +120,10 @@ public class ImageProcessor {
                 // Safely steps down physical effects to account for the smaller 6MP canvas
                 int finalGrainSize = p.grainSize;
                 int finalBloom = p.bloom;
-
+                
                 if (isDiptych) {
                     finalGrainSize = Math.max(0, p.grainSize - 1);
-
+                    
                     int[] bloomMap = {0, 5, 6, 1, 2, 3, 4};
                     int currentBloomIdx = 0;
                     for (int i = 0; i < bloomMap.length; i++) {
@@ -141,8 +141,6 @@ public class ImageProcessor {
                 }
 
                 // Use the CPU Engine toggle from Settings (page 6) to decide thread count.
-                // SINGLE-CORE = 1 worker (safer on older BIONZ hardware, avoids thread scheduling overhead).
-                // MULTI-CORE  = all available processors (faster on cameras that handle it well).
                 RecipeManager rm = ((MainActivity) mContext).getRecipeManager();
                 int numCores = rm.isMultiCoreEnabled() ? Runtime.getRuntime().availableProcessors() : 1;
                 Log.d("JPEG.CAM", "Processing with " + numCores + " core(s). MultiCore=" + rm.isMultiCoreEnabled());
@@ -151,7 +149,17 @@ public class ImageProcessor {
                     original.getAbsolutePath(), outFile.getAbsolutePath(),
                     scale, p.opacity, p.grain, finalGrainSize, p.vignette, p.rollOff,
                     p.colorChrome, p.chromeBlue, p.shadowToe, p.subtractiveSat,
-                    p.halation, finalBloom,
+                    p.halation, finalBloom, 
                     cxxGrainEngine,
-                    finalJpegQuality,
-                    apply
+                    finalJpegQuality, 
+                    applyCrop, numCores);  // <--- ADDED numCores HERE
+                if (success) {
+                    return "SAVED";
+                }
+            } catch (Exception e) { Log.e("COOKBOOK", "Java error: " + e.getMessage()); }
+            return "FAILED";
+        }
+
+        @Override protected void onPostExecute(String result) { mCallback.onProcessFinished(result); }
+    }
+}

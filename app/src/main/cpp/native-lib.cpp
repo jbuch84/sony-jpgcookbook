@@ -343,8 +343,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
 #include <errno.h>
 #include <unistd.h>
 
-// Helper to open files with retries for handling OS file-system locks.
-// Sony's media scanner can hold a file briefly after a shot is written.
+// Helper to open files with retries for OS file-system locks (e.g. Sony media scanner).
 FILE* fopen_retry(const char* path, const char* mode) {
     for (int i = 0; i < 5; i++) {
         FILE* f = fopen(path, mode);
@@ -363,7 +362,6 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_Diptych
     const char *p1 = env->GetStringUTFChars(path1, NULL);
     const char *p2 = env->GetStringUTFChars(path2, NULL);
     const char *po = env->GetStringUTFChars(outPath, NULL);
-
     FILE *f1 = fopen_retry(p1, "rb");
     if (!f1) {
         LOGD("Diptych open failed (p1): %s, error: %s", p1, strerror(errno));
@@ -462,4 +460,33 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_Diptych
     for (int y = 0; y < finalH; y++) {
         jpeg_read_scanlines(&c1, rp1, 1); jpeg_read_scanlines(&c2, rp2, 1);
         if (firstShotLeft) {
-            memcpy(combined, row1 + q1 * 3, half1 
+            memcpy(combined, row1 + q1 * 3, half1 * 3);
+            memcpy(combined + half1 * 3, row2 + q2 * 3, half2 * 3);
+        } else {
+            memcpy(combined, row2 + q2 * 3, half2 * 3);
+            memcpy(combined + half2 * 3, row1 + q1 * 3, half1 * 3);
+        }
+        // Draw Divider
+        int dividerX = firstShotLeft ? half1 : half2;
+        for(int d=-1; d<=1; d++) {
+            int dx = dividerX + d;
+            if (dx >= 0 && dx < finalW) {
+                int di = dx * 3;
+                combined[di]=combined[di+1]=combined[di+2]=0;
+            }
+        }
+        jpeg_write_scanlines(&co, rpo, 1);
+    }
+    
+    free(row1); free(row2); free(combined);
+    jpeg_finish_compress(&co); jpeg_destroy_compress(&co);
+    
+    // Abort decompression immediately without finishing to avoid unread scanline errors
+    jpeg_destroy_decompress(&c1);
+    jpeg_destroy_decompress(&c2);
+    
+    LOGD("Diptych saved: %s", po);
+    fclose(f1); fclose(f2); fclose(fo);
+    env->ReleaseStringUTFChars(path1, p1); env->ReleaseStringUTFChars(path2, p2); env->ReleaseStringUTFChars(outPath, po);
+    return JNI_TRUE;
+}

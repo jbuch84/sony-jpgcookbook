@@ -1738,4 +1738,9 @@ public class MenuController {
     }
 
     private int tabAccent(int tab) {
-        if (tab == 1) retu
+        if (tab == 1) return UiTheme.ACCENT_SETTINGS;
+        if (tab == 2) return UiTheme.ACCENT_NETWORK;
+        if (tab == 3) return UiTheme.ACCENT_SUPPORT;
+        return UiTheme.ACCENT_RECIPES;
+    }
+}
