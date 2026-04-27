@@ -94,7 +94,27 @@ public class MultiExposeManager {
 
         // Start async task to blend
         final String[] paths = capturedFiles.toArray(new String[0]);
-        final String blendedPath = new File(new File(paths[0]).getParent(), "M_EXP_B.JPG").getAbsolutePath();
+        
+        File fOriginal = new File(paths[0]);
+        String originalName = fOriginal.getName();
+        String blendedName = "M_EXP_B.JPG";
+        try {
+            String namePart = originalName;
+            int dotIdx = originalName.lastIndexOf(".");
+            if (dotIdx != -1) namePart = originalName.substring(0, dotIdx);
+            if (namePart.length() > 5) {
+                blendedName = "EXP" + namePart.substring(namePart.length() - 5) + ".JPG";
+            } else {
+                blendedName = "EXP" + namePart + ".JPG";
+            }
+            if (blendedName.length() > 12) {
+                blendedName = blendedName.substring(0, 8) + ".JPG";
+            }
+        } catch (Exception e) {}
+
+        File tempDir = new File(Filepaths.getAppDir(), "TEMP");
+        if (!tempDir.exists()) tempDir.mkdirs();
+        final String blendedPath = new File(tempDir, blendedName).getAbsolutePath();
         
         new Thread(new Runnable() {
             @Override
