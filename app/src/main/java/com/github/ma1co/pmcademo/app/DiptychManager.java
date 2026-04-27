@@ -235,4 +235,32 @@ public class DiptychManager {
                 fR.delete();
             } else {
                 Log.e("JPEG.CAM", "Stitch FAILED or output file not created!");
-         
+            }
+
+            activity.runOnUiThread(new Runnable() {
+                public void run() {
+                    activity.setProcessing(false);
+                    reset();
+                    if (tvTopStatus != null) {
+                        tvTopStatus.setText(success ? "DIPTYCH SAVED" : "DIPTYCH FAILED");
+                        tvTopStatus.setTextColor(success ? Color.WHITE : Color.RED);
+                    }
+                    activity.updateMainHUD();
+                }
+            });
+        } catch (Throwable e) {
+            Log.e("JPEG.CAM", "Diptych stitch exception", e);
+            activity.runOnUiThread(new Runnable() {
+                public void run() {
+                    activity.setProcessing(false);
+                    reset();
+                    if (tvTopStatus != null) {
+                        tvTopStatus.setText("DIPTYCH FAILED");
+                        tvTopStatus.setTextColor(Color.RED);
+                    }
+                    activity.updateMainHUD();
+                }
+            });
+        }
+    }
+}
