@@ -74,16 +74,37 @@ public class DiptychManager {
             state = STATE_PROCESSING_FIRST;
 
             // --- INSTANT PREVIEW ---
-            // Decode the original photo immediately so the user sees something while processing
-            final Bitmap thumb = getDiptychThumbnail(originalPath);
-            activity.runOnUiThread(new Runnable() {
+            // The Sony media scanner fires before the JPEG is fully flushed to disk,
+            // so we poll for file stability (same pattern as ImageProcessor) before
+            // decoding the thumbnail. A state guard prevents a stale thumb from
+            // appearing if processing finishes before the poll does.
+            new Thread(new Runnable() {
                 public void run() {
-                    if (overlayView != null) {
-                        overlayView.setThumbnail(thumb);
-                        overlayView.setState(STATE_PROCESSING_FIRST);
-                    }
+                    try {
+                        File f = new File(originalPath);
+                        long lastSize = -1;
+                        int timeout = 0;
+                        while (timeout < 40) {
+                            long sz = f.length();
+                            if (sz > 0 && sz == lastSize) break;
+                            lastSize = sz;
+                            Thread.sleep(100);
+                            timeout++;
+                        }
+                    } catch (Exception ignored) {}
+
+                    if (state != STATE_PROCESSING_FIRST) return;
+                    final Bitmap thumb = getDiptychThumbnail(originalPath);
+                    activity.runOnUiThread(new Runnable() {
+                        public void run() {
+                            if (overlayView != null && state == STATE_PROCESSING_FIRST) {
+                                overlayView.setThumbnail(thumb);
+                                overlayView.setState(STATE_PROCESSING_FIRST);
+                            }
+                        }
+                    });
                 }
-            });
+            }).start();
 
             if (activity != null) activity.updateDiptychPreviewWindow();
             return true;
@@ -214,32 +235,4 @@ public class DiptychManager {
                 fR.delete();
             } else {
                 Log.e("JPEG.CAM", "Stitch FAILED or output file not created!");
-            }
-
-            activity.runOnUiThread(new Runnable() {
-                public void run() {
-                    activity.setProcessing(false);
-                    reset();
-                    if (tvTopStatus != null) {
-                        tvTopStatus.setText(success ? "DIPTYCH SAVED" : "DIPTYCH FAILED");
-                        tvTopStatus.setTextColor(success ? Color.WHITE : Color.RED);
-                    }
-                    activity.updateMainHUD();
-                }
-            });
-        } catch (Throwable e) {
-            Log.e("JPEG.CAM", "Diptych stitch exception", e);
-            activity.runOnUiThread(new Runnable() {
-                public void run() {
-                    activity.setProcessing(false);
-                    reset();
-                    if (tvTopStatus != null) {
-                        tvTopStatus.setText("DIPTYCH FAILED");
-                        tvTopStatus.setTextColor(Color.RED);
-                    }
-                    activity.updateMainHUD();
-                }
-            });
-        }
-    }
-}
+         
