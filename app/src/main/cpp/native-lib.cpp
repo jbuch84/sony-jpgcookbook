@@ -464,7 +464,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_Diptych
             memcpy(combined + half1 * 3, row2 + half2 * 3, half2 * 3);
         } else {
             memcpy(combined, row2, half2 * 3);
-            memcpy(combined + half2 * 3, row1 + half1 * 3, half1 * 3);
+            memcpy(combined + half2 * 3, row1, half1 * 3);
         }
         // Draw Divider
         int dividerX = firstShotLeft ? half1 : half2;

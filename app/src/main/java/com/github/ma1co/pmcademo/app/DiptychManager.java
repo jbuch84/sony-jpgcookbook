@@ -69,7 +69,7 @@ public class DiptychManager {
     public boolean interceptNewFile(String filename, final String originalPath) {
         if (!isEnabled) return false;
         if (state == STATE_NEED_FIRST) {
-            leftFilename = filename;
+            leftFilename = originalPath;
             rightFilename = null;
             state = STATE_PROCESSING_FIRST;
 
@@ -110,7 +110,7 @@ public class DiptychManager {
             if (activity != null) activity.updateDiptychPreviewWindow();
             return true;
         } else if (state == STATE_NEED_SECOND) {
-            rightFilename = filename;
+            rightFilename = originalPath;
             state = STATE_STITCHING;
 
             // --- RAM OPTIMIZATION ---
@@ -150,7 +150,7 @@ public class DiptychManager {
         });
     }
 
-    public void processSecondShot(final String gradedLeftPath, final String gradedRightPath) {
+    public void processSecondShot(final String leftPath, final String rightPath, final ProcessingQueueManager.Entry entry, final long scannerStartedMs, final long detectedMs, final long stableMs, final int scannerAttempts) {
         activity.runOnUiThread(new Runnable() {
             public void run() {
                 state = STATE_STITCHING; // Re-enforce
@@ -169,11 +169,10 @@ public class DiptychManager {
         new Thread(new Runnable() {
             public void run() {
                 try {
-                    // Increased wait: give the Media Scanner more room to finish indexing
                     Thread.sleep(1000);
                 } catch (Exception ignored) {}
 
-                performDiptychStitch(gradedLeftPath, gradedRightPath, firstShotLeft);
+                performDiptychStitch(leftPath, rightPath, firstShotLeft, entry, scannerStartedMs, detectedMs, stableMs, scannerAttempts);
             }
         }).start();
     }
@@ -200,17 +199,14 @@ public class DiptychManager {
         }
     }
 
-    private void performDiptychStitch(String leftPath, String rightPath, boolean firstShotLeft) {
+    private void performDiptychStitch(String leftPath, String rightPath, boolean firstShotLeft, final ProcessingQueueManager.Entry entry, final long scannerStartedMs, final long detectedMs, final long stableMs, final int scannerAttempts) {
         try {
             System.gc();
             File fL = new File(leftPath);
             File fR = new File(rightPath);
 
-            // --- 8.3 FILENAME COMPLIANCE ---
-            // Sony cameras enforce a strict 8-character filename limit for DCIM.
-            // Example: DSC07127.JPG -> DIP07127.JPG
             String originalName = fR.getName();
-            String diptychName = "DIPTYCH.JPG"; // Failsafe
+            String diptychName = "DIPTYCH.JPG";
             try {
                 String namePart = originalName;
                 int dotIdx = originalName.lastIndexOf(".");
@@ -223,55 +219,38 @@ public class DiptychManager {
                 if (diptychName.length() > 12) {
                     diptychName = diptychName.substring(0, 8) + ".JPG";
                 }
-            } catch (Exception e) {
-                Log.e("JPEG.CAM", "Filename generation error: " + e.getMessage());
-            }
+            } catch (Exception e) {}
 
-            File finalOut = new File(Filepaths.getGradedDir(), diptychName);
-
-            Log.d("JPEG.CAM", "DIPTYCH STITCH ATTEMPT:");
-            Log.d("JPEG.CAM", "  - Left  (" + fL.exists() + "): " + leftPath);
-            Log.d("JPEG.CAM", "  - Right (" + fR.exists() + "): " + rightPath);
-            Log.d("JPEG.CAM", "  - Output: " + diptychName);
+            File tempDir = new File(Filepaths.getAppDir(), "TEMP");
+            if (!tempDir.exists()) tempDir.mkdirs();
+            final File tempOut = new File(tempDir, diptychName);
 
             if (!fL.exists() || !fR.exists()) {
-                Log.e("JPEG.CAM", "STITCH ABORTED: Source files missing!");
                 throw new Exception("Source files missing");
             }
 
-            final boolean success = stitchDiptychNative(leftPath, rightPath, finalOut.getAbsolutePath(), firstShotLeft, activity.getPrefJpegQuality());
-            Log.d("JPEG.CAM", "Diptych native result: " + success);
+            final boolean success = stitchDiptychNative(leftPath, rightPath, tempOut.getAbsolutePath(), firstShotLeft, activity.getPrefJpegQuality());
 
-            if (success && finalOut.exists()) {
-                Log.d("JPEG.CAM", "Stitch SUCCESS. Final size: " + finalOut.length());
-                fL.delete();
-                fR.delete();
+            if (success && tempOut.exists()) {
+                activity.runOnUiThread(new Runnable() {
+                    public void run() {
+                        activity.handleStitchedDiptych(tempOut.getAbsolutePath(), entry, scannerStartedMs, detectedMs, stableMs, scannerAttempts);
+                        reset();
+                    }
+                });
             } else {
-                Log.e("JPEG.CAM", "Stitch FAILED or output file not created!");
+                throw new Exception("Stitch FAILED");
             }
 
+        } catch (final Exception e) {
             activity.runOnUiThread(new Runnable() {
                 public void run() {
-                    activity.setProcessing(false);
-                    reset();
                     if (tvTopStatus != null) {
-                        tvTopStatus.setText(success ? "DIPTYCH SAVED" : "DIPTYCH FAILED");
-                        tvTopStatus.setTextColor(success ? Color.WHITE : Color.RED);
-                    }
-                    activity.updateMainHUD();
-                }
-            });
-        } catch (Throwable e) {
-            Log.e("JPEG.CAM", "Diptych stitch exception", e);
-            activity.runOnUiThread(new Runnable() {
-                public void run() {
-                    activity.setProcessing(false);
-                    reset();
-                    if (tvTopStatus != null) {
-                        tvTopStatus.setText("DIPTYCH FAILED");
+                        tvTopStatus.setText("STITCH ERROR. RESETTING.");
                         tvTopStatus.setTextColor(Color.RED);
                     }
-                    activity.updateMainHUD();
+                    try { Thread.sleep(2000); } catch (Exception ignored) {}
+                    reset();
                 }
             });
         }

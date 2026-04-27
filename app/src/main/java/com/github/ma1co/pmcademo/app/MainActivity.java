@@ -423,22 +423,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 handleQueuedProcessFinished(res);
                 return;
             }
-            if (diptychManager != null && diptychManager.isEnabled()) {
-                if (res != null && !res.toUpperCase().contains("ERROR")) {
-                    if (diptychManager.getState() == DiptychManager.STATE_PROCESSING_FIRST) {
-                        final String gradedLeft = new File(Filepaths.getGradedDir(), diptychManager.getLeftFilename()).getAbsolutePath();
-                        diptychManager.processFirstShot(gradedLeft);
-                        return;
-                    } else if (diptychManager.getState() == DiptychManager.STATE_STITCHING) {
-                        final String gradedLeft = new File(Filepaths.getGradedDir(), diptychManager.getLeftFilename()).getAbsolutePath();
-                        final String gradedRight = new File(Filepaths.getGradedDir(), diptychManager.getRightFilename()).getAbsolutePath();
-                        diptychManager.processSecondShot(gradedLeft, gradedRight);
-                        return;
-                    }
-                } else {
-                    diptychManager.reset();
-                }
-            }
             isProcessing = false;
             runOnUiThread(new Runnable() { public void run() { if (tvTopStatus != null) { tvTopStatus.setTextColor(UiTheme.TEXT); } updateMainHUD(); } });
         }
@@ -737,10 +721,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                                       long scannerStartedMs, long detectedMs, long stableMs, int scannerAttempts) {
         // --- DIPTYCH INTERCEPT ---
         if (diptychManager != null && diptychManager.interceptNewFile(f.getName(), path)) {
-            File outDir = Filepaths.getGradedDir();
-            mProcessor.processJpeg(path, outDir.getAbsolutePath(), entry.qualityIndex, entry.jpegQuality, entry.profile, false, true,
-                    entry.lutPath, entry.lutName,
-                    scannerStartedMs, detectedMs, stableMs, scannerAttempts);
+            if (diptychManager.getState() == DiptychManager.STATE_PROCESSING_FIRST) {
+                diptychManager.processFirstShot(path);
+            } else if (diptychManager.getState() == DiptychManager.STATE_STITCHING) {
+                diptychManager.processSecondShot(diptychManager.getLeftFilename(), path, entry, scannerStartedMs, detectedMs, stableMs, scannerAttempts);
+            }
+            return;
         } else if (shouldQueuePhotos()) {
             if (processingQueueManager != null) {
                 processingQueueManager.add(entry);
@@ -751,6 +737,25 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         } else {
             File outDir = Filepaths.getGradedDir();
             mProcessor.processJpeg(path, outDir.getAbsolutePath(), entry.qualityIndex, entry.jpegQuality, entry.profile, entry.applyCrop, false,
+                    entry.lutPath, entry.lutName,
+                    scannerStartedMs, detectedMs, stableMs, scannerAttempts);
+        }
+    }
+
+    public void handleStitchedDiptych(String tempPath, ProcessingQueueManager.Entry entry, long scannerStartedMs, long detectedMs, long stableMs, int scannerAttempts) {
+        entry.originalPath = tempPath;
+        entry.isDiptych = true;
+
+        if (shouldQueuePhotos()) {
+            if (processingQueueManager != null) {
+                processingQueueManager.add(entry);
+            }
+            isProcessing = false;
+            updateMainHUD();
+            maybeAutoProcessQueuedPhotos();
+        } else {
+            File outDir = Filepaths.getGradedDir();
+            mProcessor.processJpeg(tempPath, outDir.getAbsolutePath(), entry.qualityIndex, entry.jpegQuality, entry.profile, false, true,
                     entry.lutPath, entry.lutName,
                     scannerStartedMs, detectedMs, stableMs, scannerAttempts);
         }
@@ -831,16 +836,42 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (displayState == 0 && !menuController.isOpen()) setLiveUiSuppressed(true);
         // Diptych mode: shift AF bracket to the active (open) side before focusing
         if (afOverlay != null && diptychManager != null && diptychManager.isEnabled()) {
-            if (diptychManager.getState() == DiptychManager.STATE_NEED_SECOND) {
-                int width = afOverlay.getWidth();
-                if (width <= 0) width = getPreviewWindowWidth();
-                int offset = diptychManager.isThumbOnLeft() ? width / 4 : -(width / 4);
-                afOverlay.setDiptychCenterX((width / 2) + offset);
+            boolean isFirst = diptychManager.getState() == DiptychManager.STATE_NEED_FIRST;
+            boolean isSecond = diptychManager.getState() == DiptychManager.STATE_NEED_SECOND;
+            int centerX = 0;
+            if (isFirst) {
+                centerX = -500;
+            } else if (isSecond) {
+                centerX = diptychManager.isThumbOnLeft() ? 500 : -500;
+            }
+
+            int width = afOverlay.getWidth();
+            if (width <= 0) width = getPreviewWindowWidth();
+            
+            if (isFirst || isSecond) {
+                afOverlay.setDiptychCenterX((width / 2) + ((centerX * width) / 2000));
             } else {
                 afOverlay.setDiptychCenterX(-1);
             }
-        } else if (afOverlay != null) {
-            afOverlay.setDiptychCenterX(-1);
+
+            if (cameraManager != null && cameraManager.getCamera() != null) {
+                try {
+                    android.hardware.Camera.Parameters p = cameraManager.getCamera().getParameters();
+                    if (p.getMaxNumFocusAreas() > 0) {
+                        if (isFirst || isSecond) {
+                            java.util.List<android.hardware.Camera.Area> areas = new java.util.ArrayList<android.hardware.Camera.Area>();
+                            int rectSize = 150;
+                            areas.add(new android.hardware.Camera.Area(new android.graphics.Rect(centerX - rectSize, -rectSize, centerX + rectSize, rectSize), 1000));
+                            p.setFocusAreas(areas);
+                        } else {
+                            p.setFocusAreas(null);
+                        }
+                        cameraManager.getCamera().setParameters(p);
+                    }
+                } catch (Exception ignored) {}
+            }
+        } else {
+            if (afOverlay != null) afOverlay.setDiptychCenterX(-1);
         }
         if (cameraManager != null && cameraManager.getCamera() != null && !cachedIsManualFocus) {
             if (afOverlay != null) afOverlay.startFocus(cameraManager.getCamera());
@@ -2408,7 +2439,18 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     @Override public void    setPrefJpegQuality(int v)      { prefJpegQuality      = v; }
     @Override public void    setProcessingFrequency(int v)   { processingFrequency = normalizeProcessingFrequency(v); saveAppPreferences(); updateMainHUD(); }
     @Override public void    setPrefDiptych(boolean v)      {
-        if (diptychManager != null) diptychManager.setEnabled(v);
+        if (diptychManager != null) {
+            diptychManager.setEnabled(v);
+            if (!v && cameraManager != null && cameraManager.getCamera() != null) {
+                try {
+                    android.hardware.Camera.Parameters p = cameraManager.getCamera().getParameters();
+                    if (p.getMaxNumFocusAreas() > 0) {
+                        p.setFocusAreas(null);
+                        cameraManager.getCamera().setParameters(p);
+                    }
+                } catch (Exception ignored) {}
+            }
+        }
         updateMainHUD();
     }
     @Override public void forceProcessQueuedPhotos() {
