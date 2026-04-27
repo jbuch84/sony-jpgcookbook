@@ -94,7 +94,8 @@ public class DiptychManager {
                     } catch (Exception ignored) {}
 
                     if (state != STATE_PROCESSING_FIRST) return;
-                    final Bitmap thumb = getDiptychThumbnail(originalPath);
+                    final boolean thumbOnLeft = isThumbOnLeft();
+                    final Bitmap thumb = getDiptychThumbnail(originalPath, thumbOnLeft);
                     activity.runOnUiThread(new Runnable() {
                         public void run() {
                             if (overlayView != null && state == STATE_PROCESSING_FIRST) {
@@ -130,7 +131,8 @@ public class DiptychManager {
 
     public void processFirstShot(final String gradedPath) {
         state = STATE_NEED_SECOND;
-        final Bitmap thumb = getDiptychThumbnail(gradedPath);
+        final boolean thumbOnLeft = isThumbOnLeft();
+        final Bitmap thumb = getDiptychThumbnail(gradedPath, thumbOnLeft);
         activity.runOnUiThread(new Runnable() {
             public void run() {
                 if (overlayView != null) {
@@ -176,12 +178,23 @@ public class DiptychManager {
         }).start();
     }
 
-    private Bitmap getDiptychThumbnail(String path) {
+    private Bitmap getDiptychThumbnail(String path, boolean leftHalf) {
         try {
+            android.graphics.BitmapRegionDecoder decoder = android.graphics.BitmapRegionDecoder.newInstance(path, false);
+            int width = decoder.getWidth();
+            int height = decoder.getHeight();
+            android.graphics.Rect rect;
+            if (leftHalf) {
+                rect = new android.graphics.Rect(0, 0, width / 2, height);
+            } else {
+                rect = new android.graphics.Rect(width / 2, 0, width, height);
+            }
             BitmapFactory.Options opts = new BitmapFactory.Options();
             opts.inSampleSize = 16;
             opts.inPreferredConfig = Bitmap.Config.RGB_565;
-            return BitmapFactory.decodeFile(path, opts);
+            Bitmap bm = decoder.decodeRegion(rect, opts);
+            decoder.recycle();
+            return bm;
         } catch (Throwable t) {
             return null;
         }

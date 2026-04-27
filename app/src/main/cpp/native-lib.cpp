@@ -460,11 +460,11 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_Diptych
     for (int y = 0; y < finalH; y++) {
         jpeg_read_scanlines(&c1, rp1, 1); jpeg_read_scanlines(&c2, rp2, 1);
         if (firstShotLeft) {
-            memcpy(combined, row1 + q1 * 3, half1 * 3);
-            memcpy(combined + half1 * 3, row2 + q2 * 3, half2 * 3);
+            memcpy(combined, row1, half1 * 3);
+            memcpy(combined + half1 * 3, row2 + half2 * 3, half2 * 3);
         } else {
-            memcpy(combined, row2 + q2 * 3, half2 * 3);
-            memcpy(combined + half2 * 3, row1 + q1 * 3, half1 * 3);
+            memcpy(combined, row2, half2 * 3);
+            memcpy(combined + half2 * 3, row1 + half1 * 3, half1 * 3);
         }
         // Draw Divider
         int dividerX = firstShotLeft ? half1 : half2;

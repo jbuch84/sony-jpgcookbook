@@ -82,25 +82,8 @@ public class DiptychOverlayView extends View {
         int mid = w / 2;
 
         if (state == DiptychManager.STATE_NEED_FIRST) {
-            int quarter = w / 4;
-            int mg = Math.max(8, w / 32);
-            int bl = h / 10;
             int cy = h / 2;
             int crossLen = 14;
-
-            darkPaint.setAlpha(220);
-            canvas.drawRect(0, 0, quarter, h, darkPaint);
-            canvas.drawRect(w - quarter, 0, w, h, darkPaint);
-            darkPaint.setAlpha(180);
-
-            canvas.drawLine(quarter + mg, mg, quarter + mg + bl, mg, framePaint);
-            canvas.drawLine(quarter + mg, mg, quarter + mg, mg + bl, framePaint);
-            canvas.drawLine(w - quarter - mg, mg, w - quarter - mg - bl, mg, framePaint);
-            canvas.drawLine(w - quarter - mg, mg, w - quarter - mg, mg + bl, framePaint);
-            canvas.drawLine(quarter + mg, h - mg, quarter + mg + bl, h - mg, framePaint);
-            canvas.drawLine(quarter + mg, h - mg, quarter + mg, h - mg - bl, framePaint);
-            canvas.drawLine(w - quarter - mg, h - mg, w - quarter - mg - bl, h - mg, framePaint);
-            canvas.drawLine(w - quarter - mg, h - mg, w - quarter - mg, h - mg - bl, framePaint);
 
             canvas.drawLine(mid - crossLen, cy, mid + crossLen, cy, framePaint);
             canvas.drawLine(mid, cy - crossLen, mid, cy + crossLen, framePaint);
@@ -114,10 +97,8 @@ public class DiptychOverlayView extends View {
             if (thumbnail != null && !thumbnail.isRecycled()) {
                 int tW = thumbnail.getWidth();
                 int tH = thumbnail.getHeight();
-                int srcLeft = tW / 4;
-                int srcRight = srcLeft + (tW / 2);
 
-                Rect srcRect = new Rect(srcLeft, 0, srcRight, tH);
+                Rect srcRect = new Rect(0, 0, tW, tH);
                 Rect dstRect = thumbOnLeft ? new Rect(0, 0, mid, h) : new Rect(mid, 0, w, h);
                 canvas.drawBitmap(thumbnail, srcRect, dstRect, thumbPaint);
             }
@@ -129,8 +110,6 @@ public class DiptychOverlayView extends View {
             }
         }
 
-        if (state != DiptychManager.STATE_NEED_FIRST) {
-            canvas.drawLine(mid, 0, mid, h, linePaint);
-        }
+        canvas.drawLine(mid, 0, mid, h, linePaint);
     }
 }
