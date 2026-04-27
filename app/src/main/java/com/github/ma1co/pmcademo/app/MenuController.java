@@ -926,6 +926,7 @@ public class MenuController {
             }
             else if (sel == 3) host.setPrefGridLines(!host.isPrefGridLines());
             else if (sel == 4) host.setPrefJpegQuality(Math.max(60, Math.min(100, host.getPrefJpegQuality() + dir * 5)));
+            else if (sel == 5) rm.setMultiCoreEnabled(!rm.isMultiCoreEnabled());
         } else if (currentPage == 7) {
             if      (sel == 0) rm.setPrefC1(clampCustomButtonAction(rm.getPrefC1() + dir));
             else if (sel == 1) rm.setPrefC2(clampCustomButtonAction(rm.getPrefC2() + dir));
@@ -1097,7 +1098,7 @@ public class MenuController {
             }
         }
         if (currentPage == 6) {
-            ic = 5;
+            ic = 6;
             String[] qLbls = {"1/4 RES","HALF RES","FULL RES"};
 
             String creativeMode = "OFF";
@@ -1109,6 +1110,7 @@ public class MenuController {
             setRow(2, "Creative Modes",        creativeMode);
             setRow(3, "Rule of Thirds Grid",   host.isPrefGridLines()    ? "ON" : "OFF");
             setRow(4, "SW JPEG Quality",       String.valueOf(host.getPrefJpegQuality()));
+            setRow(5, "CPU Engine",            rm.isMultiCoreEnabled() ? "MULTI-CORE" : "SINGLE-CORE");
         } else if (currentPage == 7) {
             ic = 5;
             setRow(0, "Custom 1 (C1)", customButtonLabel(rm.getPrefC1()));
@@ -1736,9 +1738,4 @@ public class MenuController {
     }
 
     private int tabAccent(int tab) {
-        if (tab == 1) return UiTheme.ACCENT_SETTINGS;
-        if (tab == 2) return UiTheme.ACCENT_NETWORK;
-        if (tab == 3) return UiTheme.ACCENT_SUPPORT;
-        return UiTheme.ACCENT_RECIPES;
-    }
-}
+        if (tab == 1) retu

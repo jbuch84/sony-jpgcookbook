@@ -18,6 +18,7 @@ public class RecipeManager {
     private int currentSlot = 0;
 
     private int qualityIndex = 1;
+    private int multiCoreEnabled = 0; // 0 = SINGLE-CORE, 1 = MULTI-CORE
     private int prefC1 = 0;
     private int prefC2 = 0;
     private int prefC3 = 0;
@@ -46,6 +47,12 @@ public class RecipeManager {
     public int getQualityIndex() { return qualityIndex; }
     public void setQualityIndex(int index) {
         this.qualityIndex = (index + 3) % 3;
+        savePreferences();
+    }
+
+    public boolean isMultiCoreEnabled() { return multiCoreEnabled == 1; }
+    public void setMultiCoreEnabled(boolean enabled) {
+        this.multiCoreEnabled = enabled ? 1 : 0;
         savePreferences();
     }
 
@@ -153,7 +160,7 @@ public class RecipeManager {
             p.halation        = json.optInt("halation", 0);
             p.vignette        = json.optInt("vignette", 0);
             p.grain           = json.optInt("grain", 0);
-            
+
             String loadedGrainName = json.optString("grainName", "NONE");
             List<String> grainOptions = java.util.Arrays.asList(MenuController.getGrainEngineOptions());
 
@@ -268,6 +275,7 @@ public class RecipeManager {
                 while ((line = br.readLine()) != null) {
                     if (line.startsWith("quality=")) qualityIndex = Integer.parseInt(line.split("=")[1]);
                     else if (line.startsWith("slot=")) currentSlot = Integer.parseInt(line.split("=")[1]);
+                    else if (line.startsWith("multicore=")) multiCoreEnabled = Integer.parseInt(line.split("=")[1]);
                     else if (line.startsWith("c1=")) prefC1 = Integer.parseInt(line.split("=")[1]);
                     else if (line.startsWith("c2=")) prefC2 = Integer.parseInt(line.split("=")[1]);
                     else if (line.startsWith("c3=")) prefC3 = Integer.parseInt(line.split("=")[1]);
@@ -284,6 +292,7 @@ public class RecipeManager {
             File prefsFile = new File(recipeDir, "PREFS.TXT");
             FileOutputStream fos = new FileOutputStream(prefsFile);
             String prefsData = "quality=" + qualityIndex + "\nslot=" + currentSlot + "\n" +
+                               "multicore=" + multiCoreEnabled + "\n" +
                                "c1=" + prefC1 + "\nc2=" + prefC2 + "\nc3=" + prefC3 + "\n" +
                                "ael=" + prefAel + "\nfn=" + prefFn + "\n";
             fos.write(prefsData.getBytes());
@@ -380,7 +389,4 @@ public class RecipeManager {
 
         RTLProfile p = loadedProfiles[currentSlot];
         p.profileName = newPrettyName;
-        saveProfileToFile(new File(recipeDir, targetFile), p);
-        scanVault();
-    }
-}
+        saveProf
