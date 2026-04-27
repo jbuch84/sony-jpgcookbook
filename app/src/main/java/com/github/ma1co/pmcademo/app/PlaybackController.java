@@ -415,6 +415,11 @@ public class PlaybackController {
             opts.inJustDecodeBounds = true;
             BitmapFactory.decodeFile(path, opts);
 
+            if (opts.outWidth <= 0 || opts.outHeight <= 0) {
+                infoText.setText((idx + 1) + " / " + files.size() + "\n[CORRUPT HEADER ERROR]");
+                return;
+            }
+
             final int reqWidth = 800, reqHeight = 600;
             int inSampleSize = 1;
             if (opts.outHeight > reqHeight || opts.outWidth > reqWidth) {
@@ -425,11 +430,21 @@ public class PlaybackController {
             }
             opts.inJustDecodeBounds = false;
             opts.inSampleSize       = inSampleSize;
-            opts.inPreferredConfig  = Bitmap.Config.ARGB_8888;
-            opts.inDither           = false;
-            opts.inPreferQualityOverSpeed = true;
+            opts.inPreferredConfig  = Bitmap.Config.RGB_565; // Halves memory footprint
+            opts.inDither           = true;
+            opts.inPreferQualityOverSpeed = false;
+            opts.inPurgeable        = true;  // Crucial for Android 2.3 large bitmaps
+            opts.inInputShareable   = true;
 
-            Bitmap raw = BitmapFactory.decodeFile(path, opts);
+            Bitmap raw = null;
+            try {
+                raw = BitmapFactory.decodeFile(path, opts);
+            } catch (OutOfMemoryError e) {
+                // Fallback to even smaller size if memory is still tight
+                opts.inSampleSize *= 2;
+                System.gc();
+                raw = BitmapFactory.decodeFile(path, opts);
+            }
             if (raw == null) {
                 infoText.setText((idx + 1) + " / " + files.size() + "\n[DECODE ERROR]");
                 return;
@@ -482,6 +497,8 @@ public class PlaybackController {
             opts.inSampleSize = Math.max(1, sample);
             opts.inPreferredConfig = Bitmap.Config.RGB_565;
             opts.inDither = true;
+            opts.inPurgeable = true;
+            opts.inInputShareable = true;
             Bitmap raw = BitmapFactory.decodeFile(file.getAbsolutePath(), opts);
             if (raw == null) return null;
             Bitmap transformed = transformForDisplay(raw, exif, false);
