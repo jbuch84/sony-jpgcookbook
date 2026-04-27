@@ -555,3 +555,155 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_Diptych
     env->ReleaseStringUTFChars(path1, p1); env->ReleaseStringUTFChars(path2, p2); env->ReleaseStringUTFChars(outPath, po);
     return JNI_TRUE;
 }
+
+extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_MultiExposeManager_blendJpegsNative(
+    JNIEnv* env, jobject obj, jobjectArray inputPaths, jstring outputPath, jint blendMode) {
+    
+    int count = env->GetArrayLength(inputPaths);
+    if (count < 2 || count > 9) return JNI_FALSE;
+    
+    struct jpeg_decompress_struct cds[9];
+    struct my_error_mgr jerrs[9];
+    FILE* infs[9];
+    
+    for (int i = 0; i < count; i++) {
+        memset(&cds[i], 0, sizeof(cds[i]));
+        jstring pathObj = (jstring)env->GetObjectArrayElement(inputPaths, i);
+        const char* pathStr = env->GetStringUTFChars(pathObj, NULL);
+        infs[i] = fopen(pathStr, "rb");
+        env->ReleaseStringUTFChars(pathObj, pathStr);
+        if (!infs[i]) {
+            for (int j = 0; j < i; j++) {
+                jpeg_destroy_decompress(&cds[j]);
+                fclose(infs[j]);
+            }
+            return JNI_FALSE;
+        }
+        cds[i].err = jpeg_std_error(&jerrs[i].pub);
+        jerrs[i].pub.error_exit = my_error_exit;
+        if(setjmp(jerrs[i].setjmp_buffer)) {
+            for (int j = 0; j <= i; j++) {
+                jpeg_destroy_decompress(&cds[j]);
+                fclose(infs[j]);
+            }
+            return JNI_FALSE;
+        }
+        
+        jpeg_create_decompress(&cds[i]);
+        jpeg_stdio_src(&cds[i], infs[i]);
+        jpeg_read_header(&cds[i], TRUE);
+        cds[i].out_color_space = JCS_RGB;
+        jpeg_start_decompress(&cds[i]);
+    }
+    
+    int w = cds[0].output_width;
+    int h = cds[0].output_height;
+    int rs = w * 3;
+    
+    const char* outf_str = env->GetStringUTFChars(outputPath, NULL);
+    FILE* outf = fopen(outf_str, "wb");
+    env->ReleaseStringUTFChars(outputPath, outf_str);
+    if (!outf) {
+        for (int j = 0; j < count; j++) {
+            jpeg_destroy_decompress(&cds[j]);
+            fclose(infs[j]);
+        }
+        return JNI_FALSE;
+    }
+    
+    struct jpeg_compress_struct cc;
+    struct my_error_mgr jcerr;
+    memset(&cc, 0, sizeof(cc));
+    cc.err = jpeg_std_error(&jcerr.pub);
+    jcerr.pub.error_exit = my_error_exit;
+    if(setjmp(jcerr.setjmp_buffer)) {
+        jpeg_destroy_compress(&cc);
+        for (int j = 0; j < count; j++) {
+            jpeg_destroy_decompress(&cds[j]);
+            fclose(infs[j]);
+        }
+        fclose(outf);
+        return JNI_FALSE;
+    }
+    
+    jpeg_create_compress(&cc);
+    jpeg_stdio_dest(&cc, outf);
+    
+    cc.image_width = w;
+    cc.image_height = h;
+    cc.input_components = 3;
+    cc.in_color_space = JCS_RGB;
+    jpeg_set_defaults(&cc);
+    jpeg_set_quality(&cc, 95, TRUE);
+    jpeg_start_compress(&cc, TRUE);
+    
+    int CHUNK = 32;
+    unsigned char* row_bufs[9];
+    for (int i = 0; i < count; i++) row_bufs[i] = (unsigned char*)malloc(rs * CHUNK);
+    unsigned char* out_buf = (unsigned char*)malloc(rs * CHUNK);
+    
+    JSAMPROW row_ptrs[9][32];
+    JSAMPROW out_ptrs[32];
+    for(int i=0; i<count; i++) {
+        for(int c=0; c<CHUNK; c++) {
+            row_ptrs[i][c] = row_bufs[i] + (c * rs);
+        }
+    }
+    for(int c=0; c<CHUNK; c++) {
+        out_ptrs[c] = out_buf + (c * rs);
+    }
+    
+    while (cc.next_scanline < cc.image_height) {
+        int rows_to_read = CHUNK;
+        if (cc.image_height - cc.next_scanline < CHUNK) {
+            rows_to_read = cc.image_height - cc.next_scanline;
+        }
+        
+        for (int i = 0; i < count; i++) {
+            int read_so_far = 0;
+            while(read_so_far < rows_to_read) {
+                int got = jpeg_read_scanlines(&cds[i], &row_ptrs[i][read_so_far], rows_to_read - read_so_far);
+                if (got == 0) break;
+                read_so_far += got;
+            }
+        }
+        
+        int total_pixels = rows_to_read * rs;
+        if (blendMode == 0) { // Average
+            for (int x = 0; x < total_pixels; x++) {
+                int sum = 0;
+                for (int i = 0; i < count; i++) sum += row_bufs[i][x];
+                out_buf[x] = (unsigned char)(sum / count);
+            }
+        } else if (blendMode == 1) { // Lighten
+            for (int x = 0; x < total_pixels; x++) {
+                int mx = 0;
+                for (int i = 0; i < count; i++) {
+                    if (row_bufs[i][x] > mx) mx = row_bufs[i][x];
+                }
+                out_buf[x] = (unsigned char)mx;
+            }
+        }
+        
+        int written_so_far = 0;
+        while(written_so_far < rows_to_read) {
+            int wrote = jpeg_write_scanlines(&cc, &out_ptrs[written_so_far], rows_to_read - written_so_far);
+            if (wrote == 0) break;
+            written_so_far += wrote;
+        }
+    }
+    
+    jpeg_finish_compress(&cc);
+    jpeg_destroy_compress(&cc);
+    fclose(outf);
+    
+    for (int i = 0; i < count; i++) {
+        jpeg_finish_decompress(&cds[i]);
+        jpeg_destroy_decompress(&cds[i]);
+        fclose(infs[i]);
+        free(row_bufs[i]);
+    }
+    free(out_buf);
+    
+    return JNI_TRUE;
+}

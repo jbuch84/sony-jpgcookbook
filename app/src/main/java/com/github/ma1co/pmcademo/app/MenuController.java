@@ -141,7 +141,8 @@ public class MenuController {
         // Preferences — read
         boolean isPrefFocusMeter();
         boolean isPrefCinemaMattes();
-        boolean isPrefDiptych(); // <--- ADDED
+        boolean isPrefDiptych();
+        boolean isPrefMultiExpose(); // <--- ADDED
         boolean isPrefGridLines();
         int     getPrefJpegQuality();
         int     getProcessingFrequency();
@@ -153,7 +154,8 @@ public class MenuController {
         // Preferences — write
         void setPrefFocusMeter(boolean v);
         void setPrefCinemaMattes(boolean v);
-        void setPrefDiptych(boolean v); // <--- ADDED
+        void setPrefDiptych(boolean v);
+        void setPrefMultiExpose(boolean v); // <--- ADDED
         void setPrefGridLines(boolean v);
         void setPrefJpegQuality(int v);
         void setProcessingFrequency(int v);
@@ -918,11 +920,13 @@ public class MenuController {
                 int mode = 0;
                 if (host.isPrefCinemaMattes()) mode = 1;
                 else if (host.isPrefDiptych()) mode = 2;
+                else if (host.isPrefMultiExpose()) mode = 3;
 
-                mode = (mode + dir + 3) % 3;
+                mode = (mode + dir + 4) % 4;
 
                 host.setPrefCinemaMattes(mode == 1);
                 host.setPrefDiptych(mode == 2);
+                host.setPrefMultiExpose(mode == 3);
             }
             else if (sel == 3) host.setPrefGridLines(!host.isPrefGridLines());
             else if (sel == 4) host.setPrefJpegQuality(Math.max(60, Math.min(100, host.getPrefJpegQuality() + dir * 5)));
@@ -1104,6 +1108,7 @@ public class MenuController {
             String creativeMode = "OFF";
             if (host.isPrefCinemaMattes()) creativeMode = "XPAN CROP";
             else if (host.isPrefDiptych()) creativeMode = "DIPTYCH";
+            else if (host.isPrefMultiExpose()) creativeMode = "MULTI-EXP";
 
             setRow(0, "SW Global Resolution", qLbls[rm.getQualityIndex()]);
             setRow(1, "Manual Focus Meter",    host.isPrefFocusMeter()   ? "ON" : "OFF");

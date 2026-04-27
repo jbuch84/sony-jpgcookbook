@@ -128,8 +128,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private boolean prefShowCinemaMattes = false;
     private boolean prefShowGridLines = false;
     private int prefJpegQuality = 95;
-    private int processingFrequency = 1;
+    private LutEngine lutEngine;
     private DiptychManager diptychManager;
+    private MultiExposeManager multiExposeManager;
 
     private LensProfileManager lensManager;
     private List<String> availableLenses = new ArrayList<String>();
@@ -727,6 +728,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 diptychManager.processSecondShot(diptychManager.getLeftFilename(), path, entry, scannerStartedMs, detectedMs, stableMs, scannerAttempts);
             }
             return;
+        }
+
+        // --- MULTI-EXPOSURE INTERCEPT ---
+        if (multiExposeManager != null && multiExposeManager.interceptNewFile(f.getName(), path)) {
+            if (multiExposeManager.getState() == MultiExposeManager.STATE_PROCESSING) {
+                multiExposeManager.processFinalShot(entry, scannerStartedMs, detectedMs, stableMs, scannerAttempts);
+            }
+            return;
         } else if (shouldQueuePhotos()) {
             if (processingQueueManager != null) {
                 processingQueueManager.add(entry);
@@ -740,6 +749,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     entry.lutPath, entry.lutName,
                     scannerStartedMs, detectedMs, stableMs, scannerAttempts);
         }
+    }
+
+    public void handleStitchedMultiExpose(String tempPath, ProcessingQueueManager.Entry entry, long scannerStartedMs, long detectedMs, long stableMs, int scannerAttempts) {
+        entry.originalPath = tempPath;
+        mProcessor.processJpeg(tempPath, entry.outDirPath, entry.qualityIndex, entry.jpegQuality, entry.profile, entry.applyCrop, entry.isDiptych,
+                entry.lutPath, entry.lutName,
+                scannerStartedMs, detectedMs, stableMs, scannerAttempts);
+        if (processingQueueManager != null) processingQueueManager.removeFirst();
     }
 
     public void handleStitchedDiptych(String tempPath, ProcessingQueueManager.Entry entry, long scannerStartedMs, long detectedMs, long stableMs, int scannerAttempts) {
@@ -1259,14 +1276,26 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     }
 
     private void saveAppPreferences() {
-        SharedPreferences.Editor ed = getSharedPreferences("JPEG.CAM_Prefs", MODE_PRIVATE).edit();
+        SharedPreferences prefs = getSharedPreferences("JPEG.CAM_Prefs", MODE_PRIVATE);
+        SharedPreferences.Editor ed = prefs.edit();
         ed.putBoolean("focusMeter",    prefShowFocusMeter);
         ed.putBoolean("cinemaMattes",  prefShowCinemaMattes);
         ed.putBoolean("gridLines",     prefShowGridLines);
         ed.putInt("jpegQuality",       prefJpegQuality);
         ed.putInt("processingFrequency", processingFrequency);
         ed.putBoolean("diptychEnabled", isPrefDiptych());
+        ed.putBoolean("multiExposeEnabled", isPrefMultiExpose());
         ed.apply();
+    }
+
+    public void setPrefMultiExpose(boolean v) {
+        SharedPreferences prefs = getSharedPreferences("JPEG.CAM_Prefs", MODE_PRIVATE);
+        SharedPreferences.Editor ed = prefs.edit();
+        ed.putBoolean("multiExposeEnabled", v);
+        ed.commit();
+        if (multiExposeManager != null) {
+            multiExposeManager.setEnabled(v);
+        }
     }
 
     @Override
@@ -1303,11 +1332,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             int mode = 0;
             if (isPrefCinemaMattes()) mode = 1;
             else if (isPrefDiptych()) mode = 2;
+            else if (isPrefMultiExpose()) mode = 3;
 
-            mode = (mode + 1) % 3;
+            mode = (mode + 1) % 4;
 
             setPrefCinemaMattes(mode == 1);
             setPrefDiptych(mode == 2);
+            setPrefMultiExpose(mode == 3);
             saveAppPreferences();
             updateMainHUD();
             return true;
@@ -1768,7 +1799,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         // HUD controller — builds and owns its overlay views
         hudController = new HudController(this, mainUIContainer, this);
 
+        setupDialsAndButtons();
         diptychManager = new DiptychManager(this, mainUIContainer, tvTopStatus);
+        multiExposeManager = new MultiExposeManager(this, mainUIContainer, tvTopStatus);
+        multiExposeManager.setEnabled(isPrefMultiExpose());
     }
 
 
@@ -2119,15 +2153,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 int slotNum = recipeManager.getCurrentSlot() + 1;
                 String readyText = isReady ? "READY" : "LOADING..";
                 int queued = processingQueueManager != null ? processingQueueManager.getCountForMode(currentQueueMode()) : 0;
-                if (processingFrequency == PROCESSING_FREQUENCY_MANUAL) {
-                    readyText += " | MANUAL " + queued + " QUEUED";
-                } else if (processingFrequency > 1) {
-                    int left = processingFrequency - queued;
-                    if (left < 0) left = 0;
-                    readyText += " | " + left + "/" + processingFrequency + " LEFT";
-                } else if (queued > 0) {
-                    readyText += " | " + queued + " QUEUED";
-                }
+                if (queued > 0) readyText += " | Q: " + queued;
+                if (processingFrequency == PROCESSING_FREQUENCY_MANUAL) readyText += " | MANUAL PROCESSING";
+                else if (processingFrequency > 1) readyText += " | AUTO PROCESS AT " + processingFrequency + " SHOTS";
+
+                if (isPrefCinemaMattes()) readyText += " | XPAN CROP";
+                else if (isPrefDiptych()) readyText += " | DIPTYCH MODE";
+                else if (isPrefMultiExpose()) readyText += " | MULTI-EXP MODE";
+
                 tvTopStatus.setText("SLOT " + slotNum + ": " + customName + "\n" + readyText);
 
                 if (mDialMode == DIAL_MODE_RTL) {
@@ -2419,7 +2452,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     @Override public boolean isPrefCinemaMattes() { return prefShowCinemaMattes; }
     @Override public boolean isPrefGridLines()    { return prefShowGridLines; }
     @Override public int     getPrefJpegQuality() { return prefJpegQuality; }
-    @Override public boolean isPrefDiptych()      { return diptychManager != null && diptychManager.isEnabled(); } // <--- ADDED
+    @Override public boolean isPrefDiptych()      { return diptychManager != null && diptychManager.isEnabled(); }
+    @Override public boolean isPrefMultiExpose()  { return getSharedPreferences("JPEG.CAM_Prefs", MODE_PRIVATE).getBoolean("multiExposeEnabled", false); }
     @Override public int     getProcessingFrequency() { return processingFrequency; }
     @Override public int     getQueuedPhotoCount() { return processingQueueManager != null ? processingQueueManager.getCountForMode(currentQueueMode()) : 0; }
     @Override public List<ProcessingQueueManager.Entry> getQueuedPhotoEntries() {
