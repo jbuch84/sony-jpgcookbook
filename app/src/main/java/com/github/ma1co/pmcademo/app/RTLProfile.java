@@ -58,6 +58,12 @@ public class RTLProfile {
     // 0 = OFF | 1 = STANDARD | 2 = RICH
     public int bloom = 0;
 
+    // --- EXPERIMENTAL ---
+    // 0 = LEGACY | 1 = CRYSTAL | 2 = TEXTURE
+    public int advancedGrainExperimental = 0;
+
+    public int jpegQuality = 100;
+
     public RTLProfile(int slotIndex) {
         this.profileName = "RECIPE " + (slotIndex + 1);
     }

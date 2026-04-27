@@ -114,7 +114,8 @@ public class ImageProcessor {
                     finalBloom = bloomMap[Math.max(0, currentBloomIdx - 1)];
                 }
 
-                int numCores = Runtime.getRuntime().availableProcessors();
+                RecipeManager rm = ((MainActivity)mContext).getRecipeManager();
+                int numCores = rm.isMultiCoreEnabled() ? Runtime.getRuntime().availableProcessors() : 1;
                 Log.d("JPEG.CAM", "Using " + numCores + " cores for processing.");
 
                 if (mEngine.applyLutToJpeg(
@@ -122,6 +123,7 @@ public class ImageProcessor {
                     scale, p.opacity, p.grain, finalGrainSize, p.vignette, p.rollOff,
                     p.colorChrome, p.chromeBlue, p.shadowToe, p.subtractiveSat,
                     p.halation, finalBloom, 
+                    p.advancedGrainExperimental,
                     finalJpegQuality, 
                     applyCrop, numCores)) {  // <--- ADDED numCores HERE
                 return "SAVED";

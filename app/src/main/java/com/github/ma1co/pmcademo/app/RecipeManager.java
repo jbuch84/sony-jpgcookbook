@@ -18,6 +18,7 @@ public class RecipeManager {
     private int currentSlot = 0;
 
     private int qualityIndex = 1;
+    private int multiCoreEnabled = 0;
     private int prefC1 = 0;
     private int prefC2 = 0;
     private int prefC3 = 0;
@@ -46,6 +47,12 @@ public class RecipeManager {
     public int getQualityIndex() { return qualityIndex; }
     public void setQualityIndex(int index) {
         this.qualityIndex = (index + 3) % 3;
+        savePreferences();
+    }
+
+    public boolean isMultiCoreEnabled() { return multiCoreEnabled == 1; }
+    public void setMultiCoreEnabled(boolean enabled) {
+        this.multiCoreEnabled = enabled ? 1 : 0;
         savePreferences();
     }
 
@@ -169,6 +176,8 @@ public class RecipeManager {
             }
 
             p.bloom           = json.optInt("bloom", 0);
+            p.advancedGrainExperimental = json.optInt("advancedGrainExperimental", 0);
+            p.jpegQuality     = json.optInt("jpegQuality", 100);
             p.contrast        = json.optInt("contrast", 0);
             p.saturation      = json.optInt("saturation", 0);
             p.wbShift         = json.optInt("wbShift", 0);
@@ -227,6 +236,8 @@ public class RecipeManager {
             sb.append("  \"grainName\": \"").append(grainNameToSave.replace("\"", "\\\"")).append("\",\n");
 
             sb.append("  \"bloom\": ").append(p.bloom).append(",\n");
+            sb.append("  \"advancedGrainExperimental\": ").append(p.advancedGrainExperimental).append(",\n");
+            sb.append("  \"jpegQuality\": ").append(p.jpegQuality).append(",\n");
             sb.append("  \"contrast\": ").append(p.contrast).append(",\n");
             sb.append("  \"saturation\": ").append(p.saturation).append(",\n");
             sb.append("  \"wbShift\": ").append(p.wbShift).append(",\n");
@@ -266,6 +277,7 @@ public class RecipeManager {
                 while ((line = br.readLine()) != null) {
                     if (line.startsWith("quality=")) qualityIndex = Integer.parseInt(line.split("=")[1]);
                     else if (line.startsWith("slot=")) currentSlot = Integer.parseInt(line.split("=")[1]);
+                    else if (line.startsWith("multicore=")) multiCoreEnabled = Integer.parseInt(line.split("=")[1]);
                     else if (line.startsWith("c1=")) prefC1 = Integer.parseInt(line.split("=")[1]);
                     else if (line.startsWith("c2=")) prefC2 = Integer.parseInt(line.split("=")[1]);
                     else if (line.startsWith("c3=")) prefC3 = Integer.parseInt(line.split("=")[1]);
@@ -282,6 +294,7 @@ public class RecipeManager {
             File prefsFile = new File(recipeDir, "PREFS.TXT");
             FileOutputStream fos = new FileOutputStream(prefsFile);
             String prefsData = "quality=" + qualityIndex + "\nslot=" + currentSlot + "\n" +
+                               "multicore=" + multiCoreEnabled + "\n" +
                                "c1=" + prefC1 + "\nc2=" + prefC2 + "\nc3=" + prefC3 + "\n" +
                                "ael=" + prefAel + "\nfn=" + prefFn + "\n";
             fos.write(prefsData.getBytes());

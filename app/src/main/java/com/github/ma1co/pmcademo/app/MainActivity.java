@@ -8,7 +8,6 @@ import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
-import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.Typeface;
 import android.hardware.Camera;
@@ -48,25 +47,45 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     // --- GLOBAL DEBUG FLAG ---
     // Set to true to see diagnostic Toasts, false for clean public release
     public static final boolean DEBUG_MODE = false;
+    private static final int PHOTO_READY_RETRY_MS = 75;
+    private static final int PHOTO_READY_MAX_RETRIES = 240;
+    private static final int PHOTO_READY_STABLE_CHECKS = 1;
+    private static final int PHOTO_READY_FALLBACK_STABLE_CHECKS = 4;
+    private static final int SCANNER_ARM_TIMEOUT_MS = 6000;
+    private static final long QUEUE_FALLBACK_PROCESS_MS = 14000;
+    private static final int PROCESSING_FREQUENCY_MANUAL = -1;
 
     private SonyCameraManager cameraManager;
     private InputManager inputManager;
     private RecipeManager recipeManager;
     private MatrixManager matrixManager;
     private ConnectivityManager connectivityManager;
-    
-    
-    private Typeface digitalFont; 
-    
+
+
+    private Typeface digitalFont;
+
     private ImageProcessor mProcessor;
     private SonyFileScanner mScanner;
+    private ProcessingQueueManager processingQueueManager;
+    private ProcessingQueueManager.Entry pendingShotSnapshot;
+    private ProcessingQueueManager.Entry activeQueueEntry;
+    private boolean processingQueueActive = false;
+    private boolean manualQueueProcessRequested = false;
+    private int activeQueueMode = ProcessingQueueManager.MODE_AUTO;
+    private int processingQueueTotal = 0;
+    private int processingQueueCompleted = 0;
+    private long processingQueueStartedMs = 0;
+    private long processingQueueAverageMs = 0;
+    private boolean captureWritePending = false;
+    private int captureWriteToken = 0;
+    private int pendingQueueProcessTargetCount = 0;
 
     private SurfaceView mSurfaceView;
     private boolean hasSurface = false;
-    
+
     private FrameLayout mainUIContainer;
     private LinearLayout llBottomBar;
-    
+
     private TextView tvTopStatus;
     private TextView tvBattery;
     private TextView tvValShutter;
@@ -76,7 +95,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private TextView tvMode;
     private TextView tvFocusMode;
     private TextView tvReview;
-    
+
     // --- UNIVERSAL HUD VARIABLES ---
     private HudController hudController;
 
@@ -85,13 +104,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
      // Converts hardware value (e.g., 1024) to a human percentage (e.g., 100)
     private int matrixToPercent(int hardwareValue) {
         return Math.round((hardwareValue / 1024.0f) * 100.0f);
-    }      
+    }
     // Converts a human percentage (e.g., 100) back to the hardware value (e.g., 1024)
     private int percentToMatrix(int percentValue) {
         return Math.round((percentValue / 100.0f) * 1024.0f);
     }
 
-    
+
     private BatteryView batteryIcon;
     private PlaybackController playbackController;
     private MenuController menuController;
@@ -103,18 +122,19 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     }
 
     private boolean isReady = false;
-    private int displayState = 0; 
-    
+    private int displayState = 0;
+
 
     private boolean prefShowCinemaMattes = false;
     private boolean prefShowGridLines = false;
     private int prefJpegQuality = 95;
+    private int processingFrequency = 1;
     private DiptychManager diptychManager;
 
     private LensProfileManager lensManager;
     private List<String> availableLenses = new ArrayList<String>();
     private int currentLensIndex = 0;
-    
+
     private LensCalibrationController calibController;
 
     private float hardwareFocalLength = 0.0f;
@@ -122,24 +142,40 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private boolean hasPhysicalPasmDial = false;
     private boolean isFullFrame = false;
     private BroadcastReceiver hardwareStateReceiver; // <--- ADD THIS LINE
-    
+
     private float virtualAperture = 2.8f;
     private float virtualFocusRatio = 0.5f;
-    
+
     private TextView tvCalibrationPrompt;
-    
+
     private boolean cachedIsManualFocus = false;
     private float cachedAperture = 2.8f;
     private float cachedFocusRatio = 0.5f;
-    
+
     // isMenuEditing thin proxy removed — use menuController.isEditingMode()
-    
+
     private GridLinesView gridLines;
     private CinemaMatteView cinemaMattes;
     private AdvancedFocusMeterView focusMeter;
     private ProReticleView afOverlay;
-    
+
     private Handler uiHandler = new Handler();
+    private boolean liveHudFlashVisible = true;
+    private boolean liveHudFlashRunning = false;
+    private boolean liveUiSuppressed = false;
+    private boolean batteryReceiverRegistered = false;
+    private final Runnable liveHudFlashRunnable = new Runnable() {
+        @Override public void run() {
+            if (shouldPulseLiveHudSelection()) {
+                liveHudFlashVisible = !liveHudFlashVisible;
+                updateMainHUD();
+                uiHandler.postDelayed(this, 420);
+            } else {
+                liveHudFlashRunning = false;
+                liveHudFlashVisible = true;
+            }
+        }
+    };
 
     private int getPreviewWindowWidth() {
         if (mSurfaceView != null && mSurfaceView.getWidth() > 0) return mSurfaceView.getWidth();
@@ -158,15 +194,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(width, -1);
         int offset = 0;
-        if (diptychManager != null && diptychManager.isEnabled()
-                && (diptychManager.getState() == DiptychManager.STATE_NEED_SECOND || diptychManager.getState() == DiptychManager.STATE_STITCHING)) {
-            offset = DiptychFraming.getPreviewOffset(width, diptychManager.isThumbOnLeft());
+        if (!isProcessing && diptychManager != null && diptychManager.isEnabled()
+                && diptychManager.getState() == DiptychManager.STATE_NEED_SECOND) {
+            offset = diptychManager.isThumbOnLeft() ? width / 4 : -(width / 4);
         }
         params.leftMargin = offset;
         mSurfaceView.setLayoutParams(params);
         mSurfaceView.invalidate();
     }
-    
+
     public static final int DIAL_MODE_SHUTTER = 0;
     public static final int DIAL_MODE_APERTURE = 1;
     public static final int DIAL_MODE_ISO = 2;
@@ -175,7 +211,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     public static final int DIAL_MODE_RTL = 5;
     public static final int DIAL_MODE_PASM = 6;
     public static final int DIAL_MODE_FOCUS = 7;
-    
+
     private int mDialMode = DIAL_MODE_RTL;
     private boolean isDialLocked = true; // <--- NEW: Defaults to locked
 
@@ -205,16 +241,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         public void onReceive(Context context, Intent intent) {
             String action = intent.getAction();
             if ("com.sony.scalar.database.avindex.action.AVINDEX_DATABASE_UPDATED".equals(action)) {
-                if (mScanner != null) mScanner.checkNow();
+                armFileScanner();
             }
         }
     };
 
     private Runnable applySettingsRunnable = new Runnable() {
-        @Override 
+        @Override
         public void run() { applyHardwareRecipe(); }
     };
-    
+
     private Runnable liveUpdater = new Runnable() {
         @Override
         public void run() {
@@ -222,13 +258,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 if (cameraManager != null && cameraManager.getCamera() != null) {
                     boolean s1_1_free = ScalarInput.getKeyStatus(ScalarInput.ISV_KEY_S1_1).status == 0;
                     boolean s1_2_free = ScalarInput.getKeyStatus(ScalarInput.ISV_KEY_S1_2).status == 0;
-                    
+
                     if (s1_1_free && s1_2_free) {
                         if (afOverlay != null && afOverlay.isPolling()) {
                             afOverlay.stopFocus(cameraManager.getCamera());
-                            requestHudUpdate(); 
+                            requestHudUpdate();
                         }
-                        if (tvTopStatus != null && tvTopStatus.getVisibility() != View.VISIBLE) {
+                        if (!liveUiSuppressed && tvTopStatus != null && tvTopStatus.getVisibility() != View.VISIBLE) {
                             if (!calibController.isActive()) {
                                 setHUDVisibility(View.VISIBLE);
                             }
@@ -236,7 +272,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     }
                 }
             }
-            uiHandler.postDelayed(this, 500); 
+            uiHandler.postDelayed(this, 500);
         }
     };
 
@@ -245,17 +281,33 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         public void onReceive(Context context, Intent intent) {
             int level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
             int scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
-            if (level >= 0 && scale > 0) {
-                final int pct = (level * 100) / scale;
-                runOnUiThread(new Runnable() { 
-                    public void run() { 
-                        if (tvBattery != null) tvBattery.setText(pct + "%"); 
-                        if (batteryIcon != null) batteryIcon.setLevel(pct); 
-                    } 
+            int status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1);
+            final int pct = normalizeBatteryPercent(level, scale, status);
+            if (pct >= 0) {
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        if (tvBattery != null) tvBattery.setText(formatBatteryPercent(pct));
+                        if (batteryIcon != null) batteryIcon.setLevel(pct);
+                    }
                 });
             }
         }
     };
+
+    private int normalizeBatteryPercent(int level, int scale, int status) {
+        if (status == BatteryManager.BATTERY_STATUS_FULL) return 100;
+        if (level < 0 || scale <= 0) return -1;
+        long pct = ((long) level * 100L + (scale / 2L)) / (long) scale;
+        if (pct < 0) return 0;
+        if (pct > 100) return 100;
+        return (int) pct;
+    }
+
+    private String formatBatteryPercent(int pct) {
+        if (pct < 0) return "--%";
+        if (pct >= 100) return "100%";
+        return pct + "%";
+    }
 
     // --- FACTORY BURN SYSTEM ---
     private void factoryBurnMatrices() {
@@ -279,7 +331,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
         // --- AUTOMATIC HARDWARE SCANNER ---
         // --- UNIVERSAL FEATURE DETECTION ---
-        // Legacy cameras (API 10) will crash with a Dalvik "VerifyError" before the app opens 
+        // Legacy cameras (API 10) will crash with a Dalvik "VerifyError" before the app opens
         // if we explicitly write new API methods. We use Reflection to hide it from the scanner!
         hasPhysicalPasmDial = false;
         try {
@@ -290,15 +342,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         } catch (Exception e) {
             android.util.Log.e("JPEG.CAM", "Legacy API 10 Camera Detected. Relying on dynamic dial auto-discovery.");
         }
-        
+
         android.util.Log.e("JPEG.CAM", "Universal Dial Detection: " + hasPhysicalPasmDial);
-        
+
         // Force creation of our JPEGCAM folder skeleton immediately on boot
         Filepaths.buildAppStructure();
 
         // --- NEW: Extract our starter pack ---
         Filepaths.extractDefaultAssets(this);
-        
+
         File thumbsDir = new File(Filepaths.getDcimDir(), ".thumbnails");
         if (!thumbsDir.exists()) thumbsDir.mkdirs();
 
@@ -307,8 +359,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         prefShowCinemaMattes = prefs.getBoolean("cinemaMattes", false);
         prefShowGridLines = prefs.getBoolean("gridLines", true);
         prefJpegQuality = prefs.getInt("jpegQuality", 95);
+        processingFrequency = normalizeProcessingFrequency(prefs.getInt("processingFrequency", 1));
         boolean prefShowDiptych = prefs.getBoolean("diptychEnabled", false);
-        
+        processingQueueManager = new ProcessingQueueManager();
+
         cameraManager = new SonyCameraManager(this);
         inputManager = new InputManager(this);
         recipeManager = new RecipeManager();
@@ -319,16 +373,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
         lensManager = new LensProfileManager(this);
         availableLenses = lensManager.getAvailableLenses();
-        
+
         recipeManager.loadPreferences();
-        
+
         try {
             digitalFont = Typeface.createFromAsset(getAssets(), "fonts/digital-7.ttf");
         } catch (Exception e) {
             Log.e("JPEG.CAM", "Could not load custom font. Did you add it to assets/fonts/?");
             digitalFont = null;
         }
-        
+
         FrameLayout rootLayout = new FrameLayout(this);
         mSurfaceView = new SurfaceView(this);
         mSurfaceView.getHolder().addCallback(this);
@@ -340,22 +394,37 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 updateDiptychPreviewWindow();
             }
         });
-        
+
         buildUI(rootLayout);
         setContentView(rootLayout);
         if (prefShowDiptych && diptychManager != null) diptychManager.setEnabled(true);
         setupEngines();
+        registerReceiver(sonyCameraReceiver, new IntentFilter("com.sony.scalar.database.avindex.action.AVINDEX_DATABASE_UPDATED"));
+        registerBatteryReceiver();
+    }
+
+    private void registerBatteryReceiver() {
+        if (batteryReceiverRegistered) return;
+        try {
+            registerReceiver(batteryReceiver, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+            batteryReceiverRegistered = true;
+        } catch (Exception e) {
+            batteryReceiverRegistered = false;
+        }
     }
 
     private void setupEngines() {
         mProcessor = new ImageProcessor(this, new ImageProcessor.ProcessorCallback() {
             @Override public void onPreloadStarted() { isReady = false; runOnUiThread(new Runnable() { public void run() { updateMainHUD(); } }); }
-            @Override public void onPreloadFinished(boolean success) { isReady = true; runOnUiThread(new Runnable() { public void run() { updateMainHUD(); } }); }
-            @Override public void onProcessStarted() { runOnUiThread(new Runnable() { public void run() { if (tvTopStatus != null) { tvTopStatus.setText("PROCESSING..."); tvTopStatus.setTextColor(Color.YELLOW); } } }); }
-        @Override public void onProcessFinished(String res) { 
-            boolean success = (res != null && res.equals("SAVED"));
+            @Override public void onPreloadFinished(boolean success) { isReady = true; runOnUiThread(new Runnable() { public void run() { updateMainHUD(); if (manualQueueProcessRequested) startQueuedProcessing(true, pendingQueueProcessTargetCount); else maybeAutoProcessQueuedPhotos(); } }); }
+            @Override public void onProcessStarted() { runOnUiThread(new Runnable() { public void run() { if (tvTopStatus != null) { tvTopStatus.setText(getProcessingStatusText()); tvTopStatus.setTextColor(UiTheme.WARN); } } }); }
+        @Override public void onProcessFinished(String res) {
+            if (processingQueueActive) {
+                handleQueuedProcessFinished(res);
+                return;
+            }
             if (diptychManager != null && diptychManager.isEnabled()) {
-                if (success) {
+                if (res != null && !res.toUpperCase().contains("ERROR")) {
                     if (diptychManager.getState() == DiptychManager.STATE_PROCESSING_FIRST) {
                         final String gradedLeft = new File(Filepaths.getGradedDir(), diptychManager.getLeftFilename()).getAbsolutePath();
                         diptychManager.processFirstShot(gradedLeft);
@@ -367,90 +436,352 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                         return;
                     }
                 } else {
-                    // Any failure in Diptych mode must reset the whole chain to avoid getting stuck in a shifted/half-baked UI
                     diptychManager.reset();
                 }
             }
-            isProcessing = false; 
-            runOnUiThread(new Runnable() { public void run() { if (tvTopStatus != null) { tvTopStatus.setTextColor(Color.WHITE); } updateMainHUD(); } }); 
+            isProcessing = false;
+            runOnUiThread(new Runnable() { public void run() { if (tvTopStatus != null) { tvTopStatus.setTextColor(UiTheme.TEXT); } updateMainHUD(); } });
         }
         });
-        
+
         mScanner = new SonyFileScanner(this, new SonyFileScanner.ScannerCallback() {
-            @Override 
-            public boolean isReadyToProcess() { 
-                RTLProfile p = recipeManager.getCurrentProfile();
-                return isReady && !isProcessing && !calibController.isCalibrating() &&
-                       ((diptychManager != null && diptychManager.isEnabled()) || p.lutIndex != 0 || p.grain != 0 || p.vignette != 0 ||
-                        p.rollOff != 0 || p.colorChrome != 0 || p.chromeBlue != 0 ||
-                        p.shadowToe != 0 || p.subtractiveSat != 0 || p.halation != 0 ||
-                        p.bloom != 0);
+            @Override
+            public boolean isReadyToProcess() {
+                return !isProcessing && !calibController.isCalibrating();
             }
-            @Override 
-            public void onNewPhotoDetected(final String path) { 
-                processWhenFileReady(path);
+            @Override
+            public void onNewPhotoDetected(final String path, final long scannerStartedMs, final long detectedMs, final int attempts) {
+                processWhenFileReady(path, scannerStartedMs, detectedMs, attempts);
             }
         });
-        
+
         triggerLutPreload();
     }
-    
-    private void processWhenFileReady(final String path) {
+
+    private boolean hasSoftwareEffects(RTLProfile p) {
+        return p != null && (p.lutIndex != 0 || p.grain != 0 || p.vignette != 0 ||
+                p.rollOff != 0 || p.colorChrome != 0 || p.chromeBlue != 0 ||
+                p.shadowToe != 0 || p.subtractiveSat != 0 || p.halation != 0 ||
+                p.bloom != 0);
+    }
+
+    private int normalizeProcessingFrequency(int value) {
+        if (value == PROCESSING_FREQUENCY_MANUAL) return PROCESSING_FREQUENCY_MANUAL;
+        if (value == 3 || value == 5) return value;
+        return 1;
+    }
+
+    private boolean shouldQueuePhotos() {
+        return (processingFrequency == PROCESSING_FREQUENCY_MANUAL || processingFrequency > 1)
+                && (diptychManager == null || !diptychManager.isEnabled());
+    }
+
+    private int currentQueueMode() {
+        return processingFrequency == PROCESSING_FREQUENCY_MANUAL
+                ? ProcessingQueueManager.MODE_MANUAL
+                : ProcessingQueueManager.MODE_AUTO;
+    }
+
+    private ProcessingQueueManager.Entry createCurrentQueueEntry() {
+        ProcessingQueueManager.Entry entry = new ProcessingQueueManager.Entry();
+        entry.profile = ProcessingQueueManager.copyProfile(recipeManager.getCurrentProfile());
+        entry.qualityIndex = recipeManager.getQualityIndex();
+        entry.jpegQuality = prefJpegQuality;
+        entry.applyCrop = prefShowCinemaMattes;
+        entry.isDiptych = false;
+        entry.outDirPath = Filepaths.getGradedDir().getAbsolutePath();
+        entry.queueMode = currentQueueMode();
+
+        int lutIndex = entry.profile != null ? entry.profile.lutIndex : 0;
+        ArrayList<String> paths = recipeManager.getRecipePaths();
+        ArrayList<String> names = recipeManager.getRecipeNames();
+        if (lutIndex > 0 && paths != null && names != null && lutIndex < paths.size() && lutIndex < names.size()) {
+            entry.lutPath = paths.get(lutIndex);
+            entry.lutName = names.get(lutIndex);
+        } else {
+            entry.lutPath = "NONE";
+            entry.lutName = "OFF";
+        }
+        return entry;
+    }
+
+    private ProcessingQueueManager.Entry consumeShotSnapshot(String path, long scannerStartedMs, long detectedMs, long stableMs, int scannerAttempts) {
+        ProcessingQueueManager.Entry entry = pendingShotSnapshot != null
+                ? ProcessingQueueManager.copyEntry(pendingShotSnapshot)
+                : createCurrentQueueEntry();
+        pendingShotSnapshot = null;
+        entry.originalPath = path;
+        entry.outDirPath = Filepaths.getGradedDir().getAbsolutePath();
+        entry.scannerStartedMs = scannerStartedMs;
+        entry.detectedMs = detectedMs;
+        entry.stableMs = stableMs;
+        entry.scannerAttempts = scannerAttempts;
+        return entry;
+    }
+
+    private String getProcessingStatusText() {
+        if (processingQueueActive && processingQueueTotal > 0 && processingQueueManager != null) {
+            int current = processingQueueCompleted + 1;
+            if (current < 1) current = 1;
+            if (current > processingQueueTotal) current = processingQueueTotal;
+            return "PROCESSING QUEUE " + current + "/" + processingQueueTotal
+                    + "\n" + formatQueueEta(current);
+        }
+        return "PROCESSING...\n" + formatProcessingEstimateForCount(1) + " LEFT";
+    }
+
+    private String formatQueueEta(int current) {
+        int remaining = processingQueueTotal - current + 1;
+        if (remaining < 1) remaining = 1;
+        return formatProcessingEstimateForCount(remaining) + " LEFT";
+    }
+
+    private String formatProcessingEstimateForCount(int count) {
+        if (count < 1) count = 1;
+        long perPhotoMs = processingQueueAverageMs > 0 ? processingQueueAverageMs : QUEUE_FALLBACK_PROCESS_MS;
+        long totalSeconds = (perPhotoMs * count + 500) / 1000;
+        if (totalSeconds < 1) totalSeconds = 1;
+        long minutes = totalSeconds / 60;
+        long seconds = totalSeconds % 60;
+        if (minutes > 0) {
+            if (seconds > 0) return "~" + minutes + " min " + seconds + " sec";
+            return "~" + minutes + " min";
+        }
+        return "~" + seconds + " sec";
+    }
+
+    private void maybeAutoProcessQueuedPhotos() {
+        if (processingFrequency > 1 && processingQueueManager != null &&
+                processingQueueManager.getCountForMode(ProcessingQueueManager.MODE_AUTO) >= processingFrequency && !isProcessing && isReady) {
+            startQueuedProcessing(false);
+        }
+    }
+
+    private void startQueuedProcessing(boolean manual) {
+        startQueuedProcessing(manual, 0);
+    }
+
+    private void startQueuedProcessing(boolean manual, int targetCount) {
+        int requestedMode = manual ? ProcessingQueueManager.MODE_MANUAL : ProcessingQueueManager.MODE_AUTO;
+        if (manual) manualQueueProcessRequested = true;
+        if (mProcessor == null || processingQueueManager == null || processingQueueManager.getCountForMode(requestedMode) == 0) {
+            manualQueueProcessRequested = false;
+            pendingQueueProcessTargetCount = 0;
+            return;
+        }
+        if (manual && targetCount > 0) pendingQueueProcessTargetCount = targetCount;
+        if (isProcessing || processingQueueActive || !isReady) return;
+        manualQueueProcessRequested = false;
+        if (targetCount <= 0) targetCount = pendingQueueProcessTargetCount;
+        pendingQueueProcessTargetCount = 0;
+        processingQueueActive = true;
+        activeQueueMode = requestedMode;
+        int queuedCount = processingQueueManager.getCountForMode(activeQueueMode);
+        processingQueueTotal = (targetCount > 0 && targetCount < queuedCount) ? targetCount : queuedCount;
+        processingQueueCompleted = 0;
+        processingQueueStartedMs = System.currentTimeMillis();
+        processingQueueAverageMs = 0;
+        isProcessing = true;
+        processNextQueuedPhoto();
+    }
+
+    private void processNextQueuedPhoto() {
+        if (processingQueueManager == null) return;
+        activeQueueEntry = processingQueueManager.peekForMode(activeQueueMode);
+        if (activeQueueEntry == null) {
+            finishQueuedProcessing();
+            return;
+        }
+
+        if (tvTopStatus != null) {
+            tvTopStatus.setText(getProcessingStatusText());
+            tvTopStatus.setTextColor(UiTheme.WARN);
+        }
+        File outDir = activeQueueEntry.outDirPath != null && activeQueueEntry.outDirPath.length() > 0
+                ? new File(activeQueueEntry.outDirPath)
+                : Filepaths.getGradedDir();
+        mProcessor.processJpeg(activeQueueEntry.originalPath, outDir.getAbsolutePath(),
+                activeQueueEntry.qualityIndex, activeQueueEntry.jpegQuality,
+                activeQueueEntry.profile, activeQueueEntry.applyCrop, activeQueueEntry.isDiptych,
+                activeQueueEntry.lutPath, activeQueueEntry.lutName,
+                activeQueueEntry.scannerStartedMs, activeQueueEntry.detectedMs,
+                activeQueueEntry.stableMs, activeQueueEntry.scannerAttempts);
+    }
+
+    private void handleQueuedProcessFinished(String result) {
+        boolean success = result != null && result.toUpperCase().indexOf("SAVED") >= 0;
+        if (success && processingQueueManager != null) {
+            processingQueueManager.removeFirstForMode(activeQueueMode);
+            processingQueueCompleted++;
+            if (processingQueueCompleted > 0 && processingQueueStartedMs > 0) {
+                processingQueueAverageMs = (System.currentTimeMillis() - processingQueueStartedMs) / processingQueueCompleted;
+            }
+            if (processingQueueCompleted < processingQueueTotal && processingQueueManager.getCountForMode(activeQueueMode) > 0) {
+                processNextQueuedPhoto();
+                return;
+            }
+            finishQueuedProcessing();
+        } else {
+            processingQueueActive = false;
+            activeQueueEntry = null;
+            processingQueueTotal = 0;
+            processingQueueCompleted = 0;
+            processingQueueStartedMs = 0;
+            processingQueueAverageMs = 0;
+            pendingQueueProcessTargetCount = 0;
+            activeQueueMode = ProcessingQueueManager.MODE_AUTO;
+            isProcessing = false;
+            runOnUiThread(new Runnable() { public void run() { if (tvTopStatus != null) { tvTopStatus.setTextColor(UiTheme.TEXT); } updateMainHUD(); } });
+        }
+    }
+
+    private void finishQueuedProcessing() {
+        processingQueueActive = false;
+        activeQueueEntry = null;
+        processingQueueTotal = 0;
+        processingQueueCompleted = 0;
+        processingQueueStartedMs = 0;
+        processingQueueAverageMs = 0;
+        pendingQueueProcessTargetCount = 0;
+        activeQueueMode = ProcessingQueueManager.MODE_AUTO;
+        isProcessing = false;
+        triggerLutPreload();
+        applyHardwareRecipe();
+        syncHardwareState();
+        runOnUiThread(new Runnable() { public void run() { if (tvTopStatus != null) { tvTopStatus.setTextColor(UiTheme.TEXT); } updateMainHUD(); } });
+    }
+
+    private void processWhenFileReady(final String path, final long scannerStartedMs, final long detectedMs, final int scannerAttempts) {
         // Wrap the diagnostic in our global debug flag
         if (DEBUG_MODE) {
             android.widget.Toast.makeText(this, "File Detected! Waiting for write...", android.widget.Toast.LENGTH_SHORT).show();
         }
-        
-        final File f = new File(path);
-        if (!f.exists()) return; 
 
-        isProcessing = true; 
-        runOnUiThread(new Runnable() { 
-            public void run() { 
-                if (tvTopStatus != null) {
-                    tvTopStatus.setText("SAVING TO SD..."); 
-                    tvTopStatus.setTextColor(Color.YELLOW); 
-                }
-                updateMainHUD(); 
-            } 
-        });
-        
+        final File f = new File(path);
+        if (!f.exists()) return;
+
+        captureWritePending = true;
+        isProcessing = true;
+        showSavingToSdStatus();
+
         final long[] lastSize = {-1};
         final int[] retries = {0};
-        
+        final int[] stableChecks = {0};
+
         Runnable checker = new Runnable() {
             @Override
             public void run() {
                 if (!f.exists()) {
+                    pendingShotSnapshot = null;
+                    captureWritePending = false;
                     isProcessing = false;
                     updateMainHUD();
                     return;
                 }
-                
+
                 long currentSize = f.length();
                 if (currentSize > 0 && currentSize == lastSize[0]) {
-                    // --- DIPTYCH INTERCEPT ---
-                    if (diptychManager != null && diptychManager.interceptNewFile(f.getName(), path)) {
-                        File outDir = Filepaths.getGradedDir();
-                        // Cap at HIGH (6MP) for Diptych to ensure native stability on legacy hardware
-                        int diptychQuality = Math.min(1, recipeManager.getQualityIndex()); 
-                        mProcessor.processJpeg(path, outDir.getAbsolutePath(), diptychQuality, prefJpegQuality, recipeManager.getCurrentProfile(), false, true);
-                    } else {
-                        File outDir = Filepaths.getGradedDir();
-                        mProcessor.processJpeg(path, outDir.getAbsolutePath(), recipeManager.getQualityIndex(), prefJpegQuality, recipeManager.getCurrentProfile(), prefShowCinemaMattes, false);
-                    }
-                } else if (retries[0] < 30) {
+                    stableChecks[0]++;
+                } else {
+                    stableChecks[0] = 0;
+                }
+
+                boolean stableEnough = currentSize > 0 && stableChecks[0] >= PHOTO_READY_STABLE_CHECKS;
+                boolean fallbackStable = currentSize > 0 && stableChecks[0] >= PHOTO_READY_FALLBACK_STABLE_CHECKS;
+                if ((stableEnough && hasJpegEndMarker(f)) || fallbackStable) {
+                    captureWritePending = false;
+                    long stableMs = System.currentTimeMillis();
+                    ProcessingQueueManager.Entry entry = consumeShotSnapshot(path, scannerStartedMs, detectedMs, stableMs, scannerAttempts);
+                    handleReadyPhotoFile(f, path, entry, scannerStartedMs, detectedMs, stableMs, scannerAttempts);
+                } else if (retries[0] < PHOTO_READY_MAX_RETRIES) {
                     lastSize[0] = currentSize;
                     retries[0]++;
-                    uiHandler.postDelayed(this, 300);
+                    uiHandler.postDelayed(this, PHOTO_READY_RETRY_MS);
                 } else {
-                    isProcessing = false;
-                    updateMainHUD();
+                    captureWritePending = false;
+                    if (f.exists() && f.length() > 0) {
+                        long stableMs = System.currentTimeMillis();
+                        ProcessingQueueManager.Entry entry = consumeShotSnapshot(path, scannerStartedMs, detectedMs, stableMs, scannerAttempts);
+                        handleReadyPhotoFile(f, path, entry, scannerStartedMs, detectedMs, stableMs, scannerAttempts);
+                    } else {
+                        pendingShotSnapshot = null;
+                        isProcessing = false;
+                        updateMainHUD();
+                    }
                 }
             }
         };
-        
-        uiHandler.postDelayed(checker, 200);
+
+        uiHandler.post(checker);
+    }
+
+    private boolean hasJpegEndMarker(File file) {
+        java.io.RandomAccessFile raf = null;
+        try {
+            if (file == null || file.length() < 2) return false;
+            raf = new java.io.RandomAccessFile(file, "r");
+            long len = raf.length();
+            if (len < 2) return false;
+            raf.seek(len - 2);
+            return (raf.read() & 0xFF) == 0xFF && (raf.read() & 0xFF) == 0xD9;
+        } catch (Exception e) {
+            return false;
+        } finally {
+            if (raf != null) {
+                try { raf.close(); } catch (Exception ignored) {}
+            }
+        }
+    }
+
+    private void handleReadyPhotoFile(File f, String path, ProcessingQueueManager.Entry entry,
+                                      long scannerStartedMs, long detectedMs, long stableMs, int scannerAttempts) {
+        // --- DIPTYCH INTERCEPT ---
+        if (diptychManager != null && diptychManager.interceptNewFile(f.getName(), path)) {
+            File outDir = Filepaths.getGradedDir();
+            mProcessor.processJpeg(path, outDir.getAbsolutePath(), entry.qualityIndex, entry.jpegQuality, entry.profile, false, true,
+                    entry.lutPath, entry.lutName,
+                    scannerStartedMs, detectedMs, stableMs, scannerAttempts);
+        } else if (shouldQueuePhotos()) {
+            if (processingQueueManager != null) {
+                processingQueueManager.add(entry);
+            }
+            isProcessing = false;
+            updateMainHUD();
+            maybeAutoProcessQueuedPhotos();
+        } else {
+            File outDir = Filepaths.getGradedDir();
+            mProcessor.processJpeg(path, outDir.getAbsolutePath(), entry.qualityIndex, entry.jpegQuality, entry.profile, entry.applyCrop, false,
+                    entry.lutPath, entry.lutName,
+                    scannerStartedMs, detectedMs, stableMs, scannerAttempts);
+        }
+    }
+
+    private boolean isShutterInput(int sc, int keyCode) {
+        return sc == ScalarInput.ISV_KEY_S1_1 || sc == ScalarInput.ISV_KEY_S1_2 || sc == ScalarInput.ISV_KEY_S2 ||
+                keyCode == ScalarInput.ISV_KEY_S1_1 || keyCode == ScalarInput.ISV_KEY_S1_2 || keyCode == ScalarInput.ISV_KEY_S2;
+    }
+
+    private boolean isFullShutterInput(int sc, int keyCode) {
+        return sc == ScalarInput.ISV_KEY_S1_2 || sc == ScalarInput.ISV_KEY_S2 ||
+                keyCode == ScalarInput.ISV_KEY_S1_2 || keyCode == ScalarInput.ISV_KEY_S2;
+    }
+
+    private boolean shouldBlockShutterInput() {
+        return isProcessing || captureWritePending;
+    }
+
+    private void showSavingToSdStatus() {
+        runOnUiThread(new Runnable() {
+            public void run() {
+                if (mainUIContainer != null) mainUIContainer.setVisibility(View.VISIBLE);
+                if (tvTopStatus != null) {
+                    tvTopStatus.setText("SAVING TO SD...");
+                    tvTopStatus.setTextColor(UiTheme.WARN);
+                    UiTheme.softPanel(tvTopStatus);
+                    tvTopStatus.setVisibility(View.VISIBLE);
+                }
+            }
+        });
     }
 
     private void triggerLutPreload() {
@@ -459,6 +790,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             // No LUT selected, engine is ready immediately for other effects
             isReady = true;
             updateMainHUD();
+            maybeAutoProcessQueuedPhotos();
             return;
         }
         mProcessor.triggerLutPreload(recipeManager.getRecipePaths().get(p.lutIndex), recipeManager.getRecipeNames().get(p.lutIndex));
@@ -467,16 +799,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private void refreshRecipes() {
         List<String> oldPaths = new ArrayList<String>(recipeManager.getRecipePaths());
         String[] savedPaths = new String[10];
-        
+
         for (int i = 0; i < 10; i++) {
             RTLProfile p = recipeManager.getProfile(i);
             if (p.lutIndex >= 0 && p.lutIndex < oldPaths.size()) savedPaths[i] = oldPaths.get(p.lutIndex);
             else savedPaths[i] = "NONE";
         }
-        
+
         recipeManager.scanRecipes();
         List<String> newPaths = recipeManager.getRecipePaths();
-        
+
         for (int i = 0; i < 10; i++) {
             int idx = newPaths.indexOf(savedPaths[i]);
             recipeManager.getProfile(i).lutIndex = (idx != -1) ? idx : 0;
@@ -492,24 +824,18 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         }
         if (playbackController.isActive()) { playbackController.exit(); return; }
         if (menuController.isOpen()) { menuController.close(); return; }
-        if (isProcessing) return; 
-        
+        if (shouldBlockShutterInput()) return;
+
         // mDialMode = DIAL_MODE_RTL; <-- DELETED. Cursor memory is now permanent!
-        
-        if (displayState == 0 && !menuController.isOpen()) setHUDVisibility(View.GONE);
 
-        // --- NEW: FORCED HARDWARE SYNC ---
-        // Ensure the Sony AF sensor target is moved BEFORE the AF trigger fires
-        if (diptychManager != null && diptychManager.isEnabled()) {
-            updateDiptychFocusArea(true);
-        }
-
+        if (displayState == 0 && !menuController.isOpen()) setLiveUiSuppressed(true);
         // Diptych mode: shift AF bracket to the active (open) side before focusing
         if (afOverlay != null && diptychManager != null && diptychManager.isEnabled()) {
             if (diptychManager.getState() == DiptychManager.STATE_NEED_SECOND) {
                 int width = afOverlay.getWidth();
                 if (width <= 0) width = getPreviewWindowWidth();
-                afOverlay.setDiptychCenterX(DiptychFraming.getActiveCenterX(width, diptychManager.isThumbOnLeft()));
+                int offset = diptychManager.isThumbOnLeft() ? width / 4 : -(width / 4);
+                afOverlay.setDiptychCenterX((width / 2) + offset);
             } else {
                 afOverlay.setDiptychCenterX(-1);
             }
@@ -517,50 +843,51 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             afOverlay.setDiptychCenterX(-1);
         }
         if (cameraManager != null && cameraManager.getCamera() != null && !cachedIsManualFocus) {
-            if (afOverlay != null) afOverlay.startFocus(cameraManager.getCamera()); 
+            if (afOverlay != null) afOverlay.startFocus(cameraManager.getCamera());
         }
+        if (displayState == 0 && !menuController.isOpen()) hideLiveViewOverlays();
     }
 
     @Override
     public void onShutterHalfReleased() {
-        if (displayState == 0 && !menuController.isOpen() && !playbackController.isActive()) setHUDVisibility(View.VISIBLE);
-        
-        // --- HARDWARE RESET ---
-        if (diptychManager != null && diptychManager.isEnabled()) {
-            updateDiptychFocusArea(false);
-        }
-        
-        // --- HARDWARE RESET ---
-        if (diptychManager != null && diptychManager.isEnabled()) {
-            updateDiptychFocusArea(false);
-        }
-
         if (afOverlay != null && cameraManager != null && cameraManager.getCamera() != null) {
             afOverlay.stopFocus(cameraManager.getCamera());
             afOverlay.setDiptychCenterX(-1);
         }
-        armFileScanner();
+        if (displayState == 0 && !menuController.isOpen() && !playbackController.isActive()) setLiveUiSuppressed(false);
     }
 
     public void armFileScanner() {
         if (mScanner != null) {
-            mScanner.start();
+            if (pendingShotSnapshot == null) pendingShotSnapshot = createCurrentQueueEntry();
+            if (mScanner.isPolling) mScanner.checkNow();
+            else mScanner.start();
+            final int token = ++captureWriteToken;
+            uiHandler.postDelayed(new Runnable() {
+                @Override public void run() {
+                    if (token == captureWriteToken && !isProcessing && pendingShotSnapshot != null) {
+                        pendingShotSnapshot = null;
+                        captureWritePending = false;
+                        updateMainHUD();
+                    }
+                }
+            }, SCANNER_ARM_TIMEOUT_MS);
         }
     }
 
-    @Override 
-    public void onDeletePressed() { 
-        finish(); 
+    @Override
+    public void onDeletePressed() {
+        finish();
     }
 
-    @Override 
+    @Override
     public void onMenuPressed() {
         if (cameraManager != null) {
             cameraManager.clearPreviewMagnification();
         }
         if (playbackController.isActive()) { playbackController.exit(); return; }
         if (isProcessing) return;
-        
+
         // 1. Contextual Back: If a HUD (like Recipe Vault) is open, close it and reveal the Menu
         if (hudController.isActive()) {
             menuController.setNamingMode(false);
@@ -568,7 +895,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             hudController.close();
             return;
         }
-        
+
         // 2. Contextual Back: If editing a value, cancel the edit. Otherwise, close the Menu.
         if (menuController.isOpen()) {
             if (menuController.cancelAction()) {
@@ -590,18 +917,39 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         uiHandler.postDelayed(hudUpdateRunnable, 100);
     }
 
-    @Override 
-public void onEnterPressed() {
-    if (playbackController.isActive()) { playbackController.exit(); return; }
+    @Override
+    public void onEnterPressed() {
+    if (playbackController.isActive()) { playbackController.select(); return; }
     if (isProcessing) return;
 
     if (hudController.isActive()) {
-        // --- VAULT HUD (MODE 10) ---
+        if (hudController.getSelection() == -2) {
+            if (hudController.getMode() == 10 && menuController.isConfirmingDelete()) {
+                menuController.setConfirmingDelete(false);
+                hudController.setSelection(hudController.getRecipeBrowserSelectedVaultIndex());
+                hudController.update();
+                return;
+            }
+            if (hudController.getMode() == 10 && hudController.isRecipeLoadBrowser()) {
+                hudController.closeRecipeLoadBrowser();
+                return;
+            }
+            if (hudController.getMode() == 10 && hudController.isRecipeDeleteBrowser()) {
+                hudController.closeRecipeDeleteBrowser();
+                return;
+            }
+            menuController.setNamingMode(false);
+            menuController.setConfirmingDelete(false);
+            hudController.close();
+            return;
+        }
+
         // --- VAULT HUD (MODE 10) ---
         if (hudController.getMode() == 10) {
             if (menuController.isNamingMode()) {
                 menuController.setNamingMode(false);
                 String finalName = new String(menuController.getNameBuffer()).trim();
+                if (finalName.isEmpty()) finalName = "CUSTOM";
                 recipeManager.saveSlotToVault(finalName);
                 hudController.refreshVaultItems();
                 for (int i = 0; i < hudController.getVaultItems().size(); i++) {
@@ -610,15 +958,36 @@ public void onEnterPressed() {
                 hudController.update(); return;
             } else if (menuController.isConfirmingDelete()) {
                 if (hudController.getSelection() == 0) {
-                    recipeManager.deleteVaultItem(hudController.getVaultIndex()); hudController.setVaultIndex(0);
-                    hudController.refreshVaultItems();
-                    if (!hudController.getVaultItems().isEmpty() && !hudController.getVaultItems().get(0).filename.equals("NONE")) recipeManager.previewVaultToSlot(hudController.getVaultItems().get(0).filename);
-                    else recipeManager.resetCurrentSlot();
-                    triggerLutPreload(); applyHardwareRecipe();
-                    menuController.setConfirmingDelete(false); hudController.setSelection(1); hudController.update(); return;
+                    int deleteIndex = hudController.getRecipeBrowserSelectedVaultIndex();
+                    if (deleteIndex >= 0) recipeManager.deleteVaultItem(deleteIndex);
+                    menuController.setConfirmingDelete(false);
+                    hudController.refreshRecipeBrowserAfterDelete();
+                    return;
                 } else if (hudController.getSelection() == 1) {
-                    menuController.setConfirmingDelete(false); hudController.setSelection(0); hudController.update(); return;
+                    menuController.setConfirmingDelete(false);
+                    hudController.setSelection(hudController.getRecipeBrowserSelectedVaultIndex());
+                    hudController.update();
+                    return;
                 }
+            } else if (hudController.isRecipeLoadBrowser()) {
+                int loadIndex = hudController.getRecipeBrowserSelectedVaultIndex();
+                if (loadIndex >= 0 && loadIndex < hudController.getVaultItems().size()) {
+                    RecipeManager.VaultItem item = hudController.getVaultItems().get(loadIndex);
+                    if (item != null && item.filename != null && !item.filename.equals("NONE")) {
+                        recipeManager.previewVaultToSlot(item.filename);
+                        triggerLutPreload();
+                        applyHardwareRecipe();
+                        recipeManager.savePreferences();
+                        hudController.close();
+                    }
+                    return;
+                }
+            } else if (hudController.isRecipeDeleteBrowser()) {
+                if (hudController.getRecipeBrowserSelectedVaultIndex() >= 0) {
+                    menuController.setConfirmingDelete(true);
+                    hudController.beginRecipeDeleteConfirm();
+                }
+                return;
             } else {
                 if (hudController.getSelection() == 0) {
                     menuController.setNamingMode(true);
@@ -627,15 +996,8 @@ public void onEnterPressed() {
                     if (currentName != null && !currentName.isEmpty() && !currentName.startsWith("SLOT ")) menuController.fillNameBuffer(currentName);
                     else menuController.resetNameBuffer();
                     menuController.resetNameCursor(); hudController.update(); return;
-                } else if (hudController.getSelection() == 1) { 
-                    // NEW: Explicitly force the highlighted Vault recipe to load into memory!
-                    if (!hudController.getVaultItems().isEmpty() && !hudController.getVaultItems().get(hudController.getVaultIndex()).filename.equals("NONE")) {
-                        recipeManager.previewVaultToSlot(hudController.getVaultItems().get(hudController.getVaultIndex()).filename);
-                        triggerLutPreload(); 
-                        applyHardwareRecipe();
-                    }
-                    recipeManager.savePreferences(); 
-                    hudController.close(); 
+                } else if (hudController.getSelection() == 1) {
+                    hudController.openRecipeLoadBrowser();
                     return;
                 } else if (hudController.getSelection() == 2) {
                     recipeManager.resetCurrentSlot();
@@ -644,28 +1006,27 @@ public void onEnterPressed() {
                     hudController.close(); // NEW: Exit HUD immediately after reset
                     return;
                 } else if (hudController.getSelection() == 3) {
-                    if (!hudController.getVaultItems().isEmpty() && !hudController.getVaultItems().get(hudController.getVaultIndex()).filename.equals("NONE")) {
-                        menuController.setConfirmingDelete(true); hudController.setSelection(1); hudController.update(); return;
-                    }
+                    hudController.openRecipeDeleteBrowser();
+                    return;
                 }
             }
-            
+
             // Clean up UI if we exited the HUD naturally (like hitting Confirm Load)
-            if (!hudController.isActive()) { 
+            if (!hudController.isActive()) {
                 hudController.hideOverlays(); // Safely clear UI without firing redundant close callbacks
-                menuController.getContainer().setVisibility(View.VISIBLE); 
-                menuController.refreshDisplay(); 
+                menuController.getContainer().setVisibility(View.VISIBLE);
+                menuController.refreshDisplay();
             }
             return;
         }
 
-        if (hudController.getMode() == 0 && hudController.getSelection() == -1) {
+        if (hudController.isMatrixSaveAction()) {
             RTLProfile p = recipeManager.getCurrentProfile();
             if (!menuController.isNamingMode()) {
                 for (int i = 0; i < matrixManager.getCount(); i++) {
                     int[] existing = matrixManager.getValues(i); boolean isMatch = true;
                     for (int j = 0; j < 9; j++) if (p.advMatrix[j] != existing[j]) { isMatch = false; break; }
-                    if (isMatch) { tvTopStatus.setText("ALREADY SAVED: " + matrixManager.getNames().get(i)); tvTopStatus.setTextColor(Color.GREEN); return; }
+                    if (isMatch) { tvTopStatus.setText("ALREADY SAVED: " + matrixManager.getNames().get(i)); tvTopStatus.setTextColor(UiTheme.SUCCESS); return; }
                 }
             }
             menuController.setNamingMode(!menuController.isNamingMode());
@@ -675,11 +1036,17 @@ public void onEnterPressed() {
         }
 
         // Standard HUD exit — controller hides overlays and fires onHudClosed callback
+        if (hudController.handleEnter()) {
+            if (!hudController.isActive()) return;
+            if (!hudController.isValueEditing()) recipeManager.savePreferences();
+            return;
+        }
+
         hudController.close();
         recipeManager.savePreferences();
         return;
     }
-        
+
         if (menuController.dispatchHudLaunch()) return;
         if (calibController.handleEnter()) return;
 
@@ -711,7 +1078,9 @@ public void onEnterPressed() {
             cameraManager.movePreviewMagnification(0, -1);
             return true;
         }
-        
+
+        if (playbackController.isActive()) { playbackController.navigate(-2); return true; }
+
         if (hudController.isActive() && (hudController.getMode() == 0 || hudController.getMode() == 10) && menuController.isNamingMode()) {
             char[] buf = menuController.getNameBuffer();
             int pos = menuController.getNameCursorPos();
@@ -723,11 +1092,11 @@ public void onEnterPressed() {
             hudController.update();
             return true;
         }
-        
+
         if (hudController.isActive() && !menuController.isNamingMode()) { hudController.handleUp(); return true; }
-        
+
         if (isProcessing || calibController.isWaiting()) return true;
-        
+
         if (calibController.handleUp()) return true;
 
         if (menuController.isOpen()) { menuController.handleUp(); return true; }
@@ -742,7 +1111,9 @@ public void onEnterPressed() {
             cameraManager.movePreviewMagnification(0, 1);
             return true;
         }
-        
+
+        if (playbackController.isActive()) { playbackController.navigate(2); return true; }
+
         if (hudController.isActive() && (hudController.getMode() == 0 || hudController.getMode() == 10) && menuController.isNamingMode()) {
             char[] buf = menuController.getNameBuffer();
             int pos = menuController.getNameCursorPos();
@@ -754,11 +1125,11 @@ public void onEnterPressed() {
             hudController.update();
             return true;
         }
-        
+
         if (hudController.isActive() && !menuController.isNamingMode()) { hudController.handleDown(); return true; }
-        
+
         if (isProcessing) return true;
-        
+
         if (calibController.handleDown()) return true;
 
         if (menuController.isOpen()) { menuController.handleDown(); return true; }
@@ -773,19 +1144,19 @@ public void onEnterPressed() {
             cameraManager.movePreviewMagnification(-1, 0);
             return true;
         }
-        
+
         if (diptychManager != null && diptychManager.isEnabled() && diptychManager.getState() == DiptychManager.STATE_NEED_SECOND) {
             diptychManager.setThumbOnLeft(true);
             updateDiptychPreviewWindow();
             return true;
         }
-        
+
         if (hudController.isActive() && (hudController.getMode() == 0 || hudController.getMode() == 10) && menuController.isNamingMode()) {
             menuController.advanceNameCursor(-1);
             hudController.update();
             return true;
         }
-        
+
         if (hudController.isActive() && !menuController.isNamingMode()) { hudController.handleLeft(); return true; }
         if (isProcessing) return true;
         if (calibController.handleLeft()) return true;
@@ -809,24 +1180,24 @@ public void onEnterPressed() {
             cameraManager.movePreviewMagnification(1, 0);
             return true;
         }
-        
+
         if (diptychManager != null && diptychManager.isEnabled() && diptychManager.getState() == DiptychManager.STATE_NEED_SECOND) {
             diptychManager.setThumbOnLeft(false);
             updateDiptychPreviewWindow();
             return true;
         }
-        
+
         if (hudController.isActive() && (hudController.getMode() == 0 || hudController.getMode() == 10) && menuController.isNamingMode()) {
             menuController.advanceNameCursor(1);
             hudController.update();
             return true;
         }
-        
+
         if (hudController.isActive() && !menuController.isNamingMode()) { hudController.handleRight(); return true; }
         if (isProcessing) return true;
         if (calibController.handleRight()) return true;
-        if (menuController.isOpen()) { menuController.handleRight(); return true; } 
-        
+        if (menuController.isOpen()) { menuController.handleRight(); return true; }
+
         if (!playbackController.isActive() && mDialMode == DIAL_MODE_FOCUS && lensManager != null && lensManager.isCurrentProfileManual()) {
             virtualFocusRatio = Math.min(1.0f, virtualFocusRatio + 0.02f);
             if (focusMeter != null) focusMeter.update(virtualFocusRatio, virtualAperture, lensManager.getCurrentFocalLength(), false, lensManager.getCurrentPoints(), getCircleOfConfusion());
@@ -841,7 +1212,7 @@ public void onEnterPressed() {
     @Override
     public boolean onCustomButtonReleased(String keyId) {
         if (playbackController.isActive() || menuController.isOpen() || isProcessing || calibController.isCalibrating()) {
-            return false; 
+            return false;
         }
 
         int action = 0;
@@ -855,13 +1226,14 @@ public void onEnterPressed() {
 
         return true; // We handled the action in our app, safely swallow the release!
     }
-    
+
     private void saveAppPreferences() {
         SharedPreferences.Editor ed = getSharedPreferences("JPEG.CAM_Prefs", MODE_PRIVATE).edit();
         ed.putBoolean("focusMeter",    prefShowFocusMeter);
         ed.putBoolean("cinemaMattes",  prefShowCinemaMattes);
         ed.putBoolean("gridLines",     prefShowGridLines);
         ed.putInt("jpegQuality",       prefJpegQuality);
+        ed.putInt("processingFrequency", processingFrequency);
         ed.putBoolean("diptychEnabled", isPrefDiptych());
         ed.apply();
     }
@@ -869,7 +1241,7 @@ public void onEnterPressed() {
     @Override
     public boolean onCustomButtonPressed(String keyId) {
         if (playbackController.isActive() || menuController.isOpen() || isProcessing || calibController.isCalibrating()) {
-            return false; 
+            return false;
         }
 
         int action = 0;
@@ -890,7 +1262,7 @@ public void onEnterPressed() {
                 cameraManager.togglePreviewMagnification();
                 requestHudUpdate();
             }
-            return true; 
+            return true;
         } else if (action == 3) { // TOGGLE FOCUS METER
             setPrefFocusMeter(!isPrefFocusMeter());
             saveAppPreferences();
@@ -900,9 +1272,9 @@ public void onEnterPressed() {
             int mode = 0;
             if (isPrefCinemaMattes()) mode = 1;
             else if (isPrefDiptych()) mode = 2;
-            
+
             mode = (mode + 1) % 3;
-            
+
             setPrefCinemaMattes(mode == 1);
             setPrefDiptych(mode == 2);
             saveAppPreferences();
@@ -913,16 +1285,32 @@ public void onEnterPressed() {
             saveAppPreferences();
             updateMainHUD();
             return true;
+        } else if (action == 6) { // SHUTTER SPEED
+            mDialMode = DIAL_MODE_SHUTTER;
+            updateMainHUD();
+            return true;
+        } else if (action == 7) { // APERTURE
+            mDialMode = DIAL_MODE_APERTURE;
+            updateMainHUD();
+            return true;
+        } else if (action == 8) { // EXPOSURE COMP
+            mDialMode = DIAL_MODE_EXPOSURE;
+            updateMainHUD();
+            return true;
+        } else if (action == 9) { // RECIPE SELECTION
+            mDialMode = DIAL_MODE_RTL;
+            updateMainHUD();
+            return true;
         }
 
         return false;
     }
-    
-    @Override 
-    public void onFrontDialRotated(int direction) { 
+
+    @Override
+    public void onFrontDialRotated(int direction) {
         // If UI is open, act like a normal scroll wheel
         if (hudController.isActive() || playbackController.isActive() || menuController.isOpen()) { onControlWheelRotated(direction); return; }
-        
+
         // If shooting, forcefully change Shutter Speed
         if (!isProcessing && cameraManager != null && cameraManager.getCameraEx() != null) {
             if (direction > 0) cameraManager.getCameraEx().incrementShutterSpeed();
@@ -931,11 +1319,11 @@ public void onEnterPressed() {
         }
     }
 
-    @Override 
-    public void onRearDialRotated(int direction) { 
+    @Override
+    public void onRearDialRotated(int direction) {
         // If UI is open, act like a normal scroll wheel
         if (hudController.isActive() || playbackController.isActive() || menuController.isOpen()) { onControlWheelRotated(direction); return; }
-        
+
         // If shooting, forcefully change Aperture
         if (!isProcessing && cameraManager != null && cameraManager.getCameraEx() != null) {
             if (cachedIsManualFocus && lensManager != null && lensManager.isCurrentProfileManual()) {
@@ -948,14 +1336,14 @@ public void onEnterPressed() {
         }
     }
 
-    @Override 
-    public void onControlWheelRotated(int direction) { 
+    @Override
+    public void onControlWheelRotated(int direction) {
         if (cameraManager != null && cameraManager.isPreviewMagnificationActive()
                 && !playbackController.isActive() && !menuController.isOpen() && !hudController.isActive()) {
             cameraManager.movePreviewMagnification(direction > 0 ? 1 : -1, 0);
             return;
         }
-        
+
         // --- NEW: INTERCEPT WHEEL TURNS FOR MATRIX NAMING ---
         if (hudController.isActive() && (hudController.getMode() == 0 || hudController.getMode() == 10) && menuController.isNamingMode()) {
             char[] buf = menuController.getNameBuffer();
@@ -967,15 +1355,15 @@ public void onEnterPressed() {
             hudController.update();
             return;
         }
-        
+
         if (hudController.isActive() && !menuController.isNamingMode()) { hudController.handleDial(direction); return; }
-        
-        if (playbackController.isActive()) { 
-            playbackController.navigate(direction); 
+
+        if (playbackController.isActive()) {
+            playbackController.navigate(direction);
         } else if (menuController.isOpen()) {
             menuController.handleDial(direction);
         } else if (!isProcessing) {
-            handleHardwareInput(direction); 
+            handleHardwareInput(direction);
         }
     }
 
@@ -985,53 +1373,53 @@ public void onEnterPressed() {
             case DIAL_MODE_SHUTTER:
                 if (keyCode == ScalarInput.ISV_KEY_RIGHT) mDialMode = DIAL_MODE_APERTURE;
                 else if (keyCode == ScalarInput.ISV_KEY_UP) mDialMode = DIAL_MODE_FOCUS;
-                else if (keyCode == ScalarInput.ISV_KEY_LEFT) mDialMode = DIAL_MODE_FOCUS; 
+                else if (keyCode == ScalarInput.ISV_KEY_LEFT) mDialMode = DIAL_MODE_FOCUS;
                 break;
             case DIAL_MODE_APERTURE:
                 if (keyCode == ScalarInput.ISV_KEY_LEFT) mDialMode = DIAL_MODE_SHUTTER;
                 else if (keyCode == ScalarInput.ISV_KEY_RIGHT) mDialMode = DIAL_MODE_ISO;
-                else if (keyCode == ScalarInput.ISV_KEY_UP) mDialMode = DIAL_MODE_PASM; 
+                else if (keyCode == ScalarInput.ISV_KEY_UP) mDialMode = DIAL_MODE_PASM;
                 break;
             case DIAL_MODE_ISO:
                 if (keyCode == ScalarInput.ISV_KEY_LEFT) mDialMode = DIAL_MODE_APERTURE;
                 else if (keyCode == ScalarInput.ISV_KEY_RIGHT) mDialMode = DIAL_MODE_EXPOSURE;
-                else if (keyCode == ScalarInput.ISV_KEY_UP) mDialMode = DIAL_MODE_REVIEW; 
+                else if (keyCode == ScalarInput.ISV_KEY_UP) mDialMode = DIAL_MODE_REVIEW;
                 break;
             case DIAL_MODE_EXPOSURE:
                 if (keyCode == ScalarInput.ISV_KEY_LEFT) mDialMode = DIAL_MODE_ISO;
                 else if (keyCode == ScalarInput.ISV_KEY_UP) mDialMode = DIAL_MODE_REVIEW;
-                else if (keyCode == ScalarInput.ISV_KEY_RIGHT) mDialMode = DIAL_MODE_REVIEW; 
+                else if (keyCode == ScalarInput.ISV_KEY_RIGHT) mDialMode = DIAL_MODE_REVIEW;
                 break;
-            case DIAL_MODE_REVIEW: 
+            case DIAL_MODE_REVIEW:
                 if (keyCode == ScalarInput.ISV_KEY_DOWN) mDialMode = DIAL_MODE_EXPOSURE;
                 else if (keyCode == ScalarInput.ISV_KEY_LEFT) mDialMode = DIAL_MODE_RTL;
-                else if (keyCode == ScalarInput.ISV_KEY_RIGHT) mDialMode = DIAL_MODE_EXPOSURE; 
-                else if (keyCode == ScalarInput.ISV_KEY_UP) mDialMode = DIAL_MODE_RTL; 
+                else if (keyCode == ScalarInput.ISV_KEY_RIGHT) mDialMode = DIAL_MODE_EXPOSURE;
+                else if (keyCode == ScalarInput.ISV_KEY_UP) mDialMode = DIAL_MODE_RTL;
                 break;
-            case DIAL_MODE_RTL: 
+            case DIAL_MODE_RTL:
                 if (keyCode == ScalarInput.ISV_KEY_DOWN) mDialMode = DIAL_MODE_PASM;
                 else if (keyCode == ScalarInput.ISV_KEY_RIGHT) mDialMode = DIAL_MODE_REVIEW;
-                else if (keyCode == ScalarInput.ISV_KEY_LEFT) mDialMode = DIAL_MODE_PASM; 
+                else if (keyCode == ScalarInput.ISV_KEY_LEFT) mDialMode = DIAL_MODE_PASM;
                 break;
-            case DIAL_MODE_PASM: 
+            case DIAL_MODE_PASM:
                 if (keyCode == ScalarInput.ISV_KEY_DOWN) mDialMode = DIAL_MODE_FOCUS;
                 else if (keyCode == ScalarInput.ISV_KEY_RIGHT) mDialMode = DIAL_MODE_RTL;
                 else if (keyCode == ScalarInput.ISV_KEY_UP) mDialMode = DIAL_MODE_RTL;
-                else if (keyCode == ScalarInput.ISV_KEY_LEFT) mDialMode = DIAL_MODE_FOCUS; 
+                else if (keyCode == ScalarInput.ISV_KEY_LEFT) mDialMode = DIAL_MODE_FOCUS;
                 break;
-            case DIAL_MODE_FOCUS: 
+            case DIAL_MODE_FOCUS:
                 if (keyCode == ScalarInput.ISV_KEY_UP) mDialMode = DIAL_MODE_PASM;
                 else if (keyCode == ScalarInput.ISV_KEY_DOWN) mDialMode = DIAL_MODE_SHUTTER;
-                else if (keyCode == ScalarInput.ISV_KEY_RIGHT) mDialMode = DIAL_MODE_PASM; 
-                else if (keyCode == ScalarInput.ISV_KEY_LEFT) mDialMode = DIAL_MODE_SHUTTER; 
+                else if (keyCode == ScalarInput.ISV_KEY_RIGHT) mDialMode = DIAL_MODE_PASM;
+                else if (keyCode == ScalarInput.ISV_KEY_LEFT) mDialMode = DIAL_MODE_SHUTTER;
                 break;
         }
-        updateMainHUD(); 
+        updateMainHUD();
     }
-    
 
 
-    
+
+
     private void autoEquipMatchingLens(float hwFocal) {
         availableLenses = lensManager.getAvailableLenses();
         String matchedLens = null;
@@ -1047,15 +1435,15 @@ public void onEnterPressed() {
             currentLensIndex = availableLenses.indexOf(matchedLens);
             lensManager.loadProfileFromFile(matchedLens);
         } else {
-            lensManager.clearCurrentProfile(); 
+            lensManager.clearCurrentProfile();
         }
     }
-    
+
     private void adjustVirtualAperture(int direction) {
         float[] stops = {1.0f, 1.2f, 1.4f, 1.8f, 2.0f, 2.8f, 4.0f, 5.6f, 8.0f, 11.0f, 16.0f, 22.0f};
         int currentIndex = 0;
         float minDiff = Float.MAX_VALUE;
-        
+
         for (int i = 0; i < stops.length; i++) {
             float diff = Math.abs(stops[i] - virtualAperture);
             if (diff < minDiff) {
@@ -1063,13 +1451,13 @@ public void onEnterPressed() {
                 currentIndex = i;
             }
         }
-        
+
         currentIndex += direction;
         if (currentIndex < 0) currentIndex = 0;
         if (currentIndex >= stops.length) currentIndex = stops.length - 1;
-        
+
         virtualAperture = stops[currentIndex];
-        
+
         if (lensManager != null && virtualAperture < lensManager.currentMaxAperture) {
             virtualAperture = lensManager.currentMaxAperture;
         }
@@ -1080,33 +1468,33 @@ public void onEnterPressed() {
         if (isDialLocked) return; // <--- NEW: Block the dial from changing values
 
         if (cameraManager == null || cameraManager.getCamera() == null || cameraManager.getCameraEx() == null) return;
-        
+
         Camera c = cameraManager.getCamera();
         CameraEx cx = cameraManager.getCameraEx();
-        Camera.Parameters p = c.getParameters(); 
+        Camera.Parameters p = c.getParameters();
         CameraEx.ParametersModifier pm = cx.createParametersModifier(p);
-        
-        if (mDialMode == DIAL_MODE_RTL) { 
-            recipeManager.setCurrentSlot(recipeManager.getCurrentSlot() + d); 
-            applyHardwareRecipe(); 
-            triggerLutPreload(); 
+
+        if (mDialMode == DIAL_MODE_RTL) {
+            recipeManager.setCurrentSlot(recipeManager.getCurrentSlot() + d);
+            applyHardwareRecipe();
+            triggerLutPreload();
         }
-        else if (mDialMode == DIAL_MODE_SHUTTER) { 
-            if (d > 0) cx.incrementShutterSpeed(); else cx.decrementShutterSpeed(); 
+        else if (mDialMode == DIAL_MODE_SHUTTER) {
+            if (d > 0) cx.incrementShutterSpeed(); else cx.decrementShutterSpeed();
         }
-        else if (mDialMode == DIAL_MODE_APERTURE) { 
+        else if (mDialMode == DIAL_MODE_APERTURE) {
             if (cachedIsManualFocus && lensManager != null && lensManager.isCurrentProfileManual()) {
                 adjustVirtualAperture(d);
             } else {
-                if (d > 0) cx.incrementAperture(); else cx.decrementAperture(); 
+                if (d > 0) cx.incrementAperture(); else cx.decrementAperture();
             }
         }
         else if (mDialMode == DIAL_MODE_ISO) {
             List<Integer> isos = (List<Integer>) pm.getSupportedISOSensitivities();
             if (isos != null) {
                 int idx = isos.indexOf(pm.getISOSensitivity());
-                if (idx != -1) { 
-                    pm.setISOSensitivity(isos.get(Math.max(0, Math.min(isos.size()-1, idx + d)))); 
+                if (idx != -1) {
+                    pm.setISOSensitivity(isos.get(Math.max(0, Math.min(isos.size()-1, idx + d))));
                     try { c.setParameters(p); } catch (Exception e) {}
                 }
             }
@@ -1118,16 +1506,16 @@ public void onEnterPressed() {
         }
         else if (mDialMode == DIAL_MODE_PASM) {
             if (hasPhysicalPasmDial) return; // <-- NEW: Prevent software override on A7II!
-            
-            List<String> valid = new ArrayList<String>(); 
+
+            List<String> valid = new ArrayList<String>();
             String[] desired = {"program-auto", "aperture-priority", "shutter-priority", "shutter-speed", "manual-exposure","auto"};
             List<String> supported = p.getSupportedSceneModes();
             if (supported != null) {
-                for (String s : desired) if (supported.contains(s)) valid.add(s); 
+                for (String s : desired) if (supported.contains(s)) valid.add(s);
                 if (!valid.isEmpty()) {
-                    int idx = valid.indexOf(p.getSceneMode()); 
-                    if (idx == -1) idx = 0; 
-                    p.setSceneMode(valid.get((idx + d + valid.size()) % valid.size())); 
+                    int idx = valid.indexOf(p.getSceneMode());
+                    if (idx == -1) idx = 0;
+                    p.setSceneMode(valid.get((idx + d + valid.size()) % valid.size()));
                     try { c.setParameters(p); } catch (Exception e) {}
                 }
             }
@@ -1135,12 +1523,12 @@ public void onEnterPressed() {
         else if (mDialMode == DIAL_MODE_FOCUS) {
             List<String> hwModes = p.getSupportedFocusModes();
             List<String> virtualModes = new ArrayList<String>();
-            
+
             if (hwModes != null) {
                 for (String m : hwModes) {
                     if (m.equals("manual")) {
                         availableLenses = lensManager.getAvailableLenses();
-                        virtualModes.add("manual_unmapped"); 
+                        virtualModes.add("manual_unmapped");
                         for (String l : availableLenses) {
                             virtualModes.add("manual_" + l);
                         }
@@ -1149,7 +1537,7 @@ public void onEnterPressed() {
                     }
                 }
             }
-            
+
             String currentVirtual = p.getFocusMode();
             if ("manual".equals(currentVirtual)) {
                  String loaded = lensManager.getCurrentLensName();
@@ -1159,12 +1547,12 @@ public void onEnterPressed() {
                      currentVirtual = "manual_" + loaded;
                  }
             }
-            
+
             int idx = virtualModes.indexOf(currentVirtual);
             if (idx == -1) idx = 0;
-            
+
             String nextVirtual = virtualModes.get((idx + d + virtualModes.size()) % virtualModes.size());
-            
+
             if (nextVirtual.startsWith("manual_")) {
                 p.setFocusMode("manual");
                 String lensFile = nextVirtual.replace("manual_", "");
@@ -1186,19 +1574,19 @@ public void onEnterPressed() {
                     } catch (Throwable t) {}
                 }
                 if (p.get("sony-focus-area") != null) p.set("sony-focus-area", "wide");
-                
+
                 p.setFocusMode(nextVirtual);
             }
-            
-            try { 
-                c.setParameters(p); 
+
+            try {
+                c.setParameters(p);
             } catch (Exception e) {
                 android.util.Log.e("JPEG.CAM", "Failed to set focus mode: " + e.getMessage());
             }
         }
-        updateMainHUD(); 
+        updateMainHUD();
     }
-    
+
     // --- NEW: KELVIN CYCLE HELPER ---
 
     private void applyHardwareRecipe() {
@@ -1217,7 +1605,7 @@ public void onEnterPressed() {
     }
 
 
-    
+
 
 
 
@@ -1230,107 +1618,111 @@ public void onEnterPressed() {
     }
 
     private void launchHudMode(int mode) { launchHudMode(mode, 0); }
-    
+
 
     private void buildUI(FrameLayout rootLayout) {
-        mainUIContainer = new FrameLayout(this); 
+        mainUIContainer = new FrameLayout(this);
         rootLayout.addView(mainUIContainer, new FrameLayout.LayoutParams(-1, -1));
-        
-        gridLines = new GridLinesView(this); 
+
+        gridLines = new GridLinesView(this);
         mainUIContainer.addView(gridLines, new FrameLayout.LayoutParams(-1, -1));
-        
-        cinemaMattes = new CinemaMatteView(this); 
+
+        cinemaMattes = new CinemaMatteView(this);
         mainUIContainer.addView(cinemaMattes, new FrameLayout.LayoutParams(-1, -1));
-        
-        tvTopStatus = new TextView(this); 
-        tvTopStatus.setTextColor(Color.WHITE); 
-        tvTopStatus.setTextSize(20); 
-        if (digitalFont != null) tvTopStatus.setTypeface(digitalFont);
-        else tvTopStatus.setTypeface(Typeface.DEFAULT_BOLD); 
+
+        tvTopStatus = new TextView(this);
+        UiTheme.applyStatusText(tvTopStatus, 18, digitalFont);
         tvTopStatus.setGravity(Gravity.CENTER);
-        
-        FrameLayout.LayoutParams topParams = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL); 
-        topParams.setMargins(0, 15, 0, 0); 
+        tvTopStatus.setPadding(16, 8, 16, 8);
+        UiTheme.softPanel(tvTopStatus);
+
+        FrameLayout.LayoutParams topParams = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        topParams.setMargins(0, 15, 0, 0);
         // REVERT to mainUIContainer
         mainUIContainer.addView(tvTopStatus, topParams);
-        
-        LinearLayout rightBar = new LinearLayout(this); 
-        rightBar.setOrientation(LinearLayout.VERTICAL); 
+
+        LinearLayout rightBar = new LinearLayout(this);
+        rightBar.setOrientation(LinearLayout.VERTICAL);
         rightBar.setGravity(Gravity.RIGHT);
-        
-        LinearLayout batteryArea = new LinearLayout(this); 
+
+        LinearLayout batteryArea = new LinearLayout(this);
         batteryArea.setOrientation(LinearLayout.HORIZONTAL);
         batteryArea.setGravity(Gravity.CENTER_VERTICAL | Gravity.RIGHT);
-        
-        tvBattery = new TextView(this); 
-        tvBattery.setTextColor(Color.rgb(227, 69, 20)); // JPEG.CAM Orange
-        tvBattery.setTextSize(14); 
-        tvBattery.setTypeface(Typeface.DEFAULT_BOLD); 
-        tvBattery.setPadding(0, 0, 5, 0); 
-        batteryArea.addView(tvBattery); // <--- THIS line was missing!
-        
-        batteryIcon = new BatteryView(this); 
-        batteryArea.addView(batteryIcon, new LinearLayout.LayoutParams(28, 12)); 
+
+        tvBattery = new TextView(this);
+        tvBattery.setTextColor(UiTheme.ACCENT);
+        tvBattery.setTextSize(14);
+        tvBattery.setTypeface(Typeface.DEFAULT_BOLD);
+        tvBattery.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        tvBattery.setPadding(0, 0, 5, 0);
+        tvBattery.setSingleLine(true);
+        tvBattery.setMinWidth(46);
+        tvBattery.setText("--%");
+        batteryArea.addView(tvBattery, new LinearLayout.LayoutParams(46, -2));
+
+        batteryIcon = new BatteryView(this);
+        batteryArea.addView(batteryIcon, new LinearLayout.LayoutParams(28, 12));
         rightBar.addView(batteryArea);
-        
-        tvReview = createSideTextIcon("▶"); 
-        LinearLayout.LayoutParams rvParams = new LinearLayout.LayoutParams(-2, -2); 
-        rvParams.setMargins(0, 20, 0, 0); 
-        tvReview.setLayoutParams(rvParams); 
+
+        tvReview = createSideTextIcon("▶");
+        LinearLayout.LayoutParams rvParams = new LinearLayout.LayoutParams(-2, -2);
+        rvParams.setMargins(0, 20, 0, 0);
+        tvReview.setLayoutParams(rvParams);
         rightBar.addView(tvReview);
-        
-        FrameLayout.LayoutParams rightParams = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.RIGHT); 
-        rightParams.setMargins(0, 20, 30, 0); 
+
+        FrameLayout.LayoutParams rightParams = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.RIGHT);
+        rightParams.setMargins(0, 20, 30, 0);
         mainUIContainer.addView(rightBar, rightParams);
-        
-        LinearLayout leftBar = new LinearLayout(this); 
-        leftBar.setOrientation(LinearLayout.VERTICAL); 
-        tvMode = createSideTextIcon("M"); 
-        leftBar.addView(tvMode); 
-        tvFocusMode = createSideTextIcon("AF-S"); 
+
+        LinearLayout leftBar = new LinearLayout(this);
+        leftBar.setOrientation(LinearLayout.VERTICAL);
+        tvMode = createSideTextIcon("M");
+        leftBar.addView(tvMode);
+        tvFocusMode = createSideTextIcon("AF-S");
         leftBar.addView(tvFocusMode);
-        
-        FrameLayout.LayoutParams leftParams = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.LEFT); 
-        leftParams.setMargins(20, 20, 0, 0); 
+
+        FrameLayout.LayoutParams leftParams = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.LEFT);
+        leftParams.setMargins(20, 20, 0, 0);
         mainUIContainer.addView(leftBar, leftParams);
-        
-        focusMeter = new AdvancedFocusMeterView(this); 
-        FrameLayout.LayoutParams fmParams = new FrameLayout.LayoutParams(-1, 140, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL); 
-        fmParams.setMargins(0, 0, 0, 70); 
+
+        focusMeter = new AdvancedFocusMeterView(this);
+        FrameLayout.LayoutParams fmParams = new FrameLayout.LayoutParams(-1, 140, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        fmParams.setMargins(0, 0, 0, 70);
         mainUIContainer.addView(focusMeter, fmParams);
-        
-        llBottomBar = new LinearLayout(this); 
-        llBottomBar.setOrientation(LinearLayout.HORIZONTAL); 
-        llBottomBar.setGravity(Gravity.CENTER); 
-        
-        tvValShutter = createBottomText(); 
-        tvValAperture = createBottomText(); 
-        tvValIso = createBottomText(); 
+
+        llBottomBar = new LinearLayout(this);
+        llBottomBar.setOrientation(LinearLayout.HORIZONTAL);
+        llBottomBar.setGravity(Gravity.CENTER);
+        llBottomBar.setPadding(8, 0, 8, 0);
+
+        tvValShutter = createBottomText();
+        tvValAperture = createBottomText();
+        tvValIso = createBottomText();
         tvValEv = createBottomText();
-        
-        llBottomBar.addView(tvValShutter); 
-        llBottomBar.addView(tvValAperture); 
-        llBottomBar.addView(tvValIso); 
-        llBottomBar.addView(tvValEv);
-        
-        FrameLayout.LayoutParams botParams = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM); 
-        botParams.setMargins(0, 0, 0, 25); 
+
+        addBottomHudBubble(tvValShutter);
+        addBottomHudBubble(tvValAperture);
+        addBottomHudBubble(tvValIso);
+        addBottomHudBubble(tvValEv);
+
+        FrameLayout.LayoutParams botParams = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
+        botParams.setMargins(0, 0, 0, 25);
         mainUIContainer.addView(llBottomBar, botParams);
-        
-        afOverlay = new ProReticleView(this); 
+
+        afOverlay = new ProReticleView(this);
         mainUIContainer.addView(afOverlay, new FrameLayout.LayoutParams(-1, -1));
-        
-        tvCalibrationPrompt = new TextView(this); 
-        tvCalibrationPrompt.setTextColor(Color.WHITE); 
-        tvCalibrationPrompt.setTextSize(18); 
-        tvCalibrationPrompt.setTypeface(Typeface.MONOSPACE, Typeface.BOLD); 
-        tvCalibrationPrompt.setGravity(Gravity.CENTER); 
-        tvCalibrationPrompt.setBackgroundColor(Color.argb(200, 0, 0, 0)); 
+
+        tvCalibrationPrompt = new TextView(this);
+        tvCalibrationPrompt.setTextColor(UiTheme.TEXT);
+        tvCalibrationPrompt.setTextSize(18);
+        tvCalibrationPrompt.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        tvCalibrationPrompt.setGravity(Gravity.CENTER);
+        UiTheme.panel(tvCalibrationPrompt);
         tvCalibrationPrompt.setPadding(10, 15, 10, 15);
         tvCalibrationPrompt.setVisibility(View.GONE);
-        
-        FrameLayout.LayoutParams cpParams = new FrameLayout.LayoutParams(-1, -2, Gravity.TOP); 
-        cpParams.setMargins(0, 20, 0, 0); 
+
+        FrameLayout.LayoutParams cpParams = new FrameLayout.LayoutParams(-1, -2, Gravity.TOP);
+        cpParams.setMargins(0, 20, 0, 0);
         mainUIContainer.addView(tvCalibrationPrompt, cpParams);
 
         // Calibration controller — receives the prompt view it needs to render into
@@ -1344,46 +1736,69 @@ public void onEnterPressed() {
 
         // HUD controller — builds and owns its overlay views
         hudController = new HudController(this, mainUIContainer, this);
-        
+
         diptychManager = new DiptychManager(this, mainUIContainer, tvTopStatus);
     }
 
 
-    private TextView createBottomText() { 
-        TextView tv = new TextView(this); 
-        tv.setTextSize(26); 
+    private TextView createBottomText() {
+        TextView tv = new TextView(this);
+        tv.setTextSize(21);
         if (digitalFont != null) tv.setTypeface(digitalFont);
-        else tv.setTypeface(Typeface.DEFAULT_BOLD); 
-        tv.setShadowLayer(4, 0, 0, Color.BLACK); 
-        tv.setPadding(20, 0, 20, 0); 
-        return tv; 
+        else tv.setTypeface(Typeface.DEFAULT_BOLD);
+        tv.setTextColor(UiTheme.ACCENT);
+        tv.setGravity(Gravity.CENTER);
+        tv.setSingleLine(true);
+        tv.setShadowLayer(4, 0, 0, UiTheme.SHADOW);
+        tv.setPadding(8, 4, 8, 4);
+        UiTheme.actionPanel(tv, UiTheme.ACCENT, false, true);
+        return tv;
     }
-    
-    private TextView createSideTextIcon(String text) { 
-        TextView tv = new TextView(this); 
-        tv.setText(text); 
-        tv.setTextColor(Color.WHITE); 
-        tv.setTextSize(22); 
+
+    private void addBottomHudBubble(TextView tv) {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1.0f);
+        lp.setMargins(4, 0, 4, 0);
+        llBottomBar.addView(tv, lp);
+    }
+
+    private TextView createSideTextIcon(String text) {
+        TextView tv = new TextView(this);
+        tv.setText(text);
+        tv.setTextColor(UiTheme.TEXT);
+        tv.setTextSize(20);
         if (digitalFont != null) tv.setTypeface(digitalFont);
-        else tv.setTypeface(Typeface.MONOSPACE, Typeface.BOLD); 
-        tv.setPadding(25, 15, 25, 15); 
-        tv.setBackgroundColor(Color.argb(140, 40, 40, 40)); 
-        tv.setGravity(Gravity.CENTER); 
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2); 
-        lp.setMargins(0, 0, 0, 15); 
-        tv.setLayoutParams(lp); 
-        return tv; 
+        else tv.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        tv.setPadding(20, 12, 20, 12);
+        UiTheme.softPanel(tv);
+        tv.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+        lp.setMargins(0, 0, 0, 15);
+        tv.setLayoutParams(lp);
+        return tv;
     }
-    
+
+    private void styleLiveHudBubble(TextView tv, boolean selected, boolean editing) {
+        if (tv == null) return;
+        if (selected) {
+            UiTheme.selected(tv, UiTheme.ACCENT);
+            tv.setTextColor(editing ? UiTheme.WARN : UiTheme.TEXT);
+            tv.setShadowLayer(2, 0, 0, UiTheme.SHADOW);
+        } else {
+            UiTheme.actionPanel(tv, UiTheme.ACCENT, false, true);
+            tv.setTextColor(UiTheme.ACCENT);
+            tv.setShadowLayer(3, 0, 0, UiTheme.SHADOW);
+        }
+    }
+
     @Override
     public boolean dispatchKeyEvent(android.view.KeyEvent event) {
         int keyCode = event.getKeyCode();
         int action = event.getAction();
 
         // --- 1. THE PASM DIAL SHIELD ---
-        if (keyCode == 624 || keyCode == ScalarInput.ISV_KEY_MODE_DIAL || 
+        if (keyCode == 624 || keyCode == ScalarInput.ISV_KEY_MODE_DIAL ||
            (keyCode >= ScalarInput.ISV_KEY_MODE_INVALID && keyCode <= ScalarInput.ISV_KEY_MODE_CUSTOM3)) {
-            
+
             if (action == android.view.KeyEvent.ACTION_DOWN) {
                 if (!hasPhysicalPasmDial) hasPhysicalPasmDial = true;
                 if (cameraManager != null) onHardwareStateChanged();
@@ -1393,12 +1808,12 @@ public void onEnterPressed() {
 
         // --- 2. THE PLAYBACK BUTTON HIJACK ---
         if (keyCode == ScalarInput.ISV_KEY_PLAY || keyCode == android.view.KeyEvent.KEYCODE_MEDIA_PLAY) {
-            
+
             // We only trigger our logic when the user RELEASES the button (ACTION_UP)
             // But we return 'true' for BOTH press and release to swallow it entirely.
             if (action == android.view.KeyEvent.ACTION_UP) {
                 if (!isProcessing) {
-                    if (playbackController.isActive()) playbackController.exit(); 
+                    if (playbackController.isActive()) playbackController.exit();
                     else if (!menuController.isOpen()) playbackController.enter();
                 }
             }
@@ -1408,7 +1823,7 @@ public void onEnterPressed() {
         // Pass all other normal buttons (D-Pad, Center button, etc.) down to your normal listeners
         return super.dispatchKeyEvent(event);
     }
-    
+
     @Override
 
     public boolean onKeyDown(int k, android.view.KeyEvent e) {
@@ -1418,17 +1833,19 @@ public void onEnterPressed() {
 
         if (k == 624 || k == ScalarInput.ISV_KEY_MODE_DIAL ||
            (k >= ScalarInput.ISV_KEY_MODE_INVALID && k <= ScalarInput.ISV_KEY_MODE_CUSTOM3)) {
-           
+
             // AUTO-DISCOVERY: If boot detection failed but they turned a physical dial,
             // lock out the software wheel permanently for this session!
             if (!hasPhysicalPasmDial) hasPhysicalPasmDial = true;
-           
+
             if (cameraManager != null) onHardwareStateChanged();
             return true; // Prevents the OS from force-closing the app
         }
-       
-        if (isProcessing && (sc == ScalarInput.ISV_KEY_S1_1 || sc == ScalarInput.ISV_KEY_S1_2 || sc == ScalarInput.ISV_KEY_S2 ||
-                             k == ScalarInput.ISV_KEY_S1_1 || k == ScalarInput.ISV_KEY_S1_2 || k == ScalarInput.ISV_KEY_S2)) return true;
+
+        if (shouldBlockShutterInput() && isShutterInput(sc, k)) return true;
+        if (isFullShutterInput(sc, k) && (e == null || e.getRepeatCount() == 0)) {
+            armFileScanner();
+        }
 
         // --- FIXED: Added standard Android keycode ---
 
@@ -1442,34 +1859,38 @@ public void onEnterPressed() {
         return super.onKeyDown(k, e);
     }
 
-    @Override 
-    public boolean onKeyUp(int k, android.view.KeyEvent e) { 
+    @Override
+    public boolean onKeyUp(int k, android.view.KeyEvent e) {
         int sc = e != null ? e.getScanCode() : 0;
         // UNIVERSAL CRASH PROTECTION: Swallow dial events on ALL cameras
-        if (k == 624 || k == ScalarInput.ISV_KEY_MODE_DIAL || 
+        if (k == 624 || k == ScalarInput.ISV_KEY_MODE_DIAL ||
            (k >= ScalarInput.ISV_KEY_MODE_INVALID && k <= ScalarInput.ISV_KEY_MODE_CUSTOM3)) {
-            return true; 
+            return true;
         }
-        
+
         // Protect shutter inputs while processing
-        if (isProcessing && (sc == ScalarInput.ISV_KEY_S1_1 || sc == ScalarInput.ISV_KEY_S1_2 || sc == ScalarInput.ISV_KEY_S2 ||
-                             k == ScalarInput.ISV_KEY_S1_1 || k == ScalarInput.ISV_KEY_S1_2 || k == ScalarInput.ISV_KEY_S2)) return true; 
+        if (isProcessing && isShutterInput(sc, k)) return true;
+
+        if (isFullShutterInput(sc, k) && (e == null || e.getRepeatCount() == 0)) {
+            armFileScanner();
+        }
 
         // --- CRITICAL: Swallow the release event so the Sony OS does nothing ---
         if (k == ScalarInput.ISV_KEY_PLAY || k == android.view.KeyEvent.KEYCODE_MEDIA_PLAY) {
-            return true; 
+            return true;
         }
-        
+
         // Pass everything else down the chain
-        if (inputManager != null) return inputManager.handleKeyUp(k, e) || super.onKeyUp(k, e); 
+        if (inputManager != null) return inputManager.handleKeyUp(k, e) || super.onKeyUp(k, e);
         return super.onKeyUp(k, e);
     }
-    
+
     @Override
     protected void onResume() {
         super.onResume();
         // REMOVED: cameraManager.start() which was causing the build error!
-        
+        registerBatteryReceiver();
+
         // --- PREVENT PASM DIAL CRASH ON A7II ---
         // Register a receiver to swallow Sony's internal hardware state broadcasts
         // This stops ScalarABlackLauncher from force-closing the app.
@@ -1487,31 +1908,33 @@ public void onEnterPressed() {
         filter.addAction("com.android.server.DAConnectionManagerService.HardwareStateChanged");
         registerReceiver(hardwareStateReceiver, filter);
     }
-    
-    @Override 
-    protected void onPause() { 
-        super.onPause(); 
-        uiHandler.removeCallbacksAndMessages(null); 
-        
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        uiHandler.removeCallbacksAndMessages(null);
+        liveHudFlashRunning = false;
+        liveHudFlashVisible = true;
+
         // --- NEW: Release the A7II hardware dial lock ---
         if (hardwareStateReceiver != null) {
             try {
                 unregisterReceiver(hardwareStateReceiver);
             } catch (Exception e) {}
         }
-        
+
         if (cameraManager != null && cameraManager.getCamera() != null) {
             try {
                 Camera c = cameraManager.getCamera();
                 Camera.Parameters p = c.getParameters();
-                
+
                 // --- 1. SAVE PASM MODE ---
                 String currentPasm = p.getSceneMode();
                 if (currentPasm != null) {
                     getSharedPreferences("JPEG.CAM_Prefs", MODE_PRIVATE)
                         .edit().putString("savedPasmMode", currentPasm).apply();
                 }
-                
+
                 // --- 2. CLEAN FOCUS RESTORE ---
                 // Put the lens back to exactly how the user had it.
                 if (menuController.getSavedFocusMode() != null) {
@@ -1519,7 +1942,7 @@ public void onEnterPressed() {
                 } else {
                     p.setFocusMode("auto"); // Failsafe so stock OS doesn't get stuck
                 }
-                
+
                 // --- 3. ZERO OUT HARDWARE HACKS ---
                 if (p.get("picture-effect") != null) p.set("picture-effect", "off");
                 if (p.get("rgb-matrix-mode") != null) p.set("rgb-matrix-mode", "false");
@@ -1529,34 +1952,39 @@ public void onEnterPressed() {
                 if (p.get("rgb-matrix") != null) p.set("rgb-matrix", "256,0,0,0,256,0,0,0,256");
                 if (p.get("lens-correction-shading-color-red") != null) p.set("lens-correction-shading-color-red", "0");
                 if (p.get("lens-correction-shading-color-blue") != null) p.set("lens-correction-shading-color-blue", "0");
-                
+
                 if (p.get("color-depth-red") != null) {
                     p.set("color-depth-red", "0"); p.set("color-depth-green", "0");
                     p.set("color-depth-blue", "0"); p.set("color-depth-cyan", "0");
                     p.set("color-depth-magenta", "0"); p.set("color-depth-yellow", "0");
                 }
-                
+
                 c.setParameters(p);
                 Log.d("JPEG.CAM", "Successfully saved mode, zeroed hardware, and restored focus.");
                 Thread.sleep(200);
             } catch (Exception e) {}
         }
-        
-        if (cameraManager != null) cameraManager.close(); 
-        try { 
-            unregisterReceiver(sonyCameraReceiver); 
-            unregisterReceiver(batteryReceiver); 
+
+        if (cameraManager != null) cameraManager.close();
+        try {
+            unregisterReceiver(sonyCameraReceiver);
         } catch (Exception e) {}
-        
-        if (connectivityManager != null) connectivityManager.stopNetworking(); 
-        if (recipeManager != null) recipeManager.savePreferences(); 
+        if (batteryReceiverRegistered) {
+            try {
+                unregisterReceiver(batteryReceiver);
+            } catch (Exception e) {}
+            batteryReceiverRegistered = false;
+        }
+
+        if (connectivityManager != null) connectivityManager.stopNetworking();
+        if (recipeManager != null) recipeManager.savePreferences();
         setAutoPowerOffMode(true);
     }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        
+
         // CRITICAL: Shut down the networking and hardware antenna FIRST
         // to prevent battery drain after the app closes.
         if (connectivityManager != null) {
@@ -1565,130 +1993,175 @@ public void onEnterPressed() {
 
         System.exit(0); // THEN exit to clear memory leaks
     }
-    
-    private void setHUDVisibility(int v) { 
+
+    private void setHUDVisibility(int v) {
         if (tvTopStatus != null) {
             // FIX: If processing, FORCE visible. Otherwise, obey the display button.
-            tvTopStatus.setVisibility(isProcessing ? View.VISIBLE : v); 
+            tvTopStatus.setVisibility((isProcessing || captureWritePending) ? View.VISIBLE : v);
         }
-        if (llBottomBar != null) llBottomBar.setVisibility(v); 
-        if (tvBattery != null) tvBattery.setVisibility(v); 
-        if (batteryIcon != null) batteryIcon.setVisibility(v); 
-        if (tvMode != null) tvMode.setVisibility(v); 
-        if (tvFocusMode != null) tvFocusMode.setVisibility(v); 
-        if (tvReview != null) tvReview.setVisibility(v); 
+        if (llBottomBar != null) llBottomBar.setVisibility(v);
+        if (tvBattery != null) tvBattery.setVisibility(v);
+        if (batteryIcon != null) batteryIcon.setVisibility(v);
+        if (tvMode != null) tvMode.setVisibility(v);
+        if (tvFocusMode != null) tvFocusMode.setVisibility(v);
+        if (tvReview != null) tvReview.setVisibility(v);
         if (focusMeter != null) {
             focusMeter.setVisibility((v == View.VISIBLE && cachedIsManualFocus && prefShowFocusMeter) ? View.VISIBLE : View.GONE);
         }
     }
 
+    private void hideLiveViewOverlays() {
+        setHUDVisibility(View.GONE);
+        if (gridLines != null) gridLines.setVisibility(View.GONE);
+        if (cinemaMattes != null) cinemaMattes.setVisibility(View.GONE);
+        if (focusMeter != null) focusMeter.setVisibility(View.GONE);
+        if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.GONE);
+        if (afOverlay != null) afOverlay.setVisibility(View.GONE);
+        if (hudController != null) hudController.hideOverlays();
+    }
+
+    private void setLiveUiSuppressed(boolean suppressed) {
+        liveUiSuppressed = suppressed;
+        if (suppressed) hideLiveViewOverlays();
+        else updateMainHUD();
+    }
+
+    private boolean shouldPulseLiveHudSelection() {
+        return false;
+    }
+
+    private void updateLiveHudFlashTimer() {
+        liveHudFlashRunning = false;
+        liveHudFlashVisible = true;
+        uiHandler.removeCallbacks(liveHudFlashRunnable);
+    }
+
     public void updateMainHUD() {
-        // <--- MOVED TO TOP: Declare this before any UI elements try to use it!
-        int selectedColor = isDialLocked ? Color.WHITE : Color.YELLOW;
+        updateLiveHudFlashTimer();
+        boolean liveControlEditing = !isDialLocked;
 
         if (cameraManager == null || cameraManager.getCamera() == null) return;
-        
+
+        if (liveUiSuppressed && !isProcessing) {
+            hideLiveViewOverlays();
+            return;
+        }
+
         // --- 1. CLEAN DISPLAY CHECK ---
         if (hudController.isActive()) {
-            // Hide the bottom bars and icons, but keep the Top Status bar for Preset names
-            setHUDVisibility(View.GONE); 
-            if (tvTopStatus != null) tvTopStatus.setVisibility(View.VISIBLE); 
-            
+            // Hide the live-view bars and let HudController own its own header.
+            setHUDVisibility(View.GONE);
+            if (tvTopStatus != null) tvTopStatus.setVisibility(View.GONE);
+
             if (focusMeter != null) focusMeter.setVisibility(View.GONE);
             if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.GONE);
-            return; 
+            return;
         } else {
             // NORMAL STATE: Explicitly force the HUD to reappear
             setHUDVisibility(View.VISIBLE);
             if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.GONE);
         }
-        
+
         // --- 2. GATHER HARDWARE DATA ---
-        Camera c = cameraManager.getCamera(); 
-        Camera.Parameters p = c.getParameters(); 
+        Camera c = cameraManager.getCamera();
+        Camera.Parameters p = c.getParameters();
         CameraEx.ParametersModifier pm = cameraManager.getCameraEx().createParametersModifier(p);
-        
-        RTLProfile prof = recipeManager.getCurrentProfile(); 
+
+        RTLProfile prof = recipeManager.getCurrentProfile();
         String name = recipeManager.getRecipeNames().get(prof.lutIndex);
         String displayName = name.length() > 15 ? name.substring(0, 12) + "..." : name;
-        
+
         String customName = prof.profileName != null ? prof.profileName.trim() : ("RECIPE " + (recipeManager.getCurrentSlot() + 1));
         if (customName.isEmpty()) customName = "RECIPE " + (recipeManager.getCurrentSlot() + 1);
-        
+
         // --- 3. UPDATE TEXT FIELDS ---
         if (!isProcessing && tvTopStatus != null) {
             if (diptychManager != null && diptychManager.isEnabled() && diptychManager.getState() == DiptychManager.STATE_NEED_SECOND) {
                 tvTopStatus.setText("SHOT 1 SAVED. [L/R] TO SWAP SIDE.");
-                tvTopStatus.setTextColor(Color.GREEN);
+                UiTheme.softPanel(tvTopStatus);
+                tvTopStatus.setTextColor(UiTheme.SUCCESS);
             } else if (diptychManager != null && diptychManager.isEnabled() && diptychManager.getState() == DiptychManager.STATE_STITCHING) {
                 tvTopStatus.setText("STITCHING DIPTYCH...");
-                tvTopStatus.setTextColor(Color.YELLOW);
+                UiTheme.softPanel(tvTopStatus);
+                tvTopStatus.setTextColor(UiTheme.WARN);
             } else {
                 int slotNum = recipeManager.getCurrentSlot() + 1;
-                tvTopStatus.setText("SLOT " + slotNum + ": " + customName + "\n" + (isReady ? "READY" : "LOADING.."));
-                
+                String readyText = isReady ? "READY" : "LOADING..";
+                int queued = processingQueueManager != null ? processingQueueManager.getCountForMode(currentQueueMode()) : 0;
+                if (processingFrequency == PROCESSING_FREQUENCY_MANUAL) {
+                    readyText += " | MANUAL " + queued + " QUEUED";
+                } else if (processingFrequency > 1) {
+                    int left = processingFrequency - queued;
+                    if (left < 0) left = 0;
+                    readyText += " | " + left + "/" + processingFrequency + " LEFT";
+                } else if (queued > 0) {
+                    readyText += " | " + queued + " QUEUED";
+                }
+                tvTopStatus.setText("SLOT " + slotNum + ": " + customName + "\n" + readyText);
+
                 if (mDialMode == DIAL_MODE_RTL) {
-                    tvTopStatus.setTextColor(selectedColor);
+                    styleLiveHudBubble(tvTopStatus, true, liveControlEditing);
                 } else if (isReady) {
-                    tvTopStatus.setTextColor(Color.rgb(0, 230, 118)); 
+                    UiTheme.softPanel(tvTopStatus);
+                    tvTopStatus.setTextColor(UiTheme.SUCCESS);
                 } else {
-                    tvTopStatus.setTextColor(Color.rgb(227, 69, 20)); 
+                    UiTheme.softPanel(tvTopStatus);
+                    tvTopStatus.setTextColor(UiTheme.ACCENT);
                 }
             }
         }
-        
-        String sm = p.getSceneMode(); 
+
+        String sm = p.getSceneMode();
         if (tvMode != null) {
-            if ("manual-exposure".equals(sm)) tvMode.setText("M"); 
-            else if ("aperture-priority".equals(sm)) tvMode.setText("A"); 
-            else if ("shutter-priority".equals(sm) || "shutter-speed".equals(sm)) tvMode.setText("S"); 
+            if ("manual-exposure".equals(sm)) tvMode.setText("M");
+            else if ("aperture-priority".equals(sm)) tvMode.setText("A");
+            else if ("shutter-priority".equals(sm) || "shutter-speed".equals(sm)) tvMode.setText("S");
             else if ("program-auto".equals(sm)) tvMode.setText("P");
             else if ("auto".equals(sm)) tvMode.setText("AUTO");
             else tvMode.setText(sm != null ? sm.toUpperCase() : "SCN");
         }
-        
+
         cachedAperture = pm.getAperture() / 100.0f;
-        Pair<Integer, Integer> ss = pm.getShutterSpeed(); 
-        
+        Pair<Integer, Integer> ss = pm.getShutterSpeed();
+
         if (tvValAperture != null) {
             if (cachedIsManualFocus && lensManager != null && lensManager.isCurrentProfileManual()) {
-                tvValAperture.setText(String.format("f%.1f", virtualAperture)); 
+                tvValAperture.setText(String.format("f%.1f", virtualAperture));
             } else {
-                tvValAperture.setText(String.format("f%.1f", cachedAperture)); 
+                tvValAperture.setText(String.format("f%.1f", cachedAperture));
             }
         }
-        
+
         if (tvValShutter != null) tvValShutter.setText(ss.first == 1 && ss.second != 1 ? ss.first + "/" + ss.second : ss.first + "\"");
         if (tvValIso != null) tvValIso.setText(pm.getISOSensitivity() == 0 ? "ISO AUTO" : "ISO " + pm.getISOSensitivity());
         if (tvValEv != null) tvValEv.setText(String.format("%+.1f", p.getExposureCompensation() * p.getExposureCompensationStep()));
-        
+
         if (tvReview != null) {
-            tvReview.setBackgroundColor(mDialMode == DIAL_MODE_REVIEW ? Color.WHITE : Color.argb(140, 40, 40, 40));
-            tvReview.setTextColor(mDialMode == DIAL_MODE_REVIEW ? Color.BLACK : Color.rgb(227, 69, 20));
+            styleLiveHudBubble(tvReview, mDialMode == DIAL_MODE_REVIEW, liveControlEditing);
         }
 
-        if (tvValShutter != null) tvValShutter.setTextColor(mDialMode == DIAL_MODE_SHUTTER ? selectedColor : Color.rgb(227, 69, 20));
-        if (tvValAperture != null) tvValAperture.setTextColor(mDialMode == DIAL_MODE_APERTURE ? selectedColor : Color.rgb(227, 69, 20));
-        if (tvValIso != null) tvValIso.setTextColor(mDialMode == DIAL_MODE_ISO ? selectedColor : Color.rgb(227, 69, 20));
-        if (tvValEv != null) tvValEv.setTextColor(mDialMode == DIAL_MODE_EXPOSURE ? selectedColor : Color.rgb(227, 69, 20));
-        if (tvMode != null) tvMode.setTextColor(mDialMode == DIAL_MODE_PASM ? selectedColor : Color.rgb(227, 69, 20));
-        
+        styleLiveHudBubble(tvValShutter, mDialMode == DIAL_MODE_SHUTTER, liveControlEditing);
+        styleLiveHudBubble(tvValAperture, mDialMode == DIAL_MODE_APERTURE, liveControlEditing);
+        styleLiveHudBubble(tvValIso, mDialMode == DIAL_MODE_ISO, liveControlEditing);
+        styleLiveHudBubble(tvValEv, mDialMode == DIAL_MODE_EXPOSURE, liveControlEditing);
+        styleLiveHudBubble(tvMode, mDialMode == DIAL_MODE_PASM, liveControlEditing);
+
         String fm = p.getFocusMode();
         cachedIsManualFocus = "manual".equals(fm);
-        
+
         if (tvFocusMode != null) {
-            if ("auto".equals(fm)) tvFocusMode.setText("AF-S"); 
+            if ("auto".equals(fm)) tvFocusMode.setText("AF-S");
             else if (cachedIsManualFocus) {
                 String rawName = lensManager != null ? lensManager.getCurrentLensName() : "Unmapped Lens";
                 String lName = LensProfileManager.formatDisplayName(rawName);
-                tvFocusMode.setText("MF [" + lName + "]"); 
+                tvFocusMode.setText("MF [" + lName + "]");
             }
-            else if ("continuous-video".equals(fm) || "continuous-picture".equals(fm)) tvFocusMode.setText("AF-C"); 
+            else if ("continuous-video".equals(fm) || "continuous-picture".equals(fm)) tvFocusMode.setText("AF-C");
             else tvFocusMode.setText(fm != null ? fm.toUpperCase() : "AF");
-            
-            tvFocusMode.setTextColor(mDialMode == DIAL_MODE_FOCUS ? selectedColor : Color.rgb(227, 69, 20)); // <--- UPDATED
+
+            styleLiveHudBubble(tvFocusMode, mDialMode == DIAL_MODE_FOCUS, liveControlEditing);
         }
-        
+
         // --- 4. UPDATE FOCUS METER ---
         if (focusMeter != null) {
             boolean shouldShow = prefShowFocusMeter && cachedIsManualFocus;
@@ -1699,12 +2172,12 @@ public void onEnterPressed() {
                 List<LensProfileManager.CalPoint> ptsToUse = cal ? calibController.getTempCalPoints() : (lensManager != null ? lensManager.getCurrentPoints() : null);
                 float ratioToFeed = (lensManager != null && lensManager.isCurrentProfileManual() && !cal) ? virtualFocusRatio : cachedFocusRatio;
                 float apToFeed    = (lensManager != null && lensManager.isCurrentProfileManual() && !cal) ? virtualAperture   : cachedAperture;
-                
+
                 focusMeter.update(ratioToFeed, apToFeed, focalToUse, cal, ptsToUse, getCircleOfConfusion());
             }
         }
-        
-        if (gridLines != null) gridLines.setVisibility(prefShowGridLines ? View.VISIBLE : View.GONE); 
+
+        if (gridLines != null) gridLines.setVisibility(prefShowGridLines ? View.VISIBLE : View.GONE);
         if (cinemaMattes != null) cinemaMattes.setVisibility(prefShowCinemaMattes ? View.VISIBLE : View.GONE);
 
         if (diptychManager != null) {
@@ -1724,22 +2197,22 @@ public void onEnterPressed() {
         }
     }
 
-    @Override 
-    public void surfaceCreated(SurfaceHolder h) { 
-        hasSurface = true; 
+    @Override
+    public void surfaceCreated(SurfaceHolder h) {
+        hasSurface = true;
         if (cameraManager != null) cameraManager.open(h);
         updateDiptychPreviewWindow();
     }
-    
-    @Override 
-    public void surfaceDestroyed(SurfaceHolder h) { 
-        hasSurface = false; 
-        if (cameraManager != null) cameraManager.close(); 
+
+    @Override
+    public void surfaceDestroyed(SurfaceHolder h) {
+        hasSurface = false;
+        if (cameraManager != null) cameraManager.close();
     }
-    
+
     @Override public void surfaceChanged(SurfaceHolder h, int f, int w, int h1) {}
 
-    @Override 
+    @Override
     public void onHardwareStateChanged() {
         runOnUiThread(new Runnable() {
             public void run() {
@@ -1747,8 +2220,8 @@ public void onEnterPressed() {
             }
         });
     }
-    
-    @Override 
+
+    @Override
     public void onCameraReady() {
         syncHardwareState();
         if (cameraManager != null) {
@@ -1760,7 +2233,7 @@ public void onEnterPressed() {
                 try {
                     Camera c = cameraManager.getCamera();
                     Camera.Parameters p = c.getParameters();
-                    
+
                     // --- NEW: CLEAN FOCUS INHERITANCE ---
                     // Sony hardware silently rejects AF mode changes if an incompatible
                     // Focus Area (like Flexible Spot) was inherited from the native OS.
@@ -1771,37 +2244,37 @@ public void onEnterPressed() {
                     }
                     if (p.get("sony-focus-area") != null) p.set("sony-focus-area", "wide");
                     c.setParameters(p); // Apply clean slate immediately
-                    
+
                     cachedIsManualFocus = "manual".equals(p.getFocusMode());
-                    
+
                     // --- NEW: BULLETPROOF SENSOR DETECTION ---
                     // Older A7 cameras don't expose 'apsc-mode-supported' in parameters.
                     // We check the physical hardware model name instead.
                     String model = android.os.Build.MODEL;
                     boolean hardwareIsFullFrame = model != null && (
-                        model.contains("ILCE-7") || model.contains("ILCE-9") || 
+                        model.contains("ILCE-7") || model.contains("ILCE-9") ||
                         model.contains("ILCE-1") || model.contains("DSC-RX1")
                     );
-                    
+
                     // Check if the user actively turned on APS-C crop mode in the Sony menu
                     boolean isCropActive = "on".equals(p.get("sony-apsc-mode"));
-                    
+
                     isFullFrame = hardwareIsFullFrame && !isCropActive;
-                    
+
                     android.util.Log.e("JPEG.CAM", "Model: " + model + " | Sensor: " + (isFullFrame ? "FULL FRAME" : "APS-C"));
                 } catch (Exception e) {
                     android.util.Log.e("JPEG.CAM", "Boot sync failed: " + e.getMessage());
                 }
             }
         }
-        
+
         applyHardwareRecipe();
-        
+
         // Do an initial HUD draw
         updateMainHUD();
-        
+
         // --- FIRMWARE RACE CONDITION FIX ---
-        // The physical dial takes a moment to report its true position to the OS on boot. 
+        // The physical dial takes a moment to report its true position to the OS on boot.
         // Force a re-sync 500ms after the app opens to guarantee accuracy.
         uiHandler.postDelayed(new Runnable() {
             @Override
@@ -1810,15 +2283,15 @@ public void onEnterPressed() {
             }
         }, 500);
     }
-    
+
     @Override public void onShutterSpeedChanged() { runOnUiThread(new Runnable() { public void run() { requestHudUpdate(); } }); }
     @Override public void onApertureChanged() { runOnUiThread(new Runnable() { public void run() { requestHudUpdate(); } }); }
     @Override public void onIsoChanged() { runOnUiThread(new Runnable() { public void run() { requestHudUpdate(); } }); }
-    
-    @Override 
+
+    @Override
     public void onFocusPositionChanged(final float ratio) {
-        if (focusMeter != null && cachedIsManualFocus) { 
-            runOnUiThread(new Runnable() { 
+        if (focusMeter != null && cachedIsManualFocus) {
+            runOnUiThread(new Runnable() {
                 public void run() {
                     cachedFocusRatio = ratio;
                     boolean cal = calibController.isCalibrating();
@@ -1839,11 +2312,11 @@ public void onEnterPressed() {
                 hardwareFocalLength = focalLengthMm;
                 if (focalLengthMm > 0.0f) {
                     boolean wasManual = !isNativeLensAttached;
-                    isNativeLensAttached = true; 
+                    isNativeLensAttached = true;
                     Log.d("JPEG.CAM_Lens", "Native Lens Zoomed: " + focalLengthMm + "mm");
-                    
+
                     autoEquipMatchingLens(focalLengthMm);
-                    
+
                     if (wasManual && cameraManager != null && cameraManager.getCamera() != null) {
                         try {
                             Camera c = cameraManager.getCamera();
@@ -1854,16 +2327,16 @@ public void onEnterPressed() {
                         } catch (Exception e) {}
                     }
                 } else {
-                    isNativeLensAttached = false; 
+                    isNativeLensAttached = false;
                     Log.d("JPEG.CAM_Lens", "Manual Lens Detected.");
                 }
-                updateMainHUD(); 
+                updateMainHUD();
             }
         });
     }
 
-    @Override 
-    public void onStatusUpdate(final String target, final String status) { 
+    @Override
+    public void onStatusUpdate(final String target, final String status) {
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
@@ -1916,22 +2389,36 @@ public void onEnterPressed() {
     @Override public boolean isPrefGridLines()    { return prefShowGridLines; }
     @Override public int     getPrefJpegQuality() { return prefJpegQuality; }
     @Override public boolean isPrefDiptych()      { return diptychManager != null && diptychManager.isEnabled(); } // <--- ADDED
+    @Override public int     getProcessingFrequency() { return processingFrequency; }
+    @Override public int     getQueuedPhotoCount() { return processingQueueManager != null ? processingQueueManager.getCountForMode(currentQueueMode()) : 0; }
+    @Override public List<ProcessingQueueManager.Entry> getQueuedPhotoEntries() {
+        if (processingQueueManager == null) return new ArrayList<ProcessingQueueManager.Entry>();
+        return processingQueueManager.getEntriesForMode(currentQueueMode());
+    }
+    @Override public ProcessingQueueManager.Entry getQueuedPhotoEntry(int index) {
+        if (processingQueueManager == null) return null;
+        return processingQueueManager.getEntryForMode(index, currentQueueMode());
+    }
+    @Override public String getProcessingEstimateText(int photoCount) {
+        return formatProcessingEstimateForCount(photoCount);
+    }
     @Override public void    setPrefFocusMeter(boolean v)   { prefShowFocusMeter   = v; }
     @Override public void    setPrefCinemaMattes(boolean v) { prefShowCinemaMattes = v; }
     @Override public void    setPrefGridLines(boolean v)    { prefShowGridLines    = v; }
     @Override public void    setPrefJpegQuality(int v)      { prefJpegQuality      = v; }
-    @Override public void    setPrefDiptych(boolean v)      { 
+    @Override public void    setProcessingFrequency(int v)   { processingFrequency = normalizeProcessingFrequency(v); saveAppPreferences(); updateMainHUD(); }
+    @Override public void    setPrefDiptych(boolean v)      {
         if (diptychManager != null) diptychManager.setEnabled(v);
         updateDiptychFocusArea(false); // Clean reset
-        updateMainHUD(); 
+        updateMainHUD();
     }
 
     public void updateDiptychFocusArea(boolean shift) {
-        if (cameraManager == null || cameraManager.getCamera() == null) return;
+        if (cameraManager == null || cameraManager.getCamera() == null) return;    
         try {
             Camera c = cameraManager.getCamera();
             Camera.Parameters p = c.getParameters();
-            
+
             // --- FOCUS SYNC FIX ---
             // Because the preview shift centers the subject on the physical sensor,
             // we should ALWAYS use Wide/Center focus for maximum hardware accuracy.
@@ -1940,7 +2427,7 @@ public void onEnterPressed() {
             }
             if (android.os.Build.VERSION.SDK_INT >= 14) {
                 try {
-                    if (p.getMaxNumFocusAreas() > 0) p.setFocusAreas(null);
+                    if (p.getMaxNumFocusAreas() > 0) p.setFocusAreas(null);        
                 } catch (Throwable t) {}
             }
             c.setParameters(p);
@@ -1948,7 +2435,27 @@ public void onEnterPressed() {
             android.util.Log.e("JPEG.CAM", "Hardware focus sync failed: " + e.getMessage());
         }
     }
-    
+
+    @Override public void forceProcessQueuedPhotos() {
+        startQueuedProcessing(processingFrequency == PROCESSING_FREQUENCY_MANUAL);
+    }
+    @Override public void processSelectedQueuedPhotos(boolean[] selected) {
+        if (processingQueueManager == null) return;
+        int selectedCount = processingQueueManager.moveSelectedToFrontForMode(selected, ProcessingQueueManager.MODE_MANUAL);
+        updateMainHUD();
+        if (selectedCount > 0) startQueuedProcessing(true, selectedCount);
+    }
+    @Override public void clearSelectedQueuedPhotos(boolean[] selected) {
+        if (processingQueueManager != null) {
+            processingQueueManager.removeSelectedForMode(selected, currentQueueMode());
+        }
+        updateMainHUD();
+    }
+    @Override public void clearQueuedPhotos() {
+        if (processingQueueManager != null) processingQueueManager.clearForMode(currentQueueMode());
+        updateMainHUD();
+    }
+
 
     @Override public void closeHud() { hudController.reset(); }
 
@@ -1957,6 +2464,10 @@ public void onEnterPressed() {
     @Override public void onMenuClosed() {
         recipeManager.savePreferences();
         saveAppPreferences();
+        if (isProcessing || processingQueueActive) {
+            updateMainHUD();
+            return;
+        }
         triggerLutPreload();
         applyHardwareRecipe();
         syncHardwareState();
