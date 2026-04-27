@@ -128,6 +128,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private boolean prefShowCinemaMattes = false;
     private boolean prefShowGridLines = false;
     private int prefJpegQuality = 95;
+    private int processingFrequency = 1;
     private LutEngine lutEngine;
     private DiptychManager diptychManager;
     private MultiExposeManager multiExposeManager;
@@ -1799,7 +1800,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         // HUD controller — builds and owns its overlay views
         hudController = new HudController(this, mainUIContainer, this);
 
-        setupDialsAndButtons();
         diptychManager = new DiptychManager(this, mainUIContainer, tvTopStatus);
         multiExposeManager = new MultiExposeManager(this, mainUIContainer, tvTopStatus);
         multiExposeManager.setEnabled(isPrefMultiExpose());
