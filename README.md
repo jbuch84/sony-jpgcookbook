@@ -3,6 +3,8 @@
 
 **💾 DOWNLOAD LINK:** Download the latest release from https://www.jpeg.cam
 
+**📺 Video WALK THRU LINK: https://www.youtube.com/watch?v=W1nfQPWFIy0
+
 **⚠️ BETA STATUS:** This project is currently in early beta. While it is stable and produces high-quality results, it is a "proof of concept" running on 2014-era hardware.
 
 JPEG.CAM turns your older Sony Alpha camera into a modern film-simulation powerhouse. This app brings professional color grading directly to your camera hardware, allowing you to apply custom 3D LUTs (`.cube` and `.cub` files) to your photos the moment you press the shutter.
