@@ -1,6 +1,11 @@
 package com.github.ma1co.pmcademo.app;
 
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.util.Log;
+import android.view.View;
 import android.view.ViewGroup;
+import android.widget.FrameLayout;
 import android.widget.TextView;
 
 import java.io.File;
@@ -15,18 +20,20 @@ public class MultiExposeManager {
 
     private boolean enabled = false;
     private int state = STATE_IDLE;
-    private int totalExposures = 2; // Default to 2 for now, can go up to 9
+    private int totalExposures = 2;
     private int blendMode = 0; // 0 = Average, 1 = Lighten
     private List<String> capturedFiles = new ArrayList<String>();
 
     private MainActivity activity;
-    private ViewGroup container;
+    private MultiExposeOverlayView overlayView;
     private TextView tvTopStatus;
 
-    public MultiExposeManager(MainActivity activity, ViewGroup container, TextView tvTopStatus) {
+    public MultiExposeManager(MainActivity activity, FrameLayout container, TextView tvTopStatus) {
         this.activity = activity;
-        this.container = container;
         this.tvTopStatus = tvTopStatus;
+        this.overlayView = new MultiExposeOverlayView(activity);
+        this.overlayView.setVisibility(View.GONE);
+        container.addView(this.overlayView, 0, new FrameLayout.LayoutParams(-1, -1));
     }
 
     public boolean isEnabled() { return enabled; }
@@ -35,6 +42,7 @@ public class MultiExposeManager {
         if (!enabled) {
             reset();
         }
+        if (overlayView != null) overlayView.setVisibility(enabled ? View.VISIBLE : View.GONE);
     }
     
     public int getTotalExposures() { return totalExposures; }
@@ -57,14 +65,15 @@ public class MultiExposeManager {
     public void reset() {
         state = STATE_IDLE;
         for (String f : capturedFiles) {
-            new File(f).delete();
+            File file = new File(f);
+            if (file.exists()) file.delete();
         }
         capturedFiles.clear();
+        if (overlayView != null) overlayView.clearThumbnails();
         updateTopStatus();
     }
 
-    // Called by MainActivity's PictureObserver when a new file is detected
-    public boolean interceptNewFile(String filename, String fullPath) {
+    public boolean interceptNewFile(String filename, final String fullPath) {
         if (!enabled) return false;
 
         capturedFiles.add(fullPath);
@@ -72,7 +81,35 @@ public class MultiExposeManager {
         if (capturedFiles.size() < totalExposures) {
             state = STATE_ACCUMULATING;
             updateTopStatus();
-            // TODO: Decode a lightweight thumbnail and display as ghost overlay
+
+            // --- INSTANT GHOST PREVIEW ---
+            new Thread(new Runnable() {
+                public void run() {
+                    try {
+                        File f = new File(fullPath);
+                        long lastSize = -1;
+                        int timeout = 0;
+                        while (timeout < 40) {
+                            long sz = f.length();
+                            if (sz > 0 && sz == lastSize) break;
+                            lastSize = sz;
+                            Thread.sleep(100);
+                            timeout++;
+                        }
+                    } catch (Exception ignored) {}
+
+                    if (state != STATE_ACCUMULATING) return;
+                    final Bitmap thumb = getGhostThumbnail(fullPath);
+                    activity.runOnUiThread(new Runnable() {
+                        public void run() {
+                            if (overlayView != null && state == STATE_ACCUMULATING) {
+                                overlayView.addThumbnail(thumb);
+                            }
+                        }
+                    });
+                }
+            }).start();
+
             activity.runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
@@ -81,18 +118,29 @@ public class MultiExposeManager {
                     activity.updateMainHUD();
                 }
             });
-            return true; // We intercepted it, do not process yet
+            return true;
         } else {
             state = STATE_PROCESSING;
+            if (overlayView != null) overlayView.clearThumbnails();
             updateTopStatus();
-            return true; // Trigger processing
+            return true;
+        }
+    }
+
+    private Bitmap getGhostThumbnail(String path) {
+        try {
+            BitmapFactory.Options opts = new BitmapFactory.Options();
+            opts.inSampleSize = 16;
+            opts.inPreferredConfig = Bitmap.Config.RGB_565;
+            return BitmapFactory.decodeFile(path, opts);
+        } catch (Throwable t) {
+            return null;
         }
     }
 
     public void processFinalShot(final ProcessingQueueManager.Entry finalEntry, final long scannerStartedMs, final long detectedMs, final long stableMs, final int scannerAttempts) {
         if (!enabled || state != STATE_PROCESSING) return;
 
-        // Start async task to blend
         final String[] paths = capturedFiles.toArray(new String[0]);
         
         File fOriginal = new File(paths[0]);
@@ -148,11 +196,12 @@ public class MultiExposeManager {
             @Override
             public void run() {
                 if (tvTopStatus == null) return;
-                tvTopStatus.setVisibility(android.view.View.VISIBLE);
-                UiTheme.softPanel(tvTopStatus);
-                if (state == STATE_ACCUMULATING) {
-                    tvTopStatus.setText("MULTI: " + capturedFiles.size() + " / " + totalExposures + " SHOTS SAVED.");
-                    tvTopStatus.setTextColor(UiTheme.SUCCESS);
+                if (state == STATE_IDLE) {
+                    tvTopStatus.setText("MULTI-EXPOSURE MODE");
+                    tvTopStatus.setTextColor(UiTheme.ACCENT_RECIPES);
+                } else if (state == STATE_ACCUMULATING) {
+                    tvTopStatus.setText("MULTI: " + capturedFiles.size() + " / " + totalExposures + " SHOTS SAVED");
+                    tvTopStatus.setTextColor(UiTheme.REC_ON);
                 } else if (state == STATE_PROCESSING) {
                     tvTopStatus.setText("BLENDING " + totalExposures + " EXPOSURES...");
                     tvTopStatus.setTextColor(UiTheme.WARN);
