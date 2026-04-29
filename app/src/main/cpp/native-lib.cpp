@@ -179,6 +179,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
     cd.scale_num = 1;
     cd.scale_denom = scaleDenom;
     cd.out_color_space = use_rgb ? JCS_RGB : JCS_YCbCr;
+    cd.dct_method = JDCT_IFAST;
     jpeg_start_decompress(&cd);
 
     struct jpeg_compress_struct cc; struct my_error_mgr jc; cc.err = jpeg_std_error(&jc.pub); jc.pub.error_exit = my_error_exit;
@@ -187,7 +188,9 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
     
     int fh = cd.output_height, sk = 0; if(applyCrop){ fh=(int)(cd.output_width/2.71f); sk=(cd.output_height-fh)/2; }
     cc.image_width = cd.output_width; cc.image_height = fh; cc.input_components = 3; cc.in_color_space = use_rgb ? JCS_RGB : JCS_YCbCr;
-    jpeg_set_defaults(&cc); jpeg_set_quality(&cc, jpegQuality, TRUE); 
+    jpeg_set_defaults(&cc); 
+    cc.dct_method = JDCT_IFAST;
+    jpeg_set_quality(&cc, jpegQuality, TRUE); 
     
     // --- COPY ALL MARKERS BACK (Fixes Review Error) ---
     jpeg_start_compress(&cc, TRUE);
@@ -592,6 +595,11 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_MultiEx
         jpeg_create_decompress(&cds[i]);
         jpeg_stdio_src(&cds[i], infs[i]);
         jpeg_read_header(&cds[i], TRUE);
+        
+        cds[i].scale_denom = (cds[i].image_width > 3000) ? 2 : 1;
+        cds[i].dct_method = JDCT_IFAST;
+        cds[i].do_fancy_upsampling = FALSE;
+        
         cds[i].out_color_space = JCS_RGB;
         jpeg_start_decompress(&cds[i]);
     }
@@ -634,6 +642,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_MultiEx
     cc.input_components = 3;
     cc.in_color_space = JCS_RGB;
     jpeg_set_defaults(&cc);
+    cc.dct_method = JDCT_IFAST;
     jpeg_set_quality(&cc, 95, TRUE);
     jpeg_start_compress(&cc, TRUE);
     

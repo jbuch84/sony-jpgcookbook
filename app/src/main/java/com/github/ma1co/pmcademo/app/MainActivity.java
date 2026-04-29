@@ -51,7 +51,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private static final int PHOTO_READY_MAX_RETRIES = 240;
     private static final int PHOTO_READY_STABLE_CHECKS = 1;
     private static final int PHOTO_READY_FALLBACK_STABLE_CHECKS = 4;
-    private static final int SCANNER_ARM_TIMEOUT_MS = 6000;
+    private static final int SCANNER_ARM_TIMEOUT_MS = 120000;
     private static final long QUEUE_FALLBACK_PROCESS_MS = 14000;
     private static final int PROCESSING_FREQUENCY_MANUAL = -1;
 

@@ -18,8 +18,8 @@ public class SonyFileScanner {
     private Handler mainHandler;
 
     private static final int POLL_INTERVAL_MS = 75;
-    private static final int MAX_SCAN_ATTEMPTS = 67;
-    private static final int MAX_DEFERRED_SCAN_ATTEMPTS = 400;
+    private static final int MAX_SCAN_ATTEMPTS = 1200;
+    private static final int MAX_DEFERRED_SCAN_ATTEMPTS = 1600;
     public boolean isPolling = false;
     private int scanAttempts = 0;
     private long scanStartedMs = 0;
@@ -52,7 +52,7 @@ public class SonyFileScanner {
         scanStartedMs = System.currentTimeMillis();
         waitingForReady = false;
         scheduleNextPoll(0);
-        Log.d("JPEG.CAM", "Scanner Woken Up: Starting 5-second window...");
+        Log.d("JPEG.CAM", "Scanner Woken Up: Starting extended capture window...");
     }
 
     public void stop() {
