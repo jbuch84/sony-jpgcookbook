@@ -22,6 +22,8 @@ int nativeLutSize = 0;
 std::vector<uint8_t> nativeGrainTexture;
 int nativeLastGrainTransform = -1;
 
+static pthread_mutex_t g_lut_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 struct my_error_mgr { struct jpeg_error_mgr pub; jmp_buf setjmp_buffer; };
 METHODDEF(void) my_error_exit (j_common_ptr cinfo) {
     my_error_mgr * myerr = (my_error_mgr *) cinfo->err;
@@ -131,6 +133,7 @@ static int choose_grain_transform(uint32_t seed, bool enabled) {
 }
 
 extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngine_loadLutNative(JNIEnv* env, jobject obj, jstring path) {
+    pthread_mutex_lock(&g_lut_mutex);
     nativeLut.clear(); nativeLutSize = 0; const char *fp = env->GetStringUTFChars(path, NULL); std::string ps(fp); std::string ex = ""; size_t dp = ps.find_last_of('.');
     if (dp != std::string::npos) { ex = ps.substr(dp); for(size_t i=0; i<ex.length(); i++) ex[i]=tolower(ex[i]); }
     if (ex == ".png") {
@@ -146,12 +149,16 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
     } else if (ex==".cube"||ex==".cub") {
         FILE *f = fopen(fp, "r"); if(f){ char l[256]; size_t c=0; while(fgets(l, 256, f)){ if(strncmp(l,"LUT_3D_SIZE",11)==0){ sscanf(l,"LUT_3D_SIZE %d",&nativeLutSize); nativeLut.resize(nativeLutSize*nativeLutSize*nativeLutSize*3); c=0; continue; } float r,g,b; if(nativeLutSize>0 && sscanf(l,"%f %f %f",&r,&g,&b)==3){ if(c+2<nativeLut.size()){ nativeLut[c++]=(uint8_t)(r*255); nativeLut[c++]=(uint8_t)(g*255); nativeLut[c++]=(uint8_t)(b*255); } } } fclose(f); }
     }
-    env->ReleaseStringUTFChars(path, fp); return nativeLutSize>0 ? JNI_TRUE : JNI_FALSE;
+    env->ReleaseStringUTFChars(path, fp); 
+    jboolean result = nativeLutSize>0 ? JNI_TRUE : JNI_FALSE;
+    pthread_mutex_unlock(&g_lut_mutex);
+    return result;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngine_loadGrainTextureNative(JNIEnv* env, jobject obj, jstring path) {
-    nativeGrainTexture.clear(); if(!path) return JNI_FALSE; const char *fp=env->GetStringUTFChars(path, NULL); int w,h,c; unsigned char *id=stbi_load(fp,&w,&h,&c,3); env->ReleaseStringUTFChars(path,fp);
-    if(id){ if((w==512||w==1024)&&w==h){ nativeGrainTexture.assign(id, id+(w*h*3)); stbi_image_free(id); return JNI_TRUE; } stbi_image_free(id); } return JNI_FALSE;
+    pthread_mutex_lock(&g_lut_mutex);
+    nativeGrainTexture.clear(); if(!path) { pthread_mutex_unlock(&g_lut_mutex); return JNI_FALSE; } const char *fp=env->GetStringUTFChars(path, NULL); int w,h,c; unsigned char *id=stbi_load(fp,&w,&h,&c,3); env->ReleaseStringUTFChars(path,fp);
+    if(id){ if((w==512||w==1024)&&w==h){ nativeGrainTexture.assign(id, id+(w*h*3)); stbi_image_free(id); pthread_mutex_unlock(&g_lut_mutex); return JNI_TRUE; } stbi_image_free(id); } pthread_mutex_unlock(&g_lut_mutex); return JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
@@ -174,7 +181,14 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
     for (int i = 0; i < 16; i++) jpeg_save_markers(&cd, JPEG_APP0 + i, 0xFFFF);
     jpeg_save_markers(&cd, JPEG_COM, 0xFFFF);
 
-    bool use_rgb = (nativeLutSize > 0 && opacity > 0);
+    // --- THREAD SAFETY COPY ---
+    pthread_mutex_lock(&g_lut_mutex);
+    std::vector<uint8_t> localLut = nativeLut;
+    int localLutSize = nativeLutSize;
+    std::vector<uint8_t> localGrainTexture = nativeGrainTexture;
+    pthread_mutex_unlock(&g_lut_mutex);
+
+    bool use_rgb = (localLutSize > 0 && opacity > 0);
     jpeg_read_header(&cd, TRUE);
     cd.scale_num = 1;
     cd.scale_denom = scaleDenom;
@@ -201,8 +215,8 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
     }
 
     int rs = cd.output_width*3;
-    const uint8_t* externalTex = nativeGrainTexture.empty() ? NULL : nativeGrainTexture.data();
-    bool is_1024_grain = nativeGrainTexture.size() > 1000000;
+    const uint8_t* externalTex = localGrainTexture.empty() ? NULL : localGrainTexture.data();
+    bool is_1024_grain = localGrainTexture.size() > 1000000;
     bool use_fast_yuv_texture_candidate = (!use_rgb && advancedGrainExperimental == 2 && externalTex != NULL
         && grain > 0 && colorChrome == 0 && chromeBlue == 0 && subtractiveSat == 0
         && bloom <= 0 && halation == 0 && vignette == 0);
@@ -226,7 +240,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
     for(int i=0; i<BUF; i++) r[i]=rb+(i*rs);
     for(int i=0; i<CHK; i++) orw[i]=ob+(i*rs);
 
-    int map[256]; for(int i=0; i<256; i++) map[i]=(i*(nativeLutSize-1)*128)/255;
+    int map[256]; for(int i=0; i<256; i++) map[i]=(i*(localLutSize-1)*128)/255;
     uint8_t roll[256]; generate_rolloff_lut(roll, rollOff);
     if (advancedGrainExperimental == 2 && externalTex != NULL && grain > 0) {
         ensure_overlay_blend_lut();
@@ -348,8 +362,8 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
                         process_row_rgb(r[0], cd.output_width, ay, cx, cy_center, vig_coef,
                             shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, halation, vignette,
                             grain, grainSize, scaleDenom, advancedGrainExperimental, grain_seed,
-                            opac_m, map, nativeLut.data(),
-                            nativeLutSize, nativeLutSize - 1, nativeLutSize * nativeLutSize,
+                            opac_m, map, localLut.data(),
+                            localLutSize, localLutSize - 1, localLutSize * localLutSize,
                             externalTex, is_1024_grain, grainTransform);
                     } else if (use_fast_yuv_texture) {
                         process_row_yuv_texture_fast(r[0], cd.output_width, ay,
@@ -385,8 +399,8 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
                         process_row_rgb(orw[i], cd.output_width, ay, cx, cy_center, vig_coef,
                             shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, 0, vignette,
                             grain, grainSize, scaleDenom, advancedGrainExperimental, grain_seed,
-                            opac_m, map, nativeLut.data(),
-                            nativeLutSize, nativeLutSize - 1, nativeLutSize * nativeLutSize,
+                            opac_m, map, localLut.data(),
+                            localLutSize, localLutSize - 1, localLutSize * localLutSize,
                             externalTex, is_1024_grain, grainTransform);
                     } else {
                         process_row_yuv(orw[i], cd.output_width, ay, cx, cy_center, vig_coef,
