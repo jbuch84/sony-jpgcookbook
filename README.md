@@ -1,4 +1,4 @@
-# JPEG.CAM - In-Camera Custom Color Sciene System
+# JPEG.CAM - In-Camera Custom Color Science System
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/jbuchanan)
 
 **💾 DOWNLOAD LINK:** Download the latest release from https://www.jpeg.cam
