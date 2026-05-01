@@ -100,13 +100,8 @@ public class DiptychOverlayView extends View {
             canvas.drawLine(mid - crossLen, cy, mid + crossLen, cy, framePaint);
             canvas.drawLine(mid, cy - crossLen, mid, cy + crossLen, framePaint);
         } else if (state == DiptychManager.STATE_NEED_SECOND || state == DiptychManager.STATE_STITCHING) {
-            // For Shot 2, darken the side where Shot 1 (the thumb) is NOT placed.
-            // If thumbOnLeft is true, Shot 1 is on Left, so user is framing Right side. Darken Left.
-            if (thumbOnLeft) {
-                canvas.drawRect(0, 0, mid, h, darkPaint);
-            } else {
-                canvas.drawRect(mid, 0, w, h, darkPaint);
-            }
+            // For Shot 2, the 'inactive' side is already covered by the Shot 1 thumbnail.
+            // No need to darken the background; it's redundant.
 
             if (thumbnail != null && !thumbnail.isRecycled()) {
                 int tW = thumbnail.getWidth();

@@ -194,21 +194,48 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         int width = getPreviewWindowWidth();
         if (width <= 0) return;
 
-        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(width, -1);
-        int offset = 0;
-        if (!isProcessing && diptychManager != null && diptychManager.isEnabled()) {
-            if (diptychManager.getState() == DiptychManager.STATE_NEED_FIRST || diptychManager.getState() == DiptychManager.STATE_PROCESSING_FIRST) {
-                // CENTER CROP: No LCD offset needed, framing is in the middle.
-                offset = 0;
-            } else if (diptychManager.getState() == DiptychManager.STATE_NEED_SECOND) {
-                // If Shot 1 is on Left, Shot 2 is on Right. Offset sensor Right to LCD Center.
-                // Shift sensor image Left (negative) to see its Right side.
-                offset = diptychManager.isThumbOnLeft() ? -(width / 4) : (width / 4);
-            }
-        }
-        params.leftMargin = offset;
+        // --- PHYSICAL ALIGNMENT ---
+        // Live view is now always full-screen and centered.
+        // AF/AE coordinates (-1000 to 1000) match the LCD 1:1.
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(-1, -1);
+        params.leftMargin = 0;
         mSurfaceView.setLayoutParams(params);
         mSurfaceView.invalidate();
+
+        // --- HARDWARE AF/AE SYNC ---
+        // Apply focus areas immediately so the user sees the 'Flexible Spot' box
+        // in the correct half of the screen while framing.
+        if (diptychManager != null && diptychManager.isEnabled()) {
+            boolean isFirst = diptychManager.getState() == DiptychManager.STATE_NEED_FIRST || diptychManager.getState() == DiptychManager.STATE_PROCESSING_FIRST;
+            boolean isSecond = diptychManager.getState() == DiptychManager.STATE_NEED_SECOND;
+            
+            int centerX = 0;
+            if (isFirst) {
+                centerX = 0;
+            } else if (isSecond) {
+                centerX = diptychManager.isThumbOnLeft() ? 500 : -500;
+            }
+
+            if (afOverlay != null) {
+                afOverlay.setDiptychCenterX((width / 2) + ((centerX * width) / 2000));
+            }
+
+            if (cameraManager != null && cameraManager.getCamera() != null) {
+                try {
+                    android.hardware.Camera.Parameters p = cameraManager.getCamera().getParameters();
+                    if (p.get("sony-focus-area") != null) p.set("sony-focus-area", "manual");
+                    
+                    java.util.List<android.hardware.Camera.Area> areas = new java.util.ArrayList<android.hardware.Camera.Area>();
+                    int rectSize = 150;
+                    areas.add(new android.hardware.Camera.Area(new android.graphics.Rect(centerX - rectSize, -rectSize, centerX + rectSize, rectSize), 1000));
+                    
+                    if (p.getMaxNumFocusAreas() > 0) p.setFocusAreas(areas);
+                    if (p.getMaxNumMeteringAreas() > 0) p.setMeteringAreas(areas);
+                    
+                    cameraManager.getCamera().setParameters(p);
+                } catch (Exception ignored) {}
+            }
+        }
     }
 
     public static final int DIAL_MODE_SHUTTER = 0;
@@ -1215,10 +1242,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             return true;
         }
 
-        if (diptychManager != null && diptychManager.isEnabled() && diptychManager.getState() == DiptychManager.STATE_NEED_SECOND) {
-            diptychManager.setThumbOnLeft(true);
-            updateDiptychPreviewWindow();
-            return true;
+        // --- DIPTYCH SIDE SWAP ---
+        // During Shot 2 framing, Left/Right moves the PREVIEW.
+        // We only do this if the HUD/Menu isn't open, so we don't 'trap' navigation.
+        if (diptychManager != null && diptychManager.isEnabled() && !menuController.isOpen() && !hudController.isActive()) {
+            if (diptychManager.getState() == DiptychManager.STATE_NEED_SECOND) {
+                diptychManager.setThumbOnLeft(true);
+                updateDiptychPreviewWindow();
+                return true; // Handle purely for Diptych
+            }
         }
 
         if (hudController.isActive() && (hudController.getMode() == 0 || hudController.getMode() == 10) && menuController.isNamingMode()) {
@@ -1251,10 +1283,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             return true;
         }
 
-        if (diptychManager != null && diptychManager.isEnabled() && (diptychManager.getState() == DiptychManager.STATE_NEED_FIRST || diptychManager.getState() == DiptychManager.STATE_NEED_SECOND)) {
-            diptychManager.setThumbOnLeft(false);
-            updateDiptychPreviewWindow();
-            return true;
+        // --- DIPTYCH SIDE SWAP ---
+        // During Shot 2 framing, Left/Right moves the PREVIEW.
+        // We only do this if the HUD/Menu isn't open, so we don't 'trap' navigation.
+        if (diptychManager != null && diptychManager.isEnabled() && !menuController.isOpen() && !hudController.isActive()) {
+            if (diptychManager.getState() == DiptychManager.STATE_NEED_SECOND) {
+                diptychManager.setThumbOnLeft(false);
+                updateDiptychPreviewWindow();
+                return true; // Handle purely for Diptych
+            }
         }
 
         if (hudController.isActive() && (hudController.getMode() == 0 || hudController.getMode() == 10) && menuController.isNamingMode()) {
