@@ -51,15 +51,21 @@ public class DiptychManager {
         leftFilename = null;
         rightFilename = null;
         shot1WasLeft = true;
-        if (overlayView != null) overlayView.setState(STATE_NEED_FIRST);
+        if (overlayView != null) {
+            overlayView.setThumbOnLeft(true); // Always start with Shot 1 on Left
+            overlayView.setState(STATE_NEED_FIRST);
+        }
         if (activity != null) activity.updateDiptychPreviewWindow();
     }
 
     public int getState() { return state; }
 
     public void setThumbOnLeft(boolean left) {
-        if (overlayView != null) overlayView.setThumbOnLeft(left);
-        if (activity != null) activity.updateDiptychPreviewWindow();
+        // Only allow swapping if we have the first shot but not the second
+        if (state == STATE_NEED_SECOND || state == STATE_PROCESSING_FIRST) {
+            if (overlayView != null) overlayView.setThumbOnLeft(left);
+            if (activity != null) activity.updateDiptychPreviewWindow();
+        }
     }
 
     public boolean isThumbOnLeft() { return overlayView != null && overlayView.isThumbOnLeft(); }
@@ -96,8 +102,7 @@ public class DiptychManager {
                     } catch (Exception ignored) {}
 
                     if (state != STATE_PROCESSING_FIRST && state != STATE_NEED_SECOND) return;
-                    final boolean thumbOnLeft = isThumbOnLeft();
-                    final Bitmap thumb = getDiptychThumbnail(originalPath, thumbOnLeft);
+                    final Bitmap thumb = getDiptychThumbnail(originalPath);
                     activity.runOnUiThread(new Runnable() {
                         public void run() {
                             if (overlayView != null && (state == STATE_PROCESSING_FIRST || state == STATE_NEED_SECOND)) {
@@ -134,7 +139,7 @@ public class DiptychManager {
     public void processFirstShot(final String gradedPath) {
         state = STATE_NEED_SECOND;
         shot1WasLeft = isThumbOnLeft();
-        final Bitmap thumb = getDiptychThumbnail(gradedPath, shot1WasLeft);
+        final Bitmap thumb = getDiptychThumbnail(gradedPath);
         activity.runOnUiThread(new Runnable() {
             public void run() {
                 if (overlayView != null) {
@@ -179,7 +184,7 @@ public class DiptychManager {
         }).start();
     }
 
-    private Bitmap getDiptychThumbnail(String path, boolean leftHalf) {
+    private Bitmap getDiptychThumbnail(String path) {
         try {
             BitmapFactory.Options opts = new BitmapFactory.Options();
             opts.inSampleSize = 16;
@@ -188,15 +193,11 @@ public class DiptychManager {
             if (fullBm == null) return null;
             int w = fullBm.getWidth();
             int h = fullBm.getHeight();
-            Bitmap cropped;
-            if (leftHalf) {
-                cropped = Bitmap.createBitmap(fullBm, 0, 0, w / 2, h);
-            } else {
-                cropped = Bitmap.createBitmap(fullBm, w / 2, 0, w / 2, h);      
-            }
+            // CENTER CROP: Take the middle half (width/4 to width/4 + width/2)
+            Bitmap cropped = Bitmap.createBitmap(fullBm, w / 4, 0, w / 2, h);
             if (cropped != fullBm) fullBm.recycle();
             return cropped;
-        } catch (Throwable t) {
+        } catch (Exception e) {
             return null;
         }
     }

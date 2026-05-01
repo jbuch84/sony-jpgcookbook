@@ -197,10 +197,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(width, -1);
         int offset = 0;
         if (!isProcessing && diptychManager != null && diptychManager.isEnabled()) {
-            if (diptychManager.getState() == DiptychManager.STATE_NEED_FIRST) {
-                offset = diptychManager.isThumbOnLeft() ? -(width / 4) : width / 4;
+            if (diptychManager.getState() == DiptychManager.STATE_NEED_FIRST || diptychManager.getState() == DiptychManager.STATE_PROCESSING_FIRST) {
+                // CENTER CROP: No LCD offset needed, framing is in the middle.
+                offset = 0;
             } else if (diptychManager.getState() == DiptychManager.STATE_NEED_SECOND) {
-                offset = diptychManager.isThumbOnLeft() ? width / 4 : -(width / 4);
+                // If Shot 1 is on Left, Shot 2 is on Right. Offset sensor Right to LCD Center.
+                // Shift sensor image Left (negative) to see its Right side.
+                offset = diptychManager.isThumbOnLeft() ? -(width / 4) : (width / 4);
             }
         }
         params.leftMargin = offset;
@@ -857,11 +860,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (displayState == 0 && !menuController.isOpen()) setLiveUiSuppressed(true);
         // Diptych mode: shift AF bracket to the active (open) side before focusing
         if (afOverlay != null && diptychManager != null && diptychManager.isEnabled()) {
-            boolean isFirst = diptychManager.getState() == DiptychManager.STATE_NEED_FIRST;
+            boolean isFirst = diptychManager.getState() == DiptychManager.STATE_NEED_FIRST || diptychManager.getState() == DiptychManager.STATE_PROCESSING_FIRST;
             boolean isSecond = diptychManager.getState() == DiptychManager.STATE_NEED_SECOND;
+            
+            // --- CENTER CROP LOGIC ---
+            // Shot 1: Always Center (0)
+            // Shot 2: Offset to framed side (If Shot 1 is on Left, Shot 2 is on Right (+500))
             int centerX = 0;
             if (isFirst) {
-                centerX = -500;
+                centerX = 0;
             } else if (isSecond) {
                 centerX = diptychManager.isThumbOnLeft() ? 500 : -500;
             }
@@ -878,16 +885,27 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             if (cameraManager != null && cameraManager.getCamera() != null) {
                 try {
                     android.hardware.Camera.Parameters p = cameraManager.getCamera().getParameters();
+                    
+                    // FORCE Flexible Spot mode so coordinates work
+                    if (p.get("sony-focus-area") != null) p.set("sony-focus-area", "manual");
+                    
+                    java.util.List<android.hardware.Camera.Area> areas = new java.util.ArrayList<android.hardware.Camera.Area>();
+                    int rectSize = 150;
+                    areas.add(new android.hardware.Camera.Area(new android.graphics.Rect(centerX - rectSize, -rectSize, centerX + rectSize, rectSize), 1000));
+                    
                     if (p.getMaxNumFocusAreas() > 0) {
-                        if (isFirst || isSecond) {
-                            java.util.List<android.hardware.Camera.Area> areas = new java.util.ArrayList<android.hardware.Camera.Area>();
-                            int rectSize = 150;
-                            areas.add(new android.hardware.Camera.Area(new android.graphics.Rect(centerX - rectSize, -rectSize, centerX + rectSize, rectSize), 1000));
-                            p.setFocusAreas(areas);
-                        } else {
-                            p.setFocusAreas(null);
-                        }
-                        cameraManager.getCamera().setParameters(p);
+                        if (isFirst || isSecond) p.setFocusAreas(areas);
+                        else p.setFocusAreas(null);
+                    }
+                    if (p.getMaxNumMeteringAreas() > 0) {
+                        if (isFirst || isSecond) p.setMeteringAreas(areas);
+                        else p.setMeteringAreas(null);
+                    }
+                    cameraManager.getCamera().setParameters(p);
+
+                    // Sync Focus Magnifier absolute position
+                    if (cameraManager.isPreviewMagnificationActive()) {
+                        cameraManager.jumpToPreviewMagnification(centerX, 0);
                     }
                 } catch (Exception ignored) {}
             }
@@ -1197,7 +1215,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             return true;
         }
 
-        if (diptychManager != null && diptychManager.isEnabled() && (diptychManager.getState() == DiptychManager.STATE_NEED_FIRST || diptychManager.getState() == DiptychManager.STATE_NEED_SECOND)) {
+        if (diptychManager != null && diptychManager.isEnabled() && diptychManager.getState() == DiptychManager.STATE_NEED_SECOND) {
             diptychManager.setThumbOnLeft(true);
             updateDiptychPreviewWindow();
             return true;
@@ -2495,10 +2513,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             if (!v && cameraManager != null && cameraManager.getCamera() != null) {
                 try {
                     android.hardware.Camera.Parameters p = cameraManager.getCamera().getParameters();
-                    if (p.getMaxNumFocusAreas() > 0) {
-                        p.setFocusAreas(null);
-                        cameraManager.getCamera().setParameters(p);
-                    }
+                    // --- HARDWARE CLEANUP ---
+                    // Reset AF/AE areas to null (Wide/Auto)
+                    if (p.getMaxNumFocusAreas() > 0) p.setFocusAreas(null);
+                    if (p.getMaxNumMeteringAreas() > 0) p.setMeteringAreas(null);
+                    
+                    // Revert Sony focus area to 'wide'
+                    if (p.get("sony-focus-area") != null) p.set("sony-focus-area", "wide");
+                    
+                    cameraManager.getCamera().setParameters(p);
+                    
+                    if (afOverlay != null) afOverlay.setDiptychCenterX(-1);
                 } catch (Exception ignored) {}
             }
         }

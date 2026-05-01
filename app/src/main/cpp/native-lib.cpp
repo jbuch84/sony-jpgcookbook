@@ -539,19 +539,29 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_Diptych
     }
     JSAMPROW rp1[1], rp2[1], rpo[1]; rp1[0] = row1; rp2[0] = row2; rpo[0] = combined;
     
-    bool shot2PlacedLeft = !shot1PlacedLeft;
-    bool shot2WasLeft = shot2PlacedLeft; // Shot 2 is framed exactly where it is placed
-
+    // --- CENTER CROP LOGIC ---
+    // Shot 1: Always take center half (q1 to q1+half1).
+    // Shot 2: Take the half matching its placement (Left side? Take left half. Right side? Take right half).
     for (int y = 0; y < finalH; y++) {
         jpeg_read_scanlines(&c1, rp1, 1); jpeg_read_scanlines(&c2, rp2, 1);
         
-        unsigned char* leftSrcRow = shot1PlacedLeft ? row1 : row2;
-        bool leftSrcWasLeft = shot1PlacedLeft ? shot1WasLeft : shot2WasLeft;
-        memcpy(combined, leftSrcRow + (leftSrcWasLeft ? 0 : half1 * 3), half1 * 3);
+        // Fill Left Half
+        if (shot1PlacedLeft) {
+            // Shot 1 is on Left. Use Shot 1's CENTER crop.
+            memcpy(combined, row1 + q1 * 3, half1 * 3);
+        } else {
+            // Shot 2 is on Left. Use Shot 2's LEFT half (exactly what was framed).
+            memcpy(combined, row2 + 0, half2 * 3);
+        }
 
-        unsigned char* rightSrcRow = shot1PlacedLeft ? row2 : row1;
-        bool rightSrcWasLeft = shot1PlacedLeft ? shot2WasLeft : shot1WasLeft;
-        memcpy(combined + half1 * 3, rightSrcRow + (rightSrcWasLeft ? 0 : half2 * 3), half2 * 3);
+        // Fill Right Half
+        if (shot1PlacedLeft) {
+            // Shot 2 is on Right. Use Shot 2's RIGHT half (exactly what was framed).
+            memcpy(combined + half1 * 3, row2 + half2 * 3, half2 * 3);
+        } else {
+            // Shot 1 is on Right. Use Shot 1's CENTER crop.
+            memcpy(combined + half2 * 3, row1 + q1 * 3, half1 * 3);
+        }
 
         // Draw Divider
         int dividerX = half1;

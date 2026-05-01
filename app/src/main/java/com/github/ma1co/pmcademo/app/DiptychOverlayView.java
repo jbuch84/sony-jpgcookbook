@@ -82,18 +82,26 @@ public class DiptychOverlayView extends View {
         int mid = w / 2;
 
         if (state == DiptychManager.STATE_NEED_FIRST) {
-            // Darken the side the user is NOT shooting. 
-            // If thumbOnLeft is true, the user is framing the LEFT side, so darken the RIGHT side.
-            if (thumbOnLeft) {
-                canvas.drawRect(mid, 0, w, h, darkPaint);
-            } else {
-                canvas.drawRect(0, 0, mid, h, darkPaint);
-            }
+            // --- CENTER CROP FRAMING ---
+            // User frames in the center. Show a frame for the crop area.
+            int cropW = mid;
+            int left = (w - cropW) / 2;
+            int right = left + cropW;
+            
+            // Darken the edges outside the center crop
+            canvas.drawRect(0, 0, left, h, darkPaint);
+            canvas.drawRect(right, 0, w, h, darkPaint);
+            
+            // Draw framing brackets
+            canvas.drawRect(left, 0, right, h, framePaint);
+            
             int cy = h / 2;
             int crossLen = 14;
             canvas.drawLine(mid - crossLen, cy, mid + crossLen, cy, framePaint);
             canvas.drawLine(mid, cy - crossLen, mid, cy + crossLen, framePaint);
         } else if (state == DiptychManager.STATE_NEED_SECOND || state == DiptychManager.STATE_STITCHING) {
+            // For Shot 2, darken the side where Shot 1 (the thumb) is NOT placed.
+            // If thumbOnLeft is true, Shot 1 is on Left, so user is framing Right side. Darken Left.
             if (thumbOnLeft) {
                 canvas.drawRect(0, 0, mid, h, darkPaint);
             } else {

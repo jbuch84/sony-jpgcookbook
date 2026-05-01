@@ -287,6 +287,24 @@ public class SonyCameraManager {
         }
     }
 
+    public boolean jumpToPreviewMagnification(int x, int y) {
+        if (cameraEx == null || !previewMagnificationActive) {
+            return false;
+        }
+
+        Pair<Integer, Integer> next = Pair.create(
+                clampPreviewMagnificationCoordinate(x),
+                clampPreviewMagnificationCoordinate(y));
+
+        try {
+            setPreviewMagnificationInternal(previewMagnificationLevel, next);
+            previewMagnificationCoordinates = next;
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     private int clampPreviewMagnificationCoordinate(int value) {
         if (value > PREVIEW_MAGNIFICATION_MAX_COORDINATE) {
             return PREVIEW_MAGNIFICATION_MAX_COORDINATE;
