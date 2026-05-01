@@ -63,6 +63,7 @@ public class DiptychManager {
     public void setThumbOnLeft(boolean left) {
         // Only allow swapping if we have the first shot but not the second
         if (state == STATE_NEED_SECOND || state == STATE_PROCESSING_FIRST) {
+            this.shot1WasLeft = left;
             if (overlayView != null) overlayView.setThumbOnLeft(left);
             if (activity != null) activity.updateDiptychPreviewWindow();
         }
