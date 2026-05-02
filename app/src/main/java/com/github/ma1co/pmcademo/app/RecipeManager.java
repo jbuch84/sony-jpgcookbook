@@ -26,6 +26,7 @@ public class RecipeManager {
     private int prefFn = 0;
     private ArrayList<String> recipePaths = new ArrayList<String>();
     private ArrayList<String> recipeNames = new ArrayList<String>();
+    private static final String[] LEGACY_GRAIN_NAMES = new String[] { "SMALL", "MED", "LARGE" };
 
     public RecipeManager() {
         recipeDir = new File(Filepaths.getAppDir(), "RECIPES");
@@ -160,20 +161,8 @@ public class RecipeManager {
             p.halation        = json.optInt("halation", 0);
             p.vignette        = json.optInt("vignette", 0);
             p.grain           = json.optInt("grain", 0);
-            
             String loadedGrainName = json.optString("grainName", "NONE");
-            List<String> grainOptions = java.util.Arrays.asList(MenuController.getGrainEngineOptions());
-
-            if (!loadedGrainName.equals("NONE")) {
-                p.grainSize = grainOptions.indexOf(loadedGrainName.toUpperCase());
-                if (p.grainSize == -1) p.grainSize = 0;
-            } else {
-                // Legacy Recipe Fallback
-                int legacySize = json.optInt("grainSize", 0);
-                String legacyName = (legacySize == 0) ? "SMALL" : (legacySize == 1) ? "MED" : "LARGE";
-                p.grainSize = grainOptions.indexOf(legacyName);
-                if (p.grainSize == -1) p.grainSize = 0; // If not found, use first available
-            }
+            p.grainSize = resolveGrainIndex(loadedGrainName, json.optInt("grainSize", 0));
 
             p.advancedGrainExperimental = json.optInt("advancedGrainExperimental", 0);
             p.bloom           = json.optInt("bloom", 0);
@@ -227,9 +216,14 @@ public class RecipeManager {
 
             String grainNameToSave = "NONE";
             if (p.grain > 0) {
-                List<String> grainOptions = java.util.Arrays.asList(MenuController.getGrainEngineOptions());
-                if (p.grainSize >= 0 && p.grainSize < grainOptions.size()) {
-                    grainNameToSave = grainOptions.get(p.grainSize);
+                File grainFile = MenuController.getGrainTextureFile(p.grainSize);
+                if (grainFile != null) {
+                    grainNameToSave = getFileStem(grainFile.getName());
+                } else {
+                    List<String> grainOptions = java.util.Arrays.asList(MenuController.getGrainEngineOptions());
+                    if (p.grainSize >= 0 && p.grainSize < grainOptions.size()) {
+                        grainNameToSave = grainOptions.get(p.grainSize);
+                    }
                 }
             }
             sb.append("  \"grainName\": \"").append(grainNameToSave.replace("\"", "\\\"")).append("\",\n");
@@ -285,6 +279,57 @@ public class RecipeManager {
                 br.close();
             } catch (Exception e) {}
         }
+    }
+
+    private static String normalizeGrainKey(String value) {
+        if (value == null) return "";
+        String normalized = value.trim().toUpperCase();
+        int dot = normalized.lastIndexOf('.');
+        if (dot > 0) normalized = normalized.substring(0, dot);
+        normalized = normalized.replace('_', ' ');
+        while (normalized.indexOf("  ") != -1) {
+            normalized = normalized.replace("  ", " ");
+        }
+        return normalized;
+    }
+
+    private static String getFileStem(String name) {
+        if (name == null) return "";
+        int dot = name.lastIndexOf('.');
+        return dot > 0 ? name.substring(0, dot) : name;
+    }
+
+    private static int findGrainIndexByName(String grainName) {
+        String target = normalizeGrainKey(grainName);
+        if (target.length() == 0 || "NONE".equals(target)) return -1;
+
+        String[] grainOptions = MenuController.getGrainEngineOptions();
+        for (int i = 0; i < grainOptions.length; i++) {
+            if (target.equals(normalizeGrainKey(grainOptions[i]))) {
+                return i;
+            }
+
+            File grainFile = MenuController.getGrainTextureFile(i);
+            if (grainFile != null && target.equals(normalizeGrainKey(getFileStem(grainFile.getName())))) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static int resolveLegacyGrainIndex(int legacySize) {
+        int safeIndex = legacySize;
+        if (safeIndex < 0) safeIndex = 0;
+        if (safeIndex >= LEGACY_GRAIN_NAMES.length) safeIndex = LEGACY_GRAIN_NAMES.length - 1;
+
+        int resolved = findGrainIndexByName(LEGACY_GRAIN_NAMES[safeIndex]);
+        return resolved >= 0 ? resolved : 0;
+    }
+
+    private static int resolveGrainIndex(String loadedGrainName, int legacySize) {
+        int resolved = findGrainIndexByName(loadedGrainName);
+        if (resolved >= 0) return resolved;
+        return resolveLegacyGrainIndex(legacySize);
     }
 
     public void savePreferences() {
