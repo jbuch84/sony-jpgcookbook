@@ -386,6 +386,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         // --- NEW: Extract our starter pack ---
         Filepaths.extractDefaultAssets(this);
 
+        // --- NEW: Auto-Extract any .cam bundles users dropped on their SD card ---
+        BundleManager.extractAllBundles();
+
         File thumbsDir = new File(Filepaths.getDcimDir(), ".thumbnails");
         if (!thumbsDir.exists()) thumbsDir.mkdirs();
 

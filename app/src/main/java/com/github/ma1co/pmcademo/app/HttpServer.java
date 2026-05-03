@@ -87,6 +87,8 @@ public class HttpServer extends NanoHTTPD {
                             targetDir = Filepaths.getLutDir();
                         } else if (lowerName.endsWith(".png")) {
                             targetDir = Filepaths.getGrainDir();
+                        } else if (lowerName.endsWith(".cam")) {
+                            targetDir = Filepaths.getAppDir();
                         } else if (lowerName.endsWith(".txt") || lowerName.endsWith(".lens")) {
                             if (lowerName.startsWith("m_")) targetDir = new File(Filepaths.getAppDir(), "MATRIX");
                             else if (lowerName.startsWith("r_")) targetDir = Filepaths.getRecipeDir();
@@ -128,6 +130,11 @@ public class HttpServer extends NanoHTTPD {
                     if (tempFile.exists()) {
                         if (destFile.exists()) destFile.delete(); 
                         tempFile.renameTo(destFile);
+                    }
+                    
+                    // If a .cam file was uploaded, extract it now.
+                    if (lowerName.endsWith(".cam")) {
+                        BundleManager.extractAllBundles();
                     }
 
                     Response success = newFixedLengthResponse(Response.Status.OK, "application/json", "{\"status\":\"success\"}");
