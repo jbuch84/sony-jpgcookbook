@@ -68,20 +68,18 @@ public class BundleManager {
                 Log.d(TAG, "Extracting: " + entryName + " to " + tempFile.getAbsolutePath());
 
                 FileOutputStream fos = null;
-                BufferedOutputStream bos = null;
                 try {
                     fos = new FileOutputStream(tempFile);
-                    bos = new BufferedOutputStream(fos, BUFFER_SIZE);
                     byte[] buffer = new byte[BUFFER_SIZE];
                     int count;
                     while ((count = zis.read(buffer, 0, BUFFER_SIZE)) != -1) {
-                        bos.write(buffer, 0, count);
+                        fos.write(buffer, 0, count);
                     }
-                    bos.flush();
+                    fos.flush();
+                    fos.getFD().sync();
                 } catch (Exception e) {
                     Log.e(TAG, "Failed to extract entry: " + entryName, e);
                 } finally {
-                    try { if (bos != null) bos.close(); } catch (Exception e) {}
                     try { if (fos != null) fos.close(); } catch (Exception e) {}
                 }
 
@@ -90,11 +88,35 @@ public class BundleManager {
                         boolean delSuccess = destFile.delete();
                         Log.d(TAG, "Deleted existing dest: " + destFile.getName() + " -> " + delSuccess);
                     }
+                    
                     boolean renameSuccess = tempFile.renameTo(destFile);
-                    if (renameSuccess) {
-                        Log.d(TAG, "Successfully moved to: " + destFile.getName());
+                    
+                    if (!renameSuccess) {
+                        Log.e(TAG, "Rename failed! Attempting fallback copy for: " + destFile.getName());
+                        // Fallback: Copy bytes directly if renameTo fails
+                        FileInputStream fis = null;
+                        FileOutputStream fallbackFos = null;
+                        try {
+                            fis = new FileInputStream(tempFile);
+                            fallbackFos = new FileOutputStream(destFile);
+                            byte[] buffer = new byte[BUFFER_SIZE];
+                            int count;
+                            while ((count = fis.read(buffer)) != -1) {
+                                fallbackFos.write(buffer, 0, count);
+                            }
+                            fallbackFos.flush();
+                            fallbackFos.getFD().sync();
+                            renameSuccess = true;
+                            Log.d(TAG, "Fallback copy succeeded for: " + destFile.getName());
+                        } catch (Exception e) {
+                            Log.e(TAG, "Fallback copy also failed!", e);
+                        } finally {
+                            try { if (fis != null) fis.close(); } catch (Exception e) {}
+                            try { if (fallbackFos != null) fallbackFos.close(); } catch (Exception e) {}
+                            if (renameSuccess) { tempFile.delete(); }
+                        }
                     } else {
-                        Log.e(TAG, "FATAL: Failed to rename " + tempFile.getName() + " to " + destFile.getName());
+                        Log.d(TAG, "Successfully moved to: " + destFile.getName());
                     }
                 } else {
                     Log.e(TAG, "FATAL: Temp file was never created! " + tempFile.getAbsolutePath());
