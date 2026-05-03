@@ -60,12 +60,16 @@ public class BundleManager {
                     parentDir.mkdirs();
                 }
 
-                Log.d(TAG, "Extracting: " + entryName + " to " + destFile.getAbsolutePath());
+                // Sony Android 2.3.7 VFAT bug: write to 8.3 temp file first, then rename.
+                // Creating a new file with a long name via FileOutputStream directly can silently fail or throw.
+                File tempFile = new File(parentDir, "BNDL.TMP");
+
+                Log.d(TAG, "Extracting: " + entryName + " to " + tempFile.getAbsolutePath());
 
                 FileOutputStream fos = null;
                 BufferedOutputStream bos = null;
                 try {
-                    fos = new FileOutputStream(destFile);
+                    fos = new FileOutputStream(tempFile);
                     bos = new BufferedOutputStream(fos, BUFFER_SIZE);
                     byte[] buffer = new byte[BUFFER_SIZE];
                     int count;
@@ -79,6 +83,13 @@ public class BundleManager {
                     try { if (bos != null) bos.close(); } catch (Exception e) {}
                     try { if (fos != null) fos.close(); } catch (Exception e) {}
                 }
+
+                if (tempFile.exists()) {
+                    if (destFile.exists()) destFile.delete();
+                    tempFile.renameTo(destFile);
+                    Log.d(TAG, "Successfully moved to: " + destFile.getName());
+                }
+
                 zis.closeEntry();
             }
             Log.d(TAG, "Successfully extracted bundle: " + zipFile.getName());
