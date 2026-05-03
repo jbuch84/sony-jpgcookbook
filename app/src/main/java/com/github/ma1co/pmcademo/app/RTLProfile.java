@@ -59,6 +59,10 @@ public class RTLProfile {
     // 0 = OFF | 1 = STANDARD | 2 = RICH
     public int bloom = 0;
 
+    // Set to the .cam filename (e.g. "Cinestill.cam") when this slot is backed by a
+    // bundle file rather than loose LUT/grain files on the SD card.  Null = normal mode.
+    public String camFile = null;
+
     public RTLProfile(int slotIndex) {
         this.profileName = "RECIPE " + (slotIndex + 1);
     }

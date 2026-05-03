@@ -161,6 +161,72 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
     if(id){ if((w==512||w==1024)&&w==h){ nativeGrainTexture.assign(id, id+(w*h*3)); stbi_image_free(id); pthread_mutex_unlock(&g_lut_mutex); return JNI_TRUE; } stbi_image_free(id); } pthread_mutex_unlock(&g_lut_mutex); return JNI_FALSE;
 }
 
+// Loads a LUT from a raw byte array (CUBE text or PNG Hald CLUT).
+// PNG is detected by magic bytes; everything else is parsed as CUBE text.
+extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngine_loadLutBytesNative(
+    JNIEnv* env, jobject obj, jbyteArray data) {
+    pthread_mutex_lock(&g_lut_mutex);
+    nativeLut.clear(); nativeLutSize = 0;
+    jsize len = env->GetArrayLength(data);
+    if (len < 4) { pthread_mutex_unlock(&g_lut_mutex); return JNI_FALSE; }
+    jbyte* raw = env->GetByteArrayElements(data, NULL);
+    if (!raw) { pthread_mutex_unlock(&g_lut_mutex); return JNI_FALSE; }
+    const uint8_t* buf = (const uint8_t*)raw;
+    // PNG magic: 0x89 'P' 'N' 'G'
+    bool isPng = (buf[0]==0x89 && buf[1]==0x50 && buf[2]==0x4E && buf[3]==0x47);
+    if (isPng) {
+        int w, h, c; unsigned char* id = stbi_load_from_memory(buf, (int)len, &w, &h, &c, 3);
+        if (id) {
+            if (w*h <= 4000000) {
+                int bl=1, md=w*h; for(int l=1; l<=150; l++){ int diff=abs((l*l*l)-(w*h)); if(diff<md){md=diff;bl=l;} }
+                nativeLutSize=bl; nativeLut.resize(bl*bl*bl*3); int tr=w/bl; if(tr==0)tr=1;
+                for(int b=0;b<bl;b++){ int cx=b%tr,cy=b/tr; for(int g=0;g<bl;g++){ int iy=cy*bl+g; for(int r=0;r<bl;r++){ int ix=cx*bl+r; if(ix>=w)ix=w-1; if(iy>=h)iy=h-1; int s=(iy*w+ix)*3,d=(r+g*bl+b*bl*bl)*3; nativeLut[d]=id[s];nativeLut[d+1]=id[s+1];nativeLut[d+2]=id[s+2]; } } }
+            }
+            stbi_image_free(id);
+        }
+    } else {
+        // Parse CUBE format from memory buffer
+        const char* pos = (const char*)buf;
+        const char* end = pos + len;
+        char line[256]; size_t ci = 0;
+        while (pos < end) {
+            int i = 0;
+            while (pos < end && i < 255) { char ch = *pos++; if(ch=='\n') break; if(ch!='\r') line[i++]=ch; }
+            line[i] = '\0';
+            if (strncmp(line,"LUT_3D_SIZE",11)==0) { sscanf(line,"LUT_3D_SIZE %d",&nativeLutSize); nativeLut.resize(nativeLutSize*nativeLutSize*nativeLutSize*3); ci=0; continue; }
+            float r,g,b; if(nativeLutSize>0 && sscanf(line,"%f %f %f",&r,&g,&b)==3){ if(ci+2<nativeLut.size()){ nativeLut[ci++]=(uint8_t)(r*255); nativeLut[ci++]=(uint8_t)(g*255); nativeLut[ci++]=(uint8_t)(b*255); } }
+        }
+    }
+    env->ReleaseByteArrayElements(data, raw, JNI_ABORT);
+    LOGD("loadLutBytesNative: isPng=%d size=%d", isPng?1:0, nativeLutSize);
+    jboolean result = nativeLutSize > 0 ? JNI_TRUE : JNI_FALSE;
+    pthread_mutex_unlock(&g_lut_mutex);
+    return result;
+}
+
+// Loads a grain texture PNG from a raw byte array.
+extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngine_loadGrainTextureBytesNative(
+    JNIEnv* env, jobject obj, jbyteArray data) {
+    pthread_mutex_lock(&g_lut_mutex);
+    nativeGrainTexture.clear();
+    jsize len = env->GetArrayLength(data);
+    if (len < 4) { pthread_mutex_unlock(&g_lut_mutex); return JNI_FALSE; }
+    jbyte* raw = env->GetByteArrayElements(data, NULL);
+    if (!raw) { pthread_mutex_unlock(&g_lut_mutex); return JNI_FALSE; }
+    int w, h, c; unsigned char* id = stbi_load_from_memory((const uint8_t*)raw, (int)len, &w, &h, &c, 3);
+    env->ReleaseByteArrayElements(data, raw, JNI_ABORT);
+    if (id) {
+        if ((w==512||w==1024) && w==h) {
+            nativeGrainTexture.assign(id, id+(w*h*3)); stbi_image_free(id);
+            LOGD("loadGrainTextureBytesNative: ok %dx%d", w, h);
+            pthread_mutex_unlock(&g_lut_mutex); return JNI_TRUE;
+        }
+        stbi_image_free(id);
+    }
+    LOGD("loadGrainTextureBytesNative: failed");
+    pthread_mutex_unlock(&g_lut_mutex); return JNI_FALSE;
+}
+
 // Patches the EXIF APP1 marker height fields to match the actual cropped output.
 // Handles both little-endian (Intel) and big-endian (Motorola) TIFF byte orders.
 // Patches IFD0 ImageLength (0x0101) and ExifSubIFD PixelYDimension (0xA003).

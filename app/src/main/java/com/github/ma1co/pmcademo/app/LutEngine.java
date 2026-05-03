@@ -7,10 +7,24 @@ public class LutEngine {
     private String currentLutName = "";
     private String currentGrainTexturePath = "";
 
+    // Result returned by loadFromCam() so ImageProcessor knows what was loaded.
+    public static class CamLoadResult {
+        public boolean lutLoaded   = false;
+        public boolean grainLoaded = false;
+    }
+
+    // Cache key for .cam loading: "<path>|<fileSize>" — avoids re-opening the ZIP
+    // on every shot when the same .cam is in use.
+    private String currentCamKey        = "";
+    private boolean lastCamLutLoaded    = false;
+    private boolean lastCamGrainLoaded  = false;
+
     private native boolean loadLutNative(String filePath);
-    
-    // NEW: Native hook for loading the 512x512 texture into C++
     private native boolean loadGrainTextureNative(String filePath);
+
+    // Memory-buffer loaders — called by loadFromCam() with bytes read from the ZIP.
+    private native boolean loadLutBytesNative(byte[] data);
+    private native boolean loadGrainTextureBytesNative(byte[] data);
 
     // Signature matches C++ exactly: 16 total parameters after env/obj
     private native boolean processImageNative(
@@ -67,7 +81,7 @@ public class LutEngine {
                                  applyCrop, numCores); 
     }
 
-    // NEW: Public wrapper to load the grain texture safely
+    // Public wrapper to load the grain texture safely (loose-file path).
     public boolean loadGrainTexture(File texFile) {
         if (texFile == null || !texFile.exists()) return false;
         String texPath = texFile.getAbsolutePath();
@@ -77,5 +91,106 @@ public class LutEngine {
             return true;
         }
         return false;
+    }
+
+    /**
+     * Opens a .cam bundle (renamed ZIP) and loads its LUT and grain directly into
+     * native memory from byte arrays — no extraction to disk needed.
+     *
+     * Expected ZIP structure:
+     *   recipe.json          declares "lutEntry" and "grainEntry" filenames
+     *   lut.cube / lut.png   the LUT (named by lutEntry)
+     *   grain.png            the grain texture (named by grainEntry, optional)
+     *
+     * Cached by camPath + file size so the ZIP is only opened once per recipe switch.
+     */
+    public CamLoadResult loadFromCam(String camPath) {
+        CamLoadResult result = new CamLoadResult();
+        java.io.File camFile = new java.io.File(camPath);
+        if (!camFile.exists()) {
+            DebugLog.write("CAM: file not found: " + camPath);
+            return result;
+        }
+
+        // Cache check — if same .cam and same size, native already has it loaded.
+        String cacheKey = camPath + "|" + camFile.length();
+        if (cacheKey.equals(currentCamKey)) {
+            result.lutLoaded   = lastCamLutLoaded;
+            result.grainLoaded = lastCamGrainLoaded;
+            return result;
+        }
+
+        String lutEntry   = null;
+        String grainEntry = null;
+
+        try {
+            java.util.zip.ZipFile zf = new java.util.zip.ZipFile(camFile);
+
+            // 1. Read recipe.json to discover which entries hold the LUT and grain.
+            java.util.zip.ZipEntry je = zf.getEntry("recipe.json");
+            if (je != null) {
+                byte[] jsonBytes = readZipEntry(zf, je);
+                try {
+                    org.json.JSONObject json = new org.json.JSONObject(new String(jsonBytes, "UTF-8"));
+                    lutEntry   = json.optString("lutEntry",   null);
+                    grainEntry = json.optString("grainEntry", null);
+                } catch (Exception e) {
+                    DebugLog.write("CAM: recipe.json parse error: " + e.getMessage());
+                }
+            } else {
+                DebugLog.write("CAM: no recipe.json in bundle");
+            }
+
+            // 2. Load LUT bytes → native.
+            if (lutEntry != null) {
+                java.util.zip.ZipEntry le = zf.getEntry(lutEntry);
+                if (le != null) {
+                    byte[] lutBytes = readZipEntry(zf, le);
+                    result.lutLoaded = loadLutBytesNative(lutBytes);
+                    // Reset loose-file caches so they don't collide.
+                    currentLutName = "";
+                } else {
+                    DebugLog.write("CAM: lutEntry \"" + lutEntry + "\" not found in ZIP");
+                }
+            }
+
+            // 3. Load grain bytes → native (optional).
+            if (grainEntry != null) {
+                java.util.zip.ZipEntry ge = zf.getEntry(grainEntry);
+                if (ge != null) {
+                    byte[] grainBytes = readZipEntry(zf, ge);
+                    result.grainLoaded = loadGrainTextureBytesNative(grainBytes);
+                    currentGrainTexturePath = "";
+                } else {
+                    DebugLog.write("CAM: grainEntry \"" + grainEntry + "\" not found in ZIP");
+                }
+            }
+
+            zf.close();
+
+        } catch (Exception e) {
+            DebugLog.write("CAM: ZIP open failed: " + e.getMessage());
+            return result;
+        }
+
+        // Update cache.
+        currentCamKey      = cacheKey;
+        lastCamLutLoaded   = result.lutLoaded;
+        lastCamGrainLoaded = result.grainLoaded;
+
+        DebugLog.write("CAM: loaded \"" + camPath + "\" lut=" + result.lutLoaded + " grain=" + result.grainLoaded);
+        return result;
+    }
+
+    /** Reads all bytes from a ZipEntry using random-access ZipFile. */
+    private static byte[] readZipEntry(java.util.zip.ZipFile zf, java.util.zip.ZipEntry entry)
+            throws java.io.IOException {
+        java.io.InputStream is = zf.getInputStream(entry);
+        java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+        byte[] buf = new byte[4096];
+        int n;
+        while ((n = is.read(buf)) != -1) baos.write(buf, 0, n);
+        is.close();
+        return baos.toByteArray();
     }
 }

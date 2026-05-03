@@ -104,10 +104,24 @@ public class ImageProcessor {
                     }
                 }
 
-                if (lutPath != null || lutName != null) {
-                    boolean lutOk = mEngine.loadLut(lutPath, lutName);
-                    DebugLog.write("LUT LOAD: name=\"" + lutName + "\"  path=" + lutPath + "  ok=" + lutOk);
-                    if (!lutOk) return "FAILED";
+                // --- .cam bundle path ---
+                boolean camGrainLoaded = false;
+                if (p != null && p.camFile != null) {
+                    String camPath = new File(Filepaths.getRecipeDir(), p.camFile).getAbsolutePath();
+                    LutEngine.CamLoadResult cam = mEngine.loadFromCam(camPath);
+                    DebugLog.write("CAM LOAD: file=" + p.camFile + " lut=" + cam.lutLoaded + " grain=" + cam.grainLoaded);
+                    if (!cam.lutLoaded && p.opacity > 0) {
+                        DebugLog.write("CAM LOAD FAILED: no LUT in bundle");
+                        return "FAILED";
+                    }
+                    camGrainLoaded = cam.grainLoaded;
+                } else {
+                    // --- Normal loose-file path ---
+                    if (lutPath != null || lutName != null) {
+                        boolean lutOk = mEngine.loadLut(lutPath, lutName);
+                        DebugLog.write("LUT LOAD: name=\"" + lutName + "\"  path=" + lutPath + "  ok=" + lutOk);
+                        if (!lutOk) return "FAILED";
+                    }
                 }
 
                 File dir = new File(outDir);
@@ -144,9 +158,15 @@ public class ImageProcessor {
 
                 int cxxGrainEngine = p.advancedGrainExperimental;
                 if (p.grain > 0) {
-                    File texFile = MenuController.getGrainTextureFile(finalGrainSize);
-                    if (mEngine.loadGrainTexture(texFile)) {
+                    if (camGrainLoaded) {
+                        // Grain was loaded from the .cam bundle — native already has it.
                         cxxGrainEngine = 2;
+                    } else {
+                        // Normal path: load grain texture from GRAIN folder on SD card.
+                        File texFile = MenuController.getGrainTextureFile(finalGrainSize);
+                        if (mEngine.loadGrainTexture(texFile)) {
+                            cxxGrainEngine = 2;
+                        }
                     }
                 }
 
