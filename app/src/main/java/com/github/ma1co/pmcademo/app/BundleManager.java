@@ -3,16 +3,29 @@ package com.github.ma1co.pmcademo.app;
 import android.util.Log;
 
 import java.io.BufferedInputStream;
-import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.FileWriter;
+import java.io.IOException;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 public class BundleManager {
     private static final String TAG = "JPEG.CAM_BUNDLE";
     private static final int BUFFER_SIZE = 8192;
+
+    private static void logToFile(String msg) {
+        Log.e(TAG, msg);
+        try {
+            File logFile = new File(Filepaths.getAppDir(), "BUNDLE_DEBUG.TXT");
+            FileWriter fw = new FileWriter(logFile, true);
+            fw.write(msg + "\n");
+            fw.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
 
     public static void extractAllBundles() {
         extractBundlesInDir(Filepaths.getAppDir());
@@ -27,7 +40,7 @@ public class BundleManager {
 
         for (File file : files) {
             if (file.isFile() && file.getName().toLowerCase().endsWith(".cam")) {
-                Log.d(TAG, "Found bundle in " + dir.getName() + ": " + file.getName());
+                logToFile("Found bundle in " + dir.getName() + ": " + file.getName());
                 extractBundle(file);
             }
         }
@@ -45,7 +58,7 @@ public class BundleManager {
                 
                 // Security: Prevent Zip-Slip vulnerability
                 if (entryName.contains("..")) {
-                    Log.w(TAG, "Skipping malicious zip entry: " + entryName);
+                    logToFile("Skipping malicious zip entry: " + entryName);
                     continue;
                 }
 
@@ -65,7 +78,7 @@ public class BundleManager {
                 // Using a counter so multiple files in the same dir don't collide if rename is slow.
                 File tempFile = new File(parentDir, String.format("BNDL%03d.TMP", fileCounter++));
 
-                Log.d(TAG, "Extracting: " + entryName + " to " + tempFile.getAbsolutePath());
+                logToFile("Extracting: " + entryName + " to " + tempFile.getAbsolutePath());
 
                 FileOutputStream fos = null;
                 try {
@@ -78,7 +91,7 @@ public class BundleManager {
                     fos.flush();
                     fos.getFD().sync();
                 } catch (Exception e) {
-                    Log.e(TAG, "Failed to extract entry: " + entryName, e);
+                    logToFile("Failed to extract entry: " + entryName + " - Error: " + e.getMessage());
                 } finally {
                     try { if (fos != null) fos.close(); } catch (Exception e) {}
                 }
@@ -86,13 +99,13 @@ public class BundleManager {
                 if (tempFile.exists()) {
                     if (destFile.exists()) {
                         boolean delSuccess = destFile.delete();
-                        Log.d(TAG, "Deleted existing dest: " + destFile.getName() + " -> " + delSuccess);
+                        logToFile("Deleted existing dest: " + destFile.getName() + " -> " + delSuccess);
                     }
                     
                     boolean renameSuccess = tempFile.renameTo(destFile);
                     
                     if (!renameSuccess) {
-                        Log.e(TAG, "Rename failed! Attempting fallback copy for: " + destFile.getName());
+                        logToFile("Rename failed for: " + tempFile.getName() + " to " + destFile.getName() + ". Attempting fallback.");
                         // Fallback: Copy bytes directly if renameTo fails
                         FileInputStream fis = null;
                         FileOutputStream fallbackFos = null;
@@ -107,36 +120,36 @@ public class BundleManager {
                             fallbackFos.flush();
                             fallbackFos.getFD().sync();
                             renameSuccess = true;
-                            Log.d(TAG, "Fallback copy succeeded for: " + destFile.getName());
+                            logToFile("Fallback copy succeeded for: " + destFile.getName());
                         } catch (Exception e) {
-                            Log.e(TAG, "Fallback copy also failed!", e);
+                            logToFile("Fallback copy also failed! Error: " + e.getMessage());
                         } finally {
                             try { if (fis != null) fis.close(); } catch (Exception e) {}
                             try { if (fallbackFos != null) fallbackFos.close(); } catch (Exception e) {}
                             if (renameSuccess) { tempFile.delete(); }
                         }
                     } else {
-                        Log.d(TAG, "Successfully moved to: " + destFile.getName());
+                        logToFile("Successfully moved to: " + destFile.getName());
                     }
                 } else {
-                    Log.e(TAG, "FATAL: Temp file was never created! " + tempFile.getAbsolutePath());
+                    logToFile("FATAL: Temp file was never created! " + tempFile.getAbsolutePath());
                 }
 
                 zis.closeEntry();
             }
-            Log.d(TAG, "Successfully extracted bundle: " + zipFile.getName());
+            logToFile("Successfully extracted bundle: " + zipFile.getName());
             
             // Delete the .cam file after successful extraction
             zis.close();
             zis = null;
             if (zipFile.delete()) {
-                Log.d(TAG, "Deleted bundle: " + zipFile.getName());
+                logToFile("Deleted bundle: " + zipFile.getName());
             } else {
-                Log.e(TAG, "Failed to delete bundle: " + zipFile.getName());
+                logToFile("Failed to delete bundle: " + zipFile.getName());
             }
 
         } catch (Exception e) {
-            Log.e(TAG, "Failed to extract bundle: " + zipFile.getName(), e);
+            logToFile("Failed to extract bundle: " + zipFile.getName() + " - Error: " + e.getMessage());
         } finally {
             try { if (zis != null) zis.close(); } catch (Exception e) {}
         }
