@@ -18,12 +18,15 @@ public class BundleManager {
     private static void logToFile(File rootDir, String msg) {
         Log.e(TAG, msg);
         try {
-            File logFile = new File(rootDir, "BUNDLE_DEBUG.TXT");
-            FileWriter fw = new FileWriter(logFile, true);
-            fw.write(msg + "\n");
-            fw.close();
+            if (rootDir != null) {
+                if (!rootDir.exists()) rootDir.mkdirs();
+                File logFile = new File(rootDir, "BUNDLE_DEBUG.TXT");
+                FileWriter fw = new FileWriter(logFile, true);
+                fw.write(msg + "\n");
+                fw.close();
+            }
         } catch (IOException e) {
-            e.printStackTrace();
+            // Ignore log errors to prevent crashing the app
         }
     }
 
@@ -45,7 +48,8 @@ public class BundleManager {
         if (files == null) return;
 
         for (File file : files) {
-            if (file.isFile() && file.getName().toUpperCase().endsWith(".cam")) {
+            String name = file.getName().toLowerCase();
+            if (file.isFile() && name.endsWith(".cam") && !name.startsWith(".")) {
                 logToFile(targetRootDir, "Found bundle in " + scanDir.getName() + ": " + file.getName());
                 extractBundle(file, targetRootDir);
             }
