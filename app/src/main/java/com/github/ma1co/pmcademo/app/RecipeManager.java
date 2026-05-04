@@ -464,7 +464,7 @@ public class RecipeManager {
             p.vignette        = json.optInt("vignette", 0);
             p.grain           = json.optInt("grain", 0);
             p.grainSize       = json.optInt("grainSize", 1);
-            p.advancedGrainExperimental = json.optInt("advancedGrainExperimental", 2);
+            p.advancedGrainExperimental = json.optInt("advancedGrainExperimental", 0);
             p.bloom           = json.optInt("bloom", 0);
             p.contrast        = json.optInt("contrast", 0);
             p.saturation      = json.optInt("saturation", 0);

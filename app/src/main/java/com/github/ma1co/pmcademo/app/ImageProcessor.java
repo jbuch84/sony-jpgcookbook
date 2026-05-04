@@ -108,7 +108,7 @@ public class ImageProcessor {
                 boolean camGrainLoaded = false;
                 if (p != null && p.camFile != null) {
                     String camPath = new File(Filepaths.getRecipeDir(), p.camFile).getAbsolutePath();
-                    LutEngine.CamLoadResult cam = mEngine.loadFromCam(camPath);
+                    LutEngine.CamLoadResult cam = mEngine.loadFromCam(camPath, mContext.getCacheDir());
                     DebugLog.write("CAM LOAD: file=" + p.camFile + " lut=" + cam.lutLoaded + " grain=" + cam.grainLoaded);
                     if (!cam.lutLoaded && p.opacity > 0) {
                         DebugLog.write("CAM LOAD FAILED: no LUT in bundle");
@@ -158,15 +158,18 @@ public class ImageProcessor {
 
                 int cxxGrainEngine = p.advancedGrainExperimental;
                 if (p.grain > 0) {
-                    if (camGrainLoaded) {
-                        // Grain was loaded from the .cam bundle — native already has it.
-                        cxxGrainEngine = 2;
-                    } else {
-                        // Normal path: load grain texture from GRAIN folder on SD card.
+                    // Try SD-card texture if .cam bundle didn't supply one.
+                    boolean grainTextureReady = camGrainLoaded;
+                    if (!grainTextureReady) {
                         File texFile = MenuController.getGrainTextureFile(finalGrainSize);
-                        if (mEngine.loadGrainTexture(texFile)) {
-                            cxxGrainEngine = 2;
-                        }
+                        grainTextureReady = mEngine.loadGrainTexture(texFile);
+                    }
+                    if (grainTextureReady) {
+                        cxxGrainEngine = 2;  // texture-based grain
+                    } else if (cxxGrainEngine == 2) {
+                        // Texture mode requested but nothing loaded — fall back to algorithmic.
+                        cxxGrainEngine = 0;
+                        DebugLog.write("GRAIN: no texture loaded, falling back to algorithmic grain");
                     }
                 }
 

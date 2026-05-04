@@ -896,7 +896,7 @@ public class MenuController {
             } else if (sel == 2) p.softFocusLevel = Math.max(1, Math.min(3, p.softFocusLevel + dir));
         } else if (currentPage == 4) {
             if (sel == 0) { if (dir > 0 && p.lutIndex < rm.getRecipeNames().size()-1) p.lutIndex++; else if (dir < 0 && p.lutIndex > 0) p.lutIndex--; }
-            else if (sel == 1 && p.lutIndex > 0) p.opacity = Math.max(10, Math.min(100, p.opacity + dir * 10));
+            else if (sel == 1 && (p.lutIndex > 0 || p.camFile != null)) p.opacity = Math.max(10, Math.min(100, p.opacity + dir * 10));
             else if (sel == 2) p.grain = Math.max(0, Math.min(5, p.grain + dir));
 
             // <--- CHANGED: Dynamically bounds the D-Pad to the number of physical files found
@@ -1424,7 +1424,7 @@ public class MenuController {
                     ||"illust".equals(eff)||"watercolor".equals(eff)||"part-color".equals(eff)||"miniature".equals(eff);
         }
         if (currentMainTab == 0 && currentPage == 4) {
-            if (i == 1) return p.lutIndex > 0;
+            if (i == 1) return p.lutIndex > 0 || p.camFile != null;
             if (i == 3) return p.grain > 0; // <--- RESTORED: Grays out Type if Amount is OFF
         }
         return true;
