@@ -12,18 +12,17 @@
 ## Status & Task Tracker
 
 ### In-Flight Tasks
-- [x] **Diptych Refactor:** Encapsulated logic into `DiptychManager.java`.
-- [x] **Multi-Core Engine:** Implemented persistent worker pool with 4 threads and 32-row chunks.
-- [ ] **Fix In-Camera Review:** Address "Decode Error" / "Memory Error" when viewing photos on camera LCD.
-- [ ] **Optimize Diptych Resolution:** Balance memory safety with output quality (currently 1/4 scale).
+- [ ] **Sony ISP Calibration Mode** — Guided UI in jpegcam: automatically steps user through each Creative Style, displays the 512×512 HaldCLUT identity grid on screen, prompts to shoot it, captures result JPEG. Uploads per-Creative-Style HaldCLUTs to server as per-camera-model calibration profiles. These feed RecipeStudio as accurate Sony ISP baselines — better coverage than any physical color checker.
+- [ ] **Fix In-Camera Review** (low priority) — "Decode Error" / "Memory Error" when viewing processed photos on camera LCD. Likely Sony media scanner database or header incompatibility. Photos are valid on PC.
 
 ### Issues & Observations
-- **Review Error:** photos are valid on PC but fail in-camera review. Likely due to Sony's media scanner database or header incompatibilities.
-- **Diptych Preview:** User reports preview after first pic never comes up.
-- **Diptych Stitch:** User reports stitch never happens.
+- **In-Camera Review Error:** photos are valid on PC but fail in-camera review. Likely due to Sony's media scanner database or header incompatibilities. Not blocking any current feature work.
 
 ### Recently Completed
+- Diptych Refactor: encapsulated logic into `DiptychManager.java`.
+- Multi-Core Engine: persistent worker pool with 4 threads and 32-row chunks.
 - Removed 1-byte dummy file write (was corrupting media scanner).
 - Implemented "Instant Preview" in `DiptychManager` by decoding original photo.
 - Fixed UI layering (Overlay at index 0).
 - Fixed Shutter Lock (isProcessing cleared after first shot).
+- `.cam` bundle format — ZIP archive containing `recipe.json` + `lut.cube` + optional `grain.png`. jpegcam downloads and unpacks `.cam` files from camera-recipe-hub for recipe application.
