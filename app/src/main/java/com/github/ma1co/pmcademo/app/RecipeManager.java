@@ -491,6 +491,9 @@ public class RecipeManager {
                 for (int i = 0; i < 9; i++) p.advMatrix[i] = arr.getInt(i);
             }
             // lutIndex stays 0 (OFF) — LUT comes from the bundle, not loose files.
+            // Read display names so the menu can show something meaningful.
+            p.bundledLutName   = json.optString("lutName", null);
+            p.bundledGrainName = json.optString("grainName", null);
 
             loadedProfiles[currentSlot] = p;
             savePreferences();

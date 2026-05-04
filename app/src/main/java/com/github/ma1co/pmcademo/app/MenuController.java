@@ -914,8 +914,15 @@ public class MenuController {
             else if (sel == 4) p.chromeBlue = Math.max(0, Math.min(2, p.chromeBlue + dir));
             else if (sel == 5) p.halation  = Math.max(0, Math.min(2, p.halation + dir));
 
-            // NEW ROW ADDED HERE: Handles left/right d-pad clicks for Optical Bloom
-            else if (sel == 6) p.bloom = Math.max(0, Math.min(6, p.bloom + dir));
+            // Navigate bloom in logical order (OFF, Local 1/8, Full 1/8, …) even though
+            // the stored value is the internal WASM representation.
+            else if (sel == 6) {
+                int[] bloomLogicalToInternal = {0, 5, 6, 1, 2, 3, 4};
+                int[] bloomInternalToLogical = {0, 3, 4, 5, 6, 1, 2};
+                int logical = bloomInternalToLogical[Math.max(0, Math.min(6, p.bloom))];
+                logical = Math.max(0, Math.min(6, logical + dir));
+                p.bloom = bloomLogicalToInternal[logical];
+            }
 
         } else if (currentPage == 6) {
             if      (sel == 0) rm.setQualityIndex(Math.max(0, Math.min(2, rm.getQualityIndex() + dir)));
@@ -1084,14 +1091,30 @@ public class MenuController {
                 setRow(2, "Edge Shading Editor",  shade);
             } else if (currentPage == 4) {
                 ic = 5;
-                setRow(0, "LUT File",    rm.getRecipeNames().get(p.lutIndex));
+
+                // For .cam bundles the LUT lives inside the ZIP, not on the SD card.
+                // Show the bundled name when available; fall back to the loose-file list.
+                String lutDisplay = (p.camFile != null
+                        && p.bundledLutName != null
+                        && !"NONE".equalsIgnoreCase(p.bundledLutName))
+                        ? p.bundledLutName
+                        : rm.getRecipeNames().get(p.lutIndex);
+                setRow(0, "LUT File",    lutDisplay);
                 setRow(1, "LUT Opacity", p.opacity + "%");
                 setRow(2, "Grain Amount",amtLbls[Math.max(0,Math.min(5,p.grain))]);
 
-                // <--- CHANGED: Dynamically fetches titles (metadata or filename) from SD card
-                String[] typeLbls = getGrainEngineOptions();
-                int safeIdx = Math.max(0, Math.min(typeLbls.length - 1, p.grainSize));
-                setRow(3, "Grain Type",  typeLbls[safeIdx]);
+                // For .cam bundles show the bundled grain name; otherwise use the SD card list.
+                String grainDisplay;
+                if (p.camFile != null
+                        && p.bundledGrainName != null
+                        && !"NONE".equalsIgnoreCase(p.bundledGrainName)) {
+                    grainDisplay = p.bundledGrainName;
+                } else {
+                    String[] typeLbls = getGrainEngineOptions();
+                    int safeIdx = Math.max(0, Math.min(typeLbls.length - 1, p.grainSize));
+                    grainDisplay = typeLbls[safeIdx];
+                }
+                setRow(3, "Grain Type",  grainDisplay);
 
                 setRow(4, "Vignette",    amtLbls[Math.max(0,Math.min(5,p.vignette))]);
             } else if (currentPage == 5) {
@@ -1103,8 +1126,13 @@ public class MenuController {
                 setRow(4, "Chrome Blue",            p.chromeBlue==0?"OFF":(p.chromeBlue==1?"WEAK":"STRONG"));
                 setRow(5, "Halation",    p.halation==0?"OFF":(p.halation==1?"WEAK":"STRONG"));
 
+                // Bloom: RecipeStudio stores an internal WASM value (BLOOM_LOGICAL_TO_INTERNAL =
+                // [0,5,6,1,2,3,4]), NOT the label index.  Reverse-map to get the display label.
+                // internal→logical: 0→0, 1→3, 2→4, 3→5, 4→6, 5→1, 6→2
                 String[] bloomLbls = {"OFF", "Local 1/8", "Full 1/8", "Local 1/4", "Full 1/4", "Local 1/2", "Full 1/2"};
-                setRow(6, "Diffusion", bloomLbls[Math.max(0, Math.min(6, p.bloom))]);
+                int[] bloomInternalToLogical = {0, 3, 4, 5, 6, 1, 2};
+                int safeBloom = Math.max(0, Math.min(6, p.bloom));
+                setRow(6, "Diffusion", bloomLbls[bloomInternalToLogical[safeBloom]]);
             }
         }
         if (currentPage == 6) {
